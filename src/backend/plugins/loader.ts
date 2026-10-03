@@ -19,7 +19,6 @@ import semver from "semver";
 import * as tar from "tar";
 import { pluginLogger } from "../utils/logger.js";
 import { isTermixCompatible, parseManifest } from "./manifest.js";
-import { getLocalVersion } from "../utils/app-version.js";
 import type { PluginManifest } from "@termix/plugin-sdk/manifest";
 import {
   getBundledPluginsDir,
@@ -53,6 +52,11 @@ export type PluginState =
 export type PluginSource = "bundled" | "user";
 
 const ACTIVATION_TIMEOUT_MS = 30_000;
+
+// NodeShell product semver is independent from the inherited Termix plugin API.
+// Phase 1A is pinned to the audited Termix 2.9.0 plugin contract.
+const PLUGIN_API_COMPAT_VERSION =
+  process.env.NODESHELL_PLUGIN_API_COMPAT_VERSION || "2.9.0";
 
 /** Defaults for the runtime error budget. Both are configurable. */
 const DEFAULT_ERROR_THRESHOLD = 5;
@@ -142,9 +146,14 @@ export class PluginLoader {
       );
     }
 
-    if (!isTermixCompatible(manifest.engine.termix, getLocalVersion())) {
+    if (
+      !isTermixCompatible(
+        manifest.engine.termix,
+        PLUGIN_API_COMPAT_VERSION,
+      )
+    ) {
       throw new Error(
-        `Plugin ${manifest.id} needs Termix ${manifest.engine.termix}, but this is ${getLocalVersion()}`,
+        `Plugin ${manifest.id} needs Termix ${manifest.engine.termix}, but NodeShell's compatibility baseline is ${PLUGIN_API_COMPAT_VERSION}`,
       );
     }
 
