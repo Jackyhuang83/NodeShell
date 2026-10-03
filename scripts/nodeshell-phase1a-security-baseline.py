@@ -40,7 +40,8 @@ rep('plugins/tunnels/src/backend/utils.ts','return tunnelConfig.bindHost || "127
 
 # command history off
 f='plugins/ssh-terminal/manifest.json'; s=rd(f); s,n=re.subn(r'("key": "enableCommandHistory"[\s\S]{0,300}?"default": )true',r'\1false',s,count=1)
-if n!=1: raise SystemExit(f'{f}: history'); wr(f,s)
+if n!=1: raise SystemExit(f'{f}: history')
+wr(f,s)
 
 # unsigned user plugins disabled
 rep('src/backend/plugins/trust.ts','return process.env.TERMIX_REQUIRE_SIGNED_PLUGINS === "true";','return true;')
@@ -52,7 +53,8 @@ rep('plugins/file-manager/src/backend/index.ts','sudoPassword: resolvedCredentia
 # metrics: remove manager routes
 f='plugins/host-metrics/src/backend/routes.ts'; s=rd(f)
 for x in ['import { registerManagerRoutes } from "./managers/index.js";\n','import { AccessDeniedError } from "./managers/route-helpers.js";\n','import { sudoPasswordOf } from "./helpers.js";\n']:
- if x not in s: raise SystemExit(f'{f}: import'); s=s.replace(x,'',1)
+ if x not in s: raise SystemExit(f'{f}: import')
+ s=s.replace(x,'',1)
 a=s.rfind('\n  registerManagerRoutes(router, {'); b=s.rfind('\n}')
 if a<0 or b<=a: raise SystemExit(f'{f}: manager block')
 wr(f,s[:a]+s[b:])
@@ -61,23 +63,29 @@ wr(f,s[:a]+s[b:])
 rep('src/backend/hosts/connect/build-connect-config.ts','algorithms: buildSSHAlgorithms(sshOptions?.allowLegacyAlgorithms !== false),','algorithms: buildSSHAlgorithms(sshOptions?.allowLegacyAlgorithms === true),')
 f='src/backend/utils/ssh-algorithms.ts'; s=rd(f)
 for x in ['    "aes256-cbc",\n','    "aes192-cbc",\n','    "aes128-cbc",\n']:
- if s.count(x)!=1: raise SystemExit(f'{f}: CBC'); s=s.replace(x,'',1)
+ if s.count(x)!=1: raise SystemExit(f'{f}: CBC')
+ s=s.replace(x,'',1)
 wr(f,s)
 
 # block browser secret-read/export paths + saved-credential Quick Connect
 f='src/backend/database/routes/host.ts'; s=rd(f)
 a='const router = express.Router();\nrouter.use(rejectSharedCopyWrites("host", /^\\/db\\/host\\/(\\d+)$/));\n'
 b=a+'''router.use((req, res, next) => {\n  const blocked = req.method === "GET" && (/^\\/db\\/host\\/\\d+\\/password$/.test(req.path) || /^\\/db\\/host\\/\\d+\\/export$/.test(req.path) || req.path === "/db/hosts/export");\n  if (blocked) return res.status(404).json({ error: "Not found" });\n  next();\n});\n'''
-if s.count(a)!=1: raise SystemExit(f'{f}: guard'); s=s.replace(a,b,1)
+if s.count(a)!=1: raise SystemExit(f'{f}: guard')
+s=s.replace(a,b,1)
 a='    try {\n      let resolvedPassword = password;'
 b='''    if (authType === "credential") {\n      return res.status(400).json({ error: "Saved credentials are disabled in Quick Connect until backend-only references are complete." });\n    }\n\n    try {\n      let resolvedPassword = password;'''
-if s.count(a)!=1: raise SystemExit(f'{f}: quick'); s=s.replace(a,b,1); wr(f,s)
+if s.count(a)!=1: raise SystemExit(f'{f}: quick')
+s=s.replace(a,b,1)
+wr(f,s)
 
 # credential detail metadata only
 f='src/backend/database/routes/credentials.ts'; s=rd(f)
 old='''      if (credential.password) {\n        output.password = credential.password;\n      }\n      output.hasKey = !!credential.key;\n      output.hasKeyPassword = !!credential.keyPassword;\n      if (credential.publicKey) {\n        output.publicKey = credential.publicKey;\n      }\n      if (credential.certPublicKey) {\n        output.certPublicKey = credential.certPublicKey;\n      }\n      if (credential.keyPassword) {\n        output.keyPassword = credential.keyPassword;\n      }\n'''
 new='''      output.hasPassword = !!credential.password;\n      output.hasKey = !!credential.key;\n      output.hasKeyPassword = !!credential.keyPassword;\n      if (credential.publicKey) output.publicKey = credential.publicKey;\n      if (credential.certPublicKey) output.certPublicKey = credential.certPublicKey;\n'''
-if s.count(old)!=1: raise SystemExit(f'{f}: secret detail'); s=s.replace(old,new,1); wr(f,s)
+if s.count(old)!=1: raise SystemExit(f'{f}: secret detail')
+s=s.replace(old,new,1)
+wr(f,s)
 
 # local secret file perms + strict cookies
 rep('src/backend/utils/system-crypto.ts','      await fs.writeFile(envPath, envContent);','      await fs.writeFile(envPath, envContent, { mode: 0o600 });\n      await fs.chmod(envPath, 0o600);')

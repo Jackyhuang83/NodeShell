@@ -395,20 +395,11 @@ router.get(
 
       const output = formatCredentialOutput(credential);
 
-      if (credential.password) {
-        output.password = credential.password;
-      }
+      output.hasPassword = !!credential.password;
       output.hasKey = !!credential.key;
       output.hasKeyPassword = !!credential.keyPassword;
-      if (credential.publicKey) {
-        output.publicKey = credential.publicKey;
-      }
-      if (credential.certPublicKey) {
-        output.certPublicKey = credential.certPublicKey;
-      }
-      if (credential.keyPassword) {
-        output.keyPassword = credential.keyPassword;
-      }
+      if (credential.publicKey) output.publicKey = credential.publicKey;
+      if (credential.certPublicKey) output.certPublicKey = credential.certPublicKey;
 
       res.json(output);
     } catch (err) {
