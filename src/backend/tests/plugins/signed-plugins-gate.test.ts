@@ -108,37 +108,9 @@ async function loadedIds(): Promise<string[]> {
   return loaded.map((plugin) => plugin.id).sort();
 }
 
-describe("signed plugins gate off", () => {
-  it("loads a user folder, an unsigned archive and a signed archive", async () => {
-    const { userDir } = setup();
-    createFixturePlugin({ id: "folder-one", root: userDir });
-    await writeArtifact(userDir, "unsigned-one", "none");
-    await writeArtifact(userDir, "signed-one", "valid");
-
-    expect(await loadedIds()).toEqual([
-      "bundled-one",
-      "folder-one",
-      "signed-one",
-      "unsigned-one",
-    ]);
-    expect(
-      fs.existsSync(
-        path.join(userDir, ".unpacked", "signed-one", "manifest.json"),
-      ),
-    ).toBe(true);
-  });
-
-  it("still blocks an archive whose .sig does not verify", async () => {
-    const { userDir } = setup();
-    await writeArtifact(userDir, "forged-one", "wrong-key");
-    expect(await loadedIds()).toEqual(["bundled-one"]);
-  });
-});
-
-describe("signed plugins gate on", () => {
+describe("mandatory signed plugins gate", () => {
   it("blocks user folders and unsigned archives, keeps bundled plugins", async () => {
     const { userDir } = setup();
-    process.env.TERMIX_REQUIRE_SIGNED_PLUGINS = "true";
     createFixturePlugin({ id: "folder-one", root: userDir });
     await writeArtifact(userDir, "unsigned-one", "none");
     await writeArtifact(userDir, "forged-one", "wrong-key");
@@ -149,7 +121,6 @@ describe("signed plugins gate on", () => {
 
   it("refuses a signed archive of a bundled id that is not newer", async () => {
     const { userDir } = setup();
-    process.env.TERMIX_REQUIRE_SIGNED_PLUGINS = "true";
     await writeArtifact(userDir, "bundled-one", "valid");
     const loader = new PluginLoader();
     const loaded = await loader.loadAll();
