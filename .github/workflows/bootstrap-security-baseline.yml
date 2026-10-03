@@ -46,7 +46,7 @@ jobs:
           git rm -rf . >/dev/null 2>&1 || true
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
 
-          rsync -a /tmp/termix/ ./             --exclude='.git/'             --exclude='.github/'             --exclude='charts/'             --exclude='Casks/'             --exclude='packaging/'             --exclude='docs/'             --exclude='crowdin.yml'             --exclude='FUNDING.json'             --exclude='RELEASE_NOTES.md'             --exclude='CONTRIBUTING.md'
+          rsync -a /tmp/termix/ ./             --exclude='.git/'             --exclude='.github/'             --exclude='/charts/'             --exclude='/Casks/'             --exclude='/packaging/'             --exclude='/docs/'             --exclude='crowdin.yml'             --exclude='FUNDING.json'             --exclude='RELEASE_NOTES.md'             --exclude='CONTRIBUTING.md'
 
           for plugin in plugins/*; do
             [ -d "$plugin" ] || continue
