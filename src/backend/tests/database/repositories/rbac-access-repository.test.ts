@@ -1,0 +1,338 @@
+import { afterEach, describe, expect, it } from "vitest";
+import { TestSqliteDatabase } from "./test-support.js";
+import { RbacAccessRepository } from "../../../database/repositories/rbac-access-repository.js";
+
+describe("RbacAccessRepository", () => {
+  let adapter: TestSqliteDatabase | null = null;
+  const activeAccessTime = "2026-06-26T12:00:00.000Z";
+
+  afterEach(async () => {
+    if (adapter) {
+      await adapter.close();
+      adapter = null;
+    }
+  });
+
+  async function createRepository(
+    onWrite?: () => void | Promise<void>,
+  ): Promise<RbacAccessRepository> {
+    adapter = new TestSqliteDatabase();
+    const context = await adapter.connect();
+    await adapter.exec(`
+      INSERT INTO users (id, username, password_hash, is_admin, is_oidc)
+      VALUES
+        ('admin', 'admin', 'hash', 1, 0),
+        ('user-1', 'alice', 'hash', 0, 0),
+        ('owner-1', 'owner', 'hash', 0, 0);
+      INSERT INTO roles (id, name, display_name, is_system)
+      VALUES (7, 'ops', 'Operations', 0);
+      INSERT INTO ssh_credentials (id, user_id, name, username, auth_type) VALUES
+        (123, 'admin', 'cred-123', 'root', 'password'),
+        (124, 'admin', 'cred-124', 'root', 'password'),
+        (125, 'admin', 'cred-125', 'root', 'password'),
+        (126, 'admin', 'cred-126', 'root', 'password');
+      INSERT INTO ssh_data (id, user_id, name, ip, port, username, auth_type) VALUES
+        (43, 'admin', 'host-43', '10.0.0.43', 22, 'root', 'password');
+      INSERT INTO ssh_data (id, user_id, name, ip, port, username, auth_type) VALUES
+        (44, 'admin', 'host-44', '10.0.0.45', 22, 'root', 'password');
+      INSERT INTO ssh_data (
+        id, user_id, name, ip, port, username, credential_id, folder, tags, auth_type)
+      VALUES (42, 'owner-1', 'prod', '10.0.0.42', 22, 'root', 123, 'servers', 'linux', 'password');
+      INSERT INTO host_access (
+        id, host_id, user_id, role_id, granted_by, permission_level, expires_at, created_at
+      )
+      VALUES
+        (1, 42, 'user-1', NULL, 'admin', 'view', NULL, '2026-06-26T00:00:00.000Z'),
+        (2, 42, NULL, 7, 'admin', 'view', '2026-06-27T00:00:00.000Z', '2026-06-26T01:00:00.000Z'),
+        (5, 44, 'user-1', NULL, 'admin', 'view', '2026-06-25T00:00:00.000Z', '2026-06-24T00:00:00.000Z');
+      INSERT INTO shared_host_secrets (
+        id, host_access_id, target_user_id, protocol, source_type, original_credential_id, encrypted_username, encrypted_auth_type
+      )
+      VALUES
+        (8, 2, 'user-1', 'ssh', 'credential', 123, 'enc-user', 'enc-auth'),
+        (9, 2, 'user-1', 'rdp', 'inline', NULL, 'enc-rdp-user', 'direct');
+    `);
+
+    return new RbacAccessRepository(context, onWrite);
+  }
+
+  it("lists host access with user and role target metadata", async () => {
+    const repo = await createRepository();
+
+    const accessList = await repo.listHostAccess(42);
+
+    expect(accessList).toMatchObject([
+      {
+        id: 2,
+        targetType: "role",
+        userId: null,
+        roleId: 7,
+        username: null,
+        roleName: "ops",
+        roleDisplayName: "Operations",
+        grantedByUsername: "admin",
+      },
+      {
+        id: 1,
+        targetType: "user",
+        userId: "user-1",
+        roleId: null,
+        username: "alice",
+        roleName: null,
+        roleDisplayName: null,
+        grantedByUsername: "admin",
+      },
+    ]);
+  });
+
+  it("lists shared hosts for direct and role access", async () => {
+    const repo = await createRepository();
+
+    const sharedHosts = await repo.listSharedHosts(
+      "user-1",
+      [7],
+      activeAccessTime,
+    );
+
+    expect(sharedHosts).toMatchObject([
+      {
+        id: 42,
+        name: "prod",
+        ip: "10.0.0.42",
+        ownerUsername: "owner",
+        permissionLevel: "view",
+      },
+      {
+        id: 42,
+        name: "prod",
+        ip: "10.0.0.42",
+        ownerUsername: "owner",
+        permissionLevel: "view",
+      },
+    ]);
+  });
+
+  it("lists visible host access entries for host list access checks", async () => {
+    const repo = await createRepository();
+
+    await expect(
+      repo.listVisibleHostAccessEntries("user-1", [7], activeAccessTime),
+    ).resolves.toEqual([
+      {
+        hostId: 42,
+        permissionLevel: "view",
+        expiresAt: "2026-06-27T00:00:00.000Z",
+      },
+      {
+        hostId: 42,
+        permissionLevel: "view",
+        expiresAt: null,
+      },
+    ]);
+  });
+
+  it("lists role host access credential sources for role assignment", async () => {
+    const repo = await createRepository();
+
+    await expect(repo.listRoleHostAccessCredentialSources(7)).resolves.toEqual([
+      {
+        hostAccessId: 2,
+        credentialId: 123,
+        hostId: 42,
+        hostOwnerId: "owner-1",
+      },
+    ]);
+  });
+
+  it("finds shared secrets per protocol and host access owner", async () => {
+    const repo = await createRepository();
+
+    await expect(
+      repo.findSharedSecretForHostUserProtocol(42, "user-1", "ssh"),
+    ).resolves.toMatchObject({
+      id: 8,
+      hostAccessId: 2,
+      protocol: "ssh",
+      sourceType: "credential",
+      originalCredentialId: 123,
+      targetUserId: "user-1",
+      encryptedUsername: "enc-user",
+      encryptedAuthType: "enc-auth",
+    });
+
+    await expect(
+      repo.findSharedSecretForHostUserProtocol(42, "user-1", "rdp"),
+    ).resolves.toMatchObject({
+      id: 9,
+      protocol: "rdp",
+      sourceType: "inline",
+      originalCredentialId: null,
+    });
+
+    await expect(
+      repo.findSharedSecretForHostUserProtocol(42, "user-1", "vnc"),
+    ).resolves.toBeNull();
+    await expect(
+      repo.findSharedSecretForHostUserProtocol(99, "user-1", "ssh"),
+    ).resolves.toBeNull();
+    await expect(repo.findHostAccessOwnerId(2)).resolves.toBe("owner-1");
+    await expect(repo.findHostAccessOwnerId(999)).resolves.toBeNull();
+  });
+
+  it("lists active grants, finds grants by id and updates grant level/expiry", async () => {
+    let writeCount = 0;
+    const repo = await createRepository(() => {
+      writeCount += 1;
+    });
+
+    const grants = await repo.listActiveHostAccessGrants(42, activeAccessTime);
+    expect(grants.map((grant) => grant.id).sort()).toEqual([1, 2]);
+
+    // Host 44's only grant expired before activeAccessTime.
+    await expect(
+      repo.listActiveHostAccessGrants(44, activeAccessTime),
+    ).resolves.toEqual([]);
+
+    await expect(repo.findHostAccessById(1, 42)).resolves.toMatchObject({
+      id: 1,
+      hostId: 42,
+      permissionLevel: "view",
+    });
+    await expect(repo.findHostAccessById(1, 99)).resolves.toBeNull();
+
+    await expect(
+      repo.updateHostAccessGrant(1, 42, {
+        permissionLevel: "manage",
+        expiresAt: "2026-07-01T00:00:00.000Z",
+      }),
+    ).resolves.toBe(true);
+    await expect(repo.findHostAccessById(1, 42)).resolves.toMatchObject({
+      permissionLevel: "manage",
+      expiresAt: "2026-07-01T00:00:00.000Z",
+    });
+
+    await expect(
+      repo.updateHostAccessGrant(999, 42, { permissionLevel: "view" }),
+    ).resolves.toBe(false);
+    expect(writeCount).toBe(1);
+  });
+
+  it("upserts host access and updates overrides", async () => {
+    let writeCount = 0;
+    const repo = await createRepository(() => {
+      writeCount += 1;
+    });
+
+    const updated = await repo.upsertHostAccess({
+      hostId: 42,
+      targetType: "user",
+      targetUserId: "user-1",
+      grantedBy: "admin",
+      permissionLevel: "view",
+      expiresAt: "2026-06-28T00:00:00.000Z",
+    });
+
+    expect(updated).toEqual({ id: 1, created: false });
+    expect(
+      (await repo.listHostAccess(42)).find((row) => row.id === 1),
+    ).toMatchObject({
+      expiresAt: "2026-06-28T00:00:00.000Z",
+    });
+
+    const created = await repo.upsertHostAccess({
+      hostId: 43,
+      targetType: "role",
+      targetRoleId: 7,
+      grantedBy: "admin",
+      permissionLevel: "view",
+      expiresAt: null,
+    });
+    expect(created.created).toBe(true);
+
+    const directAccess = await repo.findDirectHostAccess(42, "user-1");
+    expect(directAccess?.id).toBe(1);
+
+    await repo.touchHostAccess(1, "2026-06-26T03:00:00.000Z");
+    expect(
+      (await repo.findDirectHostAccess(42, "user-1"))?.lastAccessedAt,
+    ).toBe("2026-06-26T03:00:00.000Z");
+
+    await repo.revokeHostAccess(1, 42);
+    expect(await repo.findDirectHostAccess(42, "user-1")).toBeNull();
+    expect(writeCount).toBe(4);
+  });
+
+  it("finds active host access and deletes expired host access", async () => {
+    let writeCount = 0;
+    const repo = await createRepository(() => {
+      writeCount += 1;
+    });
+
+    expect(
+      await repo.findActiveHostAccess(
+        42,
+        "user-1",
+        [7],
+        "2026-06-26T12:00:00.000Z",
+      ),
+    ).toMatchObject({ id: 1 });
+    expect(
+      await repo.findActiveHostAccess(
+        44,
+        "user-1",
+        [],
+        "2026-06-26T12:00:00.000Z",
+      ),
+    ).toBeNull();
+
+    expect(await repo.deleteExpiredHostAccess("2026-06-26T12:00:00.000Z")).toBe(
+      1,
+    );
+    expect(await repo.findDirectHostAccess(44, "user-1")).toBeNull();
+    expect(writeCount).toBe(1);
+  });
+
+  it("deletes host access for a host and only saves when rows changed", async () => {
+    let writeCount = 0;
+    const repo = await createRepository(() => {
+      writeCount += 1;
+    });
+
+    expect(await repo.deleteHostAccessForHost(42)).toBe(2);
+    expect(await repo.listHostAccess(42)).toEqual([]);
+    expect(writeCount).toBe(1);
+
+    expect(await repo.deleteHostAccessForHost(42)).toBe(0);
+    expect(writeCount).toBe(1);
+  });
+
+  it("deletes host access for multiple hosts", async () => {
+    let writeCount = 0;
+    const repo = await createRepository(() => {
+      writeCount += 1;
+    });
+
+    expect(await repo.deleteHostAccessForHosts([])).toBe(0);
+    expect(writeCount).toBe(0);
+
+    expect(await repo.deleteHostAccessForHosts([42, 44])).toBe(3);
+    expect(await repo.listHostAccess(42)).toEqual([]);
+    expect(await repo.findDirectHostAccess(44, "user-1")).toBeNull();
+    expect(writeCount).toBe(1);
+  });
+
+  it("deletes host access that references a user directly or as grantor", async () => {
+    let writeCount = 0;
+    const repo = await createRepository(() => {
+      writeCount += 1;
+    });
+
+    expect(await repo.deleteHostAccessForUserReferences("admin")).toBe(3);
+    expect(await repo.listHostAccess(42)).toEqual([]);
+    expect(await repo.findDirectHostAccess(44, "user-1")).toBeNull();
+    expect(writeCount).toBe(1);
+
+    expect(await repo.deleteHostAccessForUserReferences("admin")).toBe(0);
+    expect(writeCount).toBe(1);
+  });
+});

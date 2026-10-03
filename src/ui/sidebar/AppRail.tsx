@@ -1,0 +1,667 @@
+import { useState, useEffect, type ReactElement } from "react";
+import { useTranslation } from "react-i18next";
+import {
+  Check,
+  LogOut,
+  PanelRight,
+  Pin,
+  Settings,
+  SlidersHorizontal,
+  SquareArrowOutUpRight,
+  User,
+} from "lucide-react";
+import type { TabType, ToolsTab } from "@/types/ui-types";
+import { Skeleton } from "@/components/skeleton";
+import { readRailPreference, setRailPreference } from "./rail-preferences";
+import { useRailItems, type RailItemDef } from "./rail-items";
+import { RailBadge } from "./RailBadge";
+import { rem } from "@/lib/rem";
+
+/** Core rail views; plugins add their own ids at runtime. */
+export type CoreRailView =
+  | "hosts"
+  | "credentials"
+  | "quick-connect"
+  | ToolsTab
+  | "connections"
+  | "user-profile"
+  | "admin-settings";
+
+export type RailView = CoreRailView | (string & {});
+
+type RailItem =
+  | {
+      kind?: undefined;
+      view: RailView;
+      icon: React.ReactNode;
+      title: string;
+      promotable?: boolean;
+      rightDockable?: boolean;
+      useBadge?: () => number | null | undefined;
+    }
+  | {
+      kind: "tab";
+      tabType: TabType;
+      icon: React.ReactNode;
+      title: string;
+      useBadge?: () => number | null | undefined;
+    }
+  | { kind: "separator" };
+
+function buildRailButtons(
+  items: RailItemDef[],
+  t: (key: string) => string,
+  hidden: Set<string>,
+): RailItem[] {
+  const all: RailItem[] = [];
+  for (const item of items) {
+    const Icon = item.icon;
+    if (item.kind === "tab") {
+      all.push({
+        kind: "tab",
+        tabType: item.id as TabType,
+        icon: <Icon size={16} />,
+        title: t(item.labelKey),
+        useBadge: item.useBadge,
+      });
+    } else {
+      all.push({
+        view: item.id as RailView,
+        icon: <Icon size={16} />,
+        title: t(item.labelKey),
+        promotable: item.promotable,
+        rightDockable: item.rightDockable,
+        useBadge: item.useBadge,
+      });
+    }
+    if (item.separatorAfter) all.push({ kind: "separator" });
+  }
+
+  // Filter out hidden items, then collapse consecutive/leading/trailing separators
+  const filtered = all.filter((item) => {
+    if (item.kind === "separator") return true;
+    if ("tabType" in item) return !hidden.has(item.tabType);
+    return !hidden.has(item.view);
+  });
+
+  const result: RailItem[] = [];
+  for (const item of filtered) {
+    if (item.kind === "separator") {
+      if (result.length === 0 || result[result.length - 1].kind === "separator")
+        continue;
+      result.push(item);
+    } else {
+      result.push(item);
+    }
+  }
+  if (result[result.length - 1]?.kind === "separator") result.pop();
+  return result;
+}
+
+const btnBase =
+  "relative flex items-center h-7 rounded shrink-0 transition-colors gap-2.5";
+const btnStyle = { margin: `0 ${rem(4)}`, padding: `0 ${rem(8)}` };
+
+export function AppRail({
+  railView,
+  sidebarOpen,
+  username,
+  isAdmin,
+  pluginsSettled = true,
+  onRailClick,
+  onOpenTab,
+  onOpenInRightDock,
+  onLogout,
+}: {
+  railView: RailView;
+  sidebarOpen: boolean;
+  username: string;
+  isAdmin: boolean;
+  /** False while plugins are still registering their rail items. */
+  pluginsSettled?: boolean;
+  onRailClick: (view: RailView) => void;
+  onOpenTab?: (type: TabType) => void;
+  onOpenInRightDock?: (view: RailView) => void;
+  onLogout: (options?: { manual?: boolean }) => void;
+}) {
+  const { t } = useTranslation();
+  const [hovered, setHovered] = useState(false);
+  const [pinned, setPinned] = useState(() => readRailPreference("pinAppRail"));
+  const [expandOnHover, setExpandOnHover] = useState(() =>
+    readRailPreference("expandAppRailOnHover"),
+  );
+  const [showPinButton, setShowPinButton] = useState(() =>
+    readRailPreference("showPinAppRailButton"),
+  );
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+  // Which promotable item was right-clicked, so the menu can offer to open it
+  // as a tab. Null when the right-click landed on empty rail space.
+  const [menuTarget, setMenuTarget] = useState<{
+    view: RailView;
+    title: string;
+    promotable?: boolean;
+    rightDockable?: boolean;
+  } | null>(null);
+  const [hiddenTabs, setHiddenTabs] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem("hiddenRailTabs");
+      return stored ? new Set(JSON.parse(stored)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+
+  useEffect(() => {
+    const pinHandler = () => setPinned(readRailPreference("pinAppRail"));
+    const hoverHandler = () =>
+      setExpandOnHover(readRailPreference("expandAppRailOnHover"));
+    const showPinButtonHandler = () =>
+      setShowPinButton(readRailPreference("showPinAppRailButton"));
+    window.addEventListener("pinAppRailChanged", pinHandler);
+    window.addEventListener("expandAppRailOnHoverChanged", hoverHandler);
+    window.addEventListener(
+      "showPinAppRailButtonChanged",
+      showPinButtonHandler,
+    );
+    return () => {
+      window.removeEventListener("pinAppRailChanged", pinHandler);
+      window.removeEventListener("expandAppRailOnHoverChanged", hoverHandler);
+      window.removeEventListener(
+        "showPinAppRailButtonChanged",
+        showPinButtonHandler,
+      );
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!menuPos) return;
+    const onDown = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest("[data-rail-context-menu]")) {
+        setMenuPos(null);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuPos(null);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menuPos]);
+
+  // Plugins add and remove rail items at runtime, and permissions hide some.
+  const railItems = useRailItems();
+
+  useEffect(() => {
+    const handler = () => {
+      try {
+        const stored = localStorage.getItem("hiddenRailTabs");
+        setHiddenTabs(stored ? new Set(JSON.parse(stored)) : new Set());
+      } catch {
+        setHiddenTabs(new Set());
+      }
+    };
+    window.addEventListener("hiddenRailTabsChanged", handler);
+    return () => window.removeEventListener("hiddenRailTabsChanged", handler);
+  }, []);
+
+  const railExpanded = pinned || (expandOnHover && hovered);
+  const railButtons = buildRailButtons(
+    railItems.filter((item) => item.placement !== "footer"),
+    t,
+    hiddenTabs,
+  );
+  const footerItems = railItems.filter(
+    (item) => item.placement === "footer" && !hiddenTabs.has(item.id),
+  );
+  const setRailPinned = (nextPinned: boolean) => {
+    setPinned(nextPinned);
+    localStorage.setItem("pinAppRail", String(nextPinned));
+    window.dispatchEvent(new Event("pinAppRailChanged"));
+  };
+
+  const togglePinned = () => {
+    setRailPreference("pinAppRail", !pinned);
+    setMenuPos(null);
+  };
+
+  const toggleExpandOnHover = () => {
+    setRailPreference("expandAppRailOnHover", !expandOnHover);
+    setMenuPos(null);
+  };
+
+  return (
+    <div
+      className="hidden md:flex flex-col items-stretch bg-sidebar border-r border-border shrink-0 overflow-hidden pt-2 gap-1 transition-[width] duration-200 min-h-0"
+      style={{ width: rem(railExpanded ? 160 : 40) }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        // Keep the menu on screen when right-clicking near the viewport edges
+        const MENU_W = 190;
+        const MENU_H = 96;
+        setMenuPos({
+          x: Math.min(e.clientX, window.innerWidth - MENU_W - 8),
+          y: Math.min(e.clientY, window.innerHeight - MENU_H - 8),
+        });
+        if (!(e.target as HTMLElement).closest("[data-rail-promotable]")) {
+          setMenuTarget(null);
+        }
+      }}
+    >
+      <div className="flex flex-col flex-1 gap-1 overflow-y-auto scrollbar-none min-h-0">
+        {!pluginsSettled
+          ? Array.from({ length: railButtons.length || 8 }, (_, i) => (
+              <div
+                key={`rail-skeleton-${i}`}
+                style={btnStyle}
+                className="flex items-center h-7 shrink-0"
+              >
+                <Skeleton className="size-4 shrink-0" />
+              </div>
+            ))
+          : railButtons.map((item, i) =>
+              item.kind === "separator" ? (
+                <div
+                  key={`sep-${i}`}
+                  className="mx-auto h-px bg-border my-0.5 shrink-0 transition-[width] duration-200"
+                  style={{
+                    width: railExpanded ? `calc(100% - ${rem(16)})` : rem(20),
+                  }}
+                />
+              ) : "tabType" in item ? (
+                <button
+                  key={item.tabType}
+                  onClick={() => onOpenTab?.(item.tabType)}
+                  style={btnStyle}
+                  className={`${btnBase} text-muted-foreground hover:text-foreground hover:bg-muted/60`}
+                >
+                  <span
+                    className="relative shrink-0 flex items-center justify-center"
+                    style={{ width: rem(16), height: rem(16) }}
+                  >
+                    {item.icon}
+                    {item.useBadge && (
+                      <RailBadge
+                        useBadge={item.useBadge}
+                        className="-top-1.5 -right-2"
+                      />
+                    )}
+                  </span>
+                  <span
+                    className={`text-xs font-medium whitespace-nowrap overflow-hidden transition-[opacity,width] duration-150 ${
+                      railExpanded ? "opacity-100 delay-75" : "opacity-0 w-0"
+                    }`}
+                  >
+                    {item.title}
+                  </span>
+                </button>
+              ) : (
+                <button
+                  key={item.view}
+                  onClick={(e) => {
+                    if (item.promotable && (e.ctrlKey || e.metaKey)) {
+                      onOpenTab?.(item.view as TabType);
+                      return;
+                    }
+                    onRailClick(item.view);
+                  }}
+                  onAuxClick={(e) => {
+                    if (e.button !== 1 || !item.promotable) return;
+                    e.preventDefault();
+                    onOpenTab?.(item.view as TabType);
+                  }}
+                  onContextMenu={() => {
+                    if (item.promotable || item.rightDockable)
+                      setMenuTarget({
+                        view: item.view,
+                        title: item.title,
+                        promotable: item.promotable,
+                        rightDockable: item.rightDockable,
+                      });
+                  }}
+                  data-rail-promotable={
+                    item.promotable || item.rightDockable ? "" : undefined
+                  }
+                  title={
+                    item.promotable
+                      ? `${item.title}\n${t("nav.openAsTabHint")}`
+                      : item.title
+                  }
+                  style={btnStyle}
+                  className={`${btnBase} ${
+                    sidebarOpen && railView === item.view
+                      ? "text-accent-brand bg-accent-brand/10"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
+                  }`}
+                >
+                  <span
+                    className="relative shrink-0 flex items-center justify-center"
+                    style={{ width: rem(16), height: rem(16) }}
+                  >
+                    {item.icon}
+                    {item.useBadge && (
+                      <RailBadge
+                        useBadge={item.useBadge}
+                        className="-top-1.5 -right-2"
+                      />
+                    )}
+                  </span>
+                  <span
+                    className={`text-xs font-medium whitespace-nowrap overflow-hidden transition-[opacity,width] duration-150 ${
+                      railExpanded ? "opacity-100 delay-75" : "opacity-0 w-0"
+                    }`}
+                  >
+                    {item.title}
+                  </span>
+                </button>
+              ),
+            )}
+      </div>
+
+      <div className="shrink-0 flex flex-col gap-1 border-t border-border pt-1 pb-1">
+        {showPinButton && (
+          <button
+            onClick={() => setRailPinned(!pinned)}
+            style={btnStyle}
+            title={
+              pinned ? t("nav.collapseSideMenu") : t("nav.keepSideMenuOpen")
+            }
+            className={`${btnBase} ${
+              pinned
+                ? "text-accent-brand bg-accent-brand/10 hover:text-accent-brand"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
+            }`}
+          >
+            <span
+              className="shrink-0 flex items-center justify-center"
+              style={{ width: rem(16), height: rem(16) }}
+            >
+              <Pin size={16} />
+            </span>
+            <span
+              className={`text-xs font-medium whitespace-nowrap overflow-hidden transition-[opacity,width] duration-150 ${
+                railExpanded ? "opacity-100 delay-75" : "opacity-0 w-0"
+              }`}
+            >
+              {pinned ? t("nav.collapseSideMenu") : t("nav.keepSideMenuOpen")}
+            </span>
+          </button>
+        )}
+        {showPinButton && (
+          <div
+            className="mx-auto h-px bg-border my-0.5 shrink-0 transition-[width] duration-200"
+            style={{
+              width: railExpanded ? `calc(100% - ${rem(16)})` : rem(20),
+            }}
+          />
+        )}
+        {footerItems.map((item) => {
+          const Icon = item.icon;
+          const title = t(item.labelKey);
+          return (
+            <button
+              key={item.id}
+              onClick={(e) => {
+                if (item.kind === "tab") {
+                  onOpenTab?.(item.id as TabType);
+                  return;
+                }
+                if (item.promotable && (e.ctrlKey || e.metaKey)) {
+                  onOpenTab?.(item.id as TabType);
+                  return;
+                }
+                onRailClick(item.id as RailView);
+              }}
+              onAuxClick={(e) => {
+                if (e.button !== 1 || !item.promotable) return;
+                e.preventDefault();
+                onOpenTab?.(item.id as TabType);
+              }}
+              onContextMenu={() => {
+                if (item.promotable || item.rightDockable)
+                  setMenuTarget({
+                    view: item.id as RailView,
+                    title,
+                    promotable: item.promotable,
+                    rightDockable: item.rightDockable,
+                  });
+              }}
+              data-rail-promotable={
+                item.promotable || item.rightDockable ? "" : undefined
+              }
+              title={
+                item.promotable ? `${title}\n${t("nav.openAsTabHint")}` : title
+              }
+              style={btnStyle}
+              className={`${btnBase} ${
+                sidebarOpen && railView === item.id
+                  ? "text-accent-brand bg-accent-brand/10"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
+              }`}
+            >
+              <span
+                className="relative shrink-0 flex items-center justify-center"
+                style={{ width: rem(16), height: rem(16) }}
+              >
+                <Icon size={16} />
+                {item.useBadge && (
+                  <RailBadge
+                    useBadge={item.useBadge}
+                    className="-top-1.5 -right-2"
+                  />
+                )}
+              </span>
+              <span
+                className={`text-xs font-medium whitespace-nowrap overflow-hidden transition-[opacity,width] duration-150 ${railExpanded ? "opacity-100 delay-75" : "opacity-0 w-0"}`}
+              >
+                {title}
+              </span>
+            </button>
+          );
+        })}
+        {(
+          [
+            {
+              view: "user-profile" as RailView,
+              icon: <User size={16} />,
+              title: t("nav.userProfile"),
+            },
+            ...(isAdmin
+              ? [
+                  {
+                    view: "admin-settings" as RailView,
+                    icon: <Settings size={16} />,
+                    title: t("nav.admin"),
+                  },
+                ]
+              : []),
+          ] as {
+            view: RailView;
+            icon: ReactElement;
+            title: string;
+            promotable?: boolean;
+          }[]
+        ).map((item) => (
+          <button
+            key={item.view}
+            onClick={(e) => {
+              if (item.promotable && (e.ctrlKey || e.metaKey)) {
+                onOpenTab?.(item.view as TabType);
+                return;
+              }
+              onRailClick(item.view);
+            }}
+            onAuxClick={(e) => {
+              if (e.button !== 1 || !item.promotable) return;
+              e.preventDefault();
+              onOpenTab?.(item.view as TabType);
+            }}
+            onContextMenu={() => {
+              if (item.promotable)
+                setMenuTarget({
+                  view: item.view,
+                  title: item.title,
+                  promotable: item.promotable,
+                  rightDockable: true,
+                });
+            }}
+            data-rail-promotable={item.promotable ? "" : undefined}
+            title={
+              item.promotable
+                ? `${item.title}\n${t("nav.openAsTabHint")}`
+                : item.title
+            }
+            style={btnStyle}
+            className={`${btnBase} ${
+              sidebarOpen && railView === item.view
+                ? "text-accent-brand bg-accent-brand/10"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
+            }`}
+          >
+            <span
+              className="relative shrink-0 flex items-center justify-center"
+              style={{ width: rem(16), height: rem(16) }}
+            >
+              {item.icon}
+            </span>
+            <span
+              className={`text-xs font-medium whitespace-nowrap overflow-hidden transition-[opacity,width] duration-150 ${railExpanded ? "opacity-100 delay-75" : "opacity-0 w-0"}`}
+            >
+              {item.title}
+            </span>
+          </button>
+        ))}
+        <div className="mx-2 my-1 border-t border-border" />
+        <button
+          onClick={() => onLogout({ manual: true })}
+          style={btnStyle}
+          title={t("common.logout")}
+          aria-label={t("common.logout")}
+          className={`${btnBase} text-muted-foreground hover:text-destructive hover:bg-destructive/10`}
+        >
+          <span
+            className="shrink-0 flex items-center justify-center"
+            style={{ width: rem(16), height: rem(16) }}
+          >
+            <LogOut size={16} />
+          </span>
+          <span
+            className={`text-xs font-medium whitespace-nowrap overflow-hidden transition-[opacity,width] duration-150 ${railExpanded ? "opacity-100 delay-75" : "opacity-0 w-0"}`}
+          >
+            {t("common.logout")}
+          </span>
+        </button>
+      </div>
+
+      <div className="shrink-0 border-t border-border">
+        <button
+          onClick={() => onRailClick("user-profile")}
+          title={t("nav.userProfile")}
+          aria-label={t("nav.userProfile")}
+          className="flex items-center gap-2.5 w-full h-10 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+          style={{ padding: "0 8px" }}
+        >
+          <div
+            className="rounded-full bg-accent-brand/20 border border-accent-brand/30 flex items-center justify-center font-bold text-accent-brand shrink-0"
+            style={{ width: rem(24), height: rem(24), fontSize: rem(11) }}
+          >
+            {username.charAt(0).toUpperCase() || "U"}
+          </div>
+          <div
+            className={`flex flex-col items-start overflow-hidden transition-opacity duration-150 ${
+              railExpanded ? "opacity-100 delay-75" : "opacity-0"
+            }`}
+          >
+            <span className="text-xs font-semibold leading-tight whitespace-nowrap">
+              {username || "User"}
+            </span>
+            <span className="text-[10px] text-muted-foreground leading-tight whitespace-nowrap">
+              {isAdmin ? t("nav.roleAdministrator") : t("nav.roleUser")}
+            </span>
+          </div>
+        </button>
+      </div>
+
+      {menuPos && (
+        <div
+          data-rail-context-menu
+          style={{ position: "fixed", left: menuPos.x, top: menuPos.y }}
+          className="z-[10000] bg-popover border border-border shadow-lg py-1 min-w-[190px]"
+        >
+          {menuTarget && (
+            <>
+              {menuTarget.promotable && (
+                <button
+                  onClick={() => {
+                    onOpenTab?.(menuTarget.view as TabType);
+                    setMenuPos(null);
+                  }}
+                  className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left hover:bg-accent hover:text-accent-foreground"
+                >
+                  <span className="shrink-0 w-3 flex items-center justify-center">
+                    <SquareArrowOutUpRight className="size-3" />
+                  </span>
+                  {t("nav.openAsTab")}
+                </button>
+              )}
+              {menuTarget.rightDockable && (
+                <button
+                  onClick={() => {
+                    onOpenInRightDock?.(menuTarget.view);
+                    setMenuPos(null);
+                  }}
+                  className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left hover:bg-accent hover:text-accent-foreground"
+                >
+                  <span className="shrink-0 w-3 flex items-center justify-center">
+                    <PanelRight className="size-3" />
+                  </span>
+                  {t("nav.openInRightDock")}
+                </button>
+              )}
+              <div className="h-px bg-border my-1" />
+            </>
+          )}
+          <button
+            onClick={togglePinned}
+            className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left hover:bg-accent hover:text-accent-foreground"
+            role="menuitemcheckbox"
+            aria-checked={pinned}
+          >
+            <span className="shrink-0 w-3 flex items-center justify-center">
+              {pinned && <Check className="size-3" />}
+            </span>
+            {t("newUi.sidebar.userProfile.pinAppRail")}
+          </button>
+          <button
+            onClick={toggleExpandOnHover}
+            className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left hover:bg-accent hover:text-accent-foreground"
+            role="menuitemcheckbox"
+            aria-checked={expandOnHover}
+          >
+            <span className="shrink-0 w-3 flex items-center justify-center">
+              {expandOnHover && <Check className="size-3" />}
+            </span>
+            {t("newUi.sidebar.userProfile.expandAppRailOnHover")}
+          </button>
+          <div className="h-px bg-border my-1" />
+          <button
+            onClick={() => {
+              onRailClick("user-profile");
+              setMenuPos(null);
+            }}
+            className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left hover:bg-accent hover:text-accent-foreground"
+          >
+            <span className="shrink-0 w-3 flex items-center justify-center">
+              <SlidersHorizontal className="size-3" />
+            </span>
+            {t("nav.sidebarSettings")}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,2008 @@
+import { getErrorMessage } from "../utils/error-message.js";
+import { sshOptionsForWrite } from "../hosts/ssh-options.js";
+import {
+  applyDefaultsAfterHostWrite,
+  applyHostDefaultsToWrite,
+} from "../hosts/defaults/index.js";
+import { recompute } from "../hosts/defaults/recompute.js";
+import {
+  importHostDefaults,
+  writeHostDefaultsToExport,
+} from "../hosts/defaults/user-export.js";
+import express from "express";
+import http from "http";
+import https from "https";
+import bodyParser from "body-parser";
+import multer from "multer";
+import cookieParser from "cookie-parser";
+import userRoutes from "./routes/users.js";
+import hostRoutes from "./routes/host.js";
+import credentialsRoutes from "./routes/credentials.js";
+import sshAuthRoutes from "./routes/ssh-auth-routes.js";
+import rbacRoutes from "./routes/rbac.js";
+import openTabsRoutes from "./routes/open-tabs.js";
+import userPreferencesRoutes from "./routes/user-preferences.js";
+import hostSidebarPreferencesRoutes from "./routes/host-sidebar-preferences.js";
+import credentialSidebarPreferencesRoutes from "./routes/credential-sidebar-preferences.js";
+import uiPreferencesRoutes from "./routes/ui-preferences.js";
+import { registerAuditLogRoutes } from "./routes/audit-log-routes.js";
+import syncRoutes from "../sync/server/routes.js";
+import syncLinkRoutes from "../sync/client/routes.js";
+import { syncChangeWatcher } from "../sync/server/change-watcher.js";
+import dashboardRoutes from "./routes/dashboard-routes.js";
+import {
+  mountPluginApi,
+  mountPluginLegacyPaths,
+} from "./routes/plugin-api-routes.js";
+import { attachPluginWebSockets } from "../plugins/ws.js";
+import pluginRoutes from "./routes/plugins.js";
+import { createPluginAssetsRouter } from "../plugins/assets.js";
+import { getPluginRuntime } from "../plugins/index.js";
+import { createCorsMiddleware } from "../utils/cors-config.js";
+import { createCompressionMiddleware } from "../utils/compression-config.js";
+import fs from "fs";
+import path from "path";
+import os from "os";
+import "dotenv/config";
+import { databaseLogger, apiLogger } from "../utils/logger.js";
+import { getLocalVersion } from "../utils/app-version.js";
+import {
+  compareSemver,
+  fetchGitHubAPI,
+  REPO_NAME,
+  REPO_OWNER,
+} from "../utils/latest-release.js";
+import { AuthManager } from "../utils/auth-manager.js";
+import { DataCrypto } from "../utils/data-crypto.js";
+import { DatabaseFileEncryption } from "../utils/database-file-encryption.js";
+import { DatabaseMigration } from "../utils/database-migration.js";
+import { UserDataExport } from "../utils/user-data-export.js";
+import {
+  importUserPluginRows,
+  writeUserPluginTables,
+} from "../plugins/user-data.js";
+import { configureDirectHttps, getTlsConfig } from "../tls/tls-service.js";
+import { acmeChallengeHandler } from "../tls/acme-challenges.js";
+import {
+  createCurrentCredentialRepository,
+  createCurrentHostRepository,
+  createCurrentPluginSettingsRepository,
+  createCurrentSettingsRepository,
+  createCurrentSshCredentialUsageRepository,
+  createCurrentUserRepository,
+} from "./repositories/factory.js";
+import { withCurrentSqliteForeignKeysDisabled } from "./repositories/sqlite-foreign-keys.js";
+import { applyPluginHostImportSettings } from "./routes/host-plugin-settings.js";
+import {
+  keepUsableProtocolCredentials,
+  listProtocolLogins,
+  readProtocolAuthPayload,
+  toPortableLogins,
+  writeProtocolAuth,
+} from "../hosts/protocol-auth/protocol-auth.js";
+import { parseUserAgent } from "../utils/user-agent-parser.js";
+import type { GitHubRelease, AuthenticatedRequest } from "../../types/index.js";
+import { DatabaseSaveTrigger } from "./db/index.js";
+import Database from "better-sqlite3";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const app = express();
+
+app.set("trust proxy", "loopback");
+
+const authManager = AuthManager.getInstance();
+const authenticateJWT = authManager.createAuthMiddleware();
+const requireAdmin = authManager.createAdminMiddleware();
+app.use(createCompressionMiddleware());
+app.use(createCorsMiddleware());
+
+type SettingData = {
+  key: string;
+  value: string;
+};
+
+function shouldExportSetting(key: string): boolean {
+  return !key.startsWith("reset_code_") && !key.startsWith("temp_reset_token_");
+}
+
+async function getExportableSettings(): Promise<SettingData[]> {
+  const settingsRows = await createCurrentSettingsRepository().listAll();
+
+  return settingsRows.filter((setting) => shouldExportSetting(setting.key));
+}
+
+function writeSettingsToExportDatabase(
+  exportDb: Database.Database,
+  settingsRows: SettingData[],
+): void {
+  const insertSetting = exportDb.prepare(`
+    INSERT INTO settings (key, value)
+    VALUES (?, ?)
+  `);
+
+  for (const setting of settingsRows) {
+    insertSetting.run(setting.key, setting.value);
+  }
+}
+
+function readImportedSettings(importDb: Database.Database): SettingData[] {
+  return importDb
+    .prepare("SELECT key, value FROM settings")
+    .all() as SettingData[];
+}
+
+async function upsertImportedSetting(setting: SettingData): Promise<void> {
+  await createCurrentSettingsRepository().upsert(setting.key, setting.value);
+}
+
+const uploadsDir = path.join(process.env.DATA_DIR || "./db/data", "uploads");
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    const timestamp = Date.now();
+    cb(null, `${timestamp}-${file.originalname}`);
+  },
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 1024 * 1024 * 1024,
+  },
+  fileFilter: (req, file, cb) => {
+    if (
+      file.originalname.endsWith(".termix-export.sqlite") ||
+      file.originalname.endsWith(".sqlite")
+    ) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only .termix-export.sqlite files are allowed"));
+    }
+  },
+});
+
+// Skipped for /plugin-api: a plugin router brings its own parsers with its own
+// limit (see plugins/http.ts), and parsing here first would consume the body
+// and silently cap every plugin at this limit instead.
+const coreJsonParser = bodyParser.json({ limit: "2mb" });
+const coreUrlencodedParser = bodyParser.urlencoded({
+  limit: "2mb",
+  extended: true,
+});
+
+app.use((req, res, next) => {
+  if (req.path.startsWith("/plugin-api/")) return next();
+  coreJsonParser(req, res, next);
+});
+app.use((req, res, next) => {
+  if (req.path.startsWith("/plugin-api/")) return next();
+  coreUrlencodedParser(req, res, next);
+});
+app.use(cookieParser());
+app.use((_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
+  next();
+});
+app.use(syncChangeWatcher);
+
+/**
+ * @openapi
+ * /health:
+ *   get:
+ *     summary: Health check
+ *     description: Returns the health status of the server.
+ *     tags:
+ *       - General
+ *     responses:
+ *       200:
+ *         description: Server is healthy.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: ok
+ */
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
+});
+
+/**
+ * @openapi
+ * /.well-known/acme-challenge/{token}:
+ *   get:
+ *     summary: Answer an ACME http-01 challenge
+ *     description: Public. Serves the key authorization a plugin published through ctx.system.publishHttpChallenge while it proves control of the domain.
+ *     tags:
+ *       - General
+ *     parameters:
+ *       - in: path
+ *         name: token
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: The key authorization, as text/plain.
+ *       404:
+ *         description: No challenge is published for this token.
+ */
+app.get("/.well-known/acme-challenge/:token", acmeChallengeHandler);
+
+/**
+ * @openapi
+ * /version:
+ *   get:
+ *     summary: Get version information
+ *     description: Returns the running instance's version in localVersion. When the update check succeeds, remoteVersion is the latest GitHub release and version is its legacy alias, not the instance's version. Remote fields are omitted when the check is disabled, fails, or returns an unparseable release tag.
+ *     tags:
+ *       - General
+ *     parameters:
+ *       - in: query
+ *         name: checkRemote
+ *         description: Set to false to return only localVersion and status without contacting GitHub.
+ *         schema:
+ *           type: boolean
+ *           default: true
+ *     responses:
+ *       200:
+ *         description: Version information.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required:
+ *                 - localVersion
+ *                 - status
+ *               properties:
+ *                 localVersion:
+ *                   type: string
+ *                   description: Version of the running instance. Use this field for client compatibility checks.
+ *                   example: 2.7.1
+ *                 status:
+ *                   type: string
+ *                   description: Update comparison result, update_check_disabled when explicitly disabled, or unknown when the remote lookup fails or the release tag cannot be parsed.
+ *                   enum: [up_to_date, beta, requires_update, update_check_disabled, unknown]
+ *                 remoteVersion:
+ *                   type: string
+ *                   description: Latest GitHub release version. Present only when the update check succeeds.
+ *                   example: 2.8.0
+ *                 version:
+ *                   type: string
+ *                   deprecated: true
+ *                   description: Legacy alias of remoteVersion, not the running instance's version. Present only when the update check succeeds. Use localVersion for the instance or remoteVersion for the latest release.
+ *                   example: 2.8.0
+ *                 latest_release:
+ *                   type: object
+ *                   description: GitHub release metadata. Present only when the update check succeeds.
+ *                   properties:
+ *                     tag_name:
+ *                       type: string
+ *                     name:
+ *                       type: string
+ *                       nullable: true
+ *                     published_at:
+ *                       type: string
+ *                       format: date-time
+ *                       nullable: true
+ *                     html_url:
+ *                       type: string
+ *                       format: uri
+ *                 cached:
+ *                   type: boolean
+ *                   description: Whether the release lookup used a cached response. Present only when the update check succeeds.
+ *                 cache_age:
+ *                   type: number
+ *                   description: Age of the cached response in milliseconds, when available.
+ *       404:
+ *         description: Local version not set.
+ */
+app.get("/version", authenticateJWT, async (req, res) => {
+  const localVersion = getLocalVersion();
+
+  if (!localVersion) {
+    databaseLogger.error("No version information available", undefined, {
+      operation: "version_check",
+    });
+    return res.status(404).send("Local Version Not Set");
+  }
+
+  if (req.query.checkRemote === "false") {
+    return res.json({ localVersion, status: "update_check_disabled" });
+  }
+
+  try {
+    const cacheKey = "latest_release";
+    const releaseData = await fetchGitHubAPI<GitHubRelease>(
+      `/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest`,
+      cacheKey,
+    );
+
+    const rawTag = releaseData.data.tag_name || releaseData.data.name || "";
+    const remoteVersionMatch = rawTag.match(/(\d+\.\d+(\.\d+)?)/);
+    const remoteVersion = remoteVersionMatch ? remoteVersionMatch[1] : null;
+
+    if (!remoteVersion) {
+      databaseLogger.warn("Remote version not found in GitHub response", {
+        operation: "version_check",
+        rawTag,
+      });
+      return res.json({ localVersion, status: "unknown" });
+    }
+
+    const versionComparison = compareSemver(localVersion, remoteVersion);
+    const status =
+      versionComparison === null || versionComparison === 0
+        ? "up_to_date"
+        : versionComparison > 0
+          ? "beta"
+          : "requires_update";
+
+    const response = {
+      status,
+      localVersion: localVersion,
+      version: remoteVersion,
+      remoteVersion: remoteVersion,
+      latest_release: {
+        tag_name: releaseData.data.tag_name,
+        name: releaseData.data.name,
+        published_at: releaseData.data.published_at,
+        html_url: releaseData.data.html_url,
+      },
+      cached: releaseData.cached,
+      cache_age: releaseData.cache_age,
+    };
+
+    res.json(response);
+  } catch (err) {
+    databaseLogger.error("Version check failed", err, {
+      operation: "version_check",
+    });
+    res.json({ localVersion, status: "unknown" });
+  }
+});
+
+/**
+ * @openapi
+ * /releases/rss:
+ *   get:
+ *     summary: Get releases in RSS format
+ *     description: Returns the latest releases from the GitHub repository in an RSS-like JSON format.
+ *     tags:
+ *       - General
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *         description: The page number of the releases to fetch.
+ *       - in: query
+ *         name: per_page
+ *         schema:
+ *           type: integer
+ *         description: The number of releases to fetch per page.
+ *     responses:
+ *       200:
+ *         description: Releases in RSS format.
+ *       500:
+ *         description: Failed to generate RSS format.
+ */
+app.get("/releases/rss", authenticateJWT, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const per_page = Math.min(
+      parseInt(req.query.per_page as string) || 20,
+      100,
+    );
+    const cacheKey = `releases_rss_${page}_${per_page}`;
+
+    const releasesData = await fetchGitHubAPI<GitHubRelease[]>(
+      `/repos/${REPO_OWNER}/${REPO_NAME}/releases?page=${page}&per_page=${per_page}`,
+      cacheKey,
+    );
+
+    const rssItems = releasesData.data.map((release) => ({
+      id: release.id,
+      title: release.name || release.tag_name,
+      description: release.body,
+      link: release.html_url,
+      pubDate: release.published_at,
+      version: release.tag_name,
+      isPrerelease: release.prerelease,
+      isDraft: release.draft,
+      assets: release.assets.map((asset) => ({
+        name: asset.name,
+        size: asset.size,
+        download_count: asset.download_count,
+        download_url: asset.browser_download_url,
+      })),
+    }));
+
+    const response = {
+      feed: {
+        title: `${REPO_NAME} Releases`,
+        description: `Latest releases from ${REPO_NAME} repository`,
+        link: `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases`,
+        updated: new Date().toISOString(),
+      },
+      items: rssItems,
+      total_count: rssItems.length,
+      cached: releasesData.cached,
+      cache_age: releasesData.cache_age,
+    };
+
+    res.json(response);
+  } catch (error) {
+    databaseLogger.error("Failed to generate RSS format", error, {
+      operation: "rss_releases",
+    });
+    res.status(500).json({
+      error: "Failed to generate RSS format",
+      details: getErrorMessage(error),
+    });
+  }
+});
+
+/**
+ * @openapi
+ * /encryption/status:
+ *   get:
+ *     summary: Get encryption status
+ *     description: Returns the security status of the application.
+ *     tags:
+ *       - Encryption
+ *     responses:
+ *       200:
+ *         description: Security status.
+ *       500:
+ *         description: Failed to get security status.
+ */
+app.get("/encryption/status", requireAdmin, async (req, res) => {
+  try {
+    const securityStatus = {
+      initialized: true,
+      system: { hasSecret: true, isValid: true },
+      activeSessions: {},
+      activeSessionCount: 0,
+    };
+
+    res.json({
+      security: securityStatus,
+      version: "v2-kek-dek",
+    });
+  } catch (error) {
+    apiLogger.error("Failed to get security status", error, {
+      operation: "security_status",
+    });
+    res.status(500).json({ error: "Failed to get security status" });
+  }
+});
+
+/**
+ * @openapi
+ * /encryption/initialize:
+ *   post:
+ *     summary: Initialize security system
+ *     description: Initializes the security system for the application.
+ *     tags:
+ *       - Encryption
+ *     responses:
+ *       200:
+ *         description: Security system initialized successfully.
+ *       500:
+ *         description: Failed to initialize security system.
+ */
+app.post("/encryption/initialize", requireAdmin, async (req, res) => {
+  try {
+    const authManager = AuthManager.getInstance();
+
+    const isValid = true;
+    if (!isValid) {
+      await authManager.initialize();
+    }
+
+    res.json({
+      success: true,
+      message: "Security system initialized successfully",
+      version: "v2-kek-dek",
+      note: "User data encryption will be set up when users log in",
+    });
+  } catch (error) {
+    apiLogger.error("Failed to initialize security system", error, {
+      operation: "security_init_api_failed",
+    });
+    res.status(500).json({ error: "Failed to initialize security system" });
+  }
+});
+
+/**
+ * @openapi
+ * /encryption/regenerate:
+ *   post:
+ *     summary: Regenerate JWT secret
+ *     description: Regenerates the system JWT secret. This will invalidate all existing JWT tokens.
+ *     tags:
+ *       - Encryption
+ *     responses:
+ *       200:
+ *         description: System JWT secret regenerated.
+ *       500:
+ *         description: Failed to regenerate JWT secret.
+ */
+app.post("/encryption/regenerate", requireAdmin, async (req, res) => {
+  try {
+    apiLogger.warn("System JWT secret regenerated via API", {
+      operation: "jwt_regenerate_api",
+    });
+
+    res.json({
+      success: true,
+      message: "System JWT secret regenerated",
+      warning:
+        "All existing JWT tokens are now invalid - users must re-authenticate",
+      note: "User data encryption keys are protected by passwords and cannot be regenerated",
+    });
+  } catch (error) {
+    apiLogger.error("Failed to regenerate JWT secret", error, {
+      operation: "jwt_regenerate_failed",
+    });
+    res.status(500).json({ error: "Failed to regenerate JWT secret" });
+  }
+});
+
+/**
+ * @openapi
+ * /encryption/regenerate-jwt:
+ *   post:
+ *     summary: Regenerate JWT secret
+ *     description: Regenerates the JWT secret. This will invalidate all existing JWT tokens.
+ *     tags:
+ *       - Encryption
+ *     responses:
+ *       200:
+ *         description: New JWT secret generated.
+ *       500:
+ *         description: Failed to regenerate JWT secret.
+ */
+app.post("/encryption/regenerate-jwt", requireAdmin, async (req, res) => {
+  try {
+    apiLogger.warn("JWT secret regenerated via API", {
+      operation: "jwt_secret_regenerate_api",
+    });
+
+    res.json({
+      success: true,
+      message: "New JWT secret generated",
+      warning:
+        "All existing JWT tokens are now invalid - users must re-authenticate",
+    });
+  } catch (error) {
+    apiLogger.error("Failed to regenerate JWT secret", error, {
+      operation: "jwt_secret_regenerate_failed",
+    });
+    res.status(500).json({ error: "Failed to regenerate JWT secret" });
+  }
+});
+
+/**
+ * @openapi
+ * /database/export:
+ *   post:
+ *     summary: Export user data
+ *     description: Exports the user's data as a SQLite database file.
+ *     tags:
+ *       - Database
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               password:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: User data exported successfully.
+ *       400:
+ *         description: Password required for export.
+ *       401:
+ *         description: Invalid password.
+ *       500:
+ *         description: Failed to export user data.
+ */
+app.post("/database/export", authenticateJWT, async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).userId;
+    const deviceInfo = parseUserAgent(req);
+
+    const userRepository = createCurrentUserRepository();
+    const user = await userRepository.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const isOidcUser = !!user.isOidc;
+
+    if (!DataCrypto.getUserDataKey(userId)) {
+      if (isOidcUser) {
+        const oidcUnlocked = await authManager.authenticateExternalUser(
+          userId,
+          deviceInfo.type,
+        );
+        if (!oidcUnlocked) {
+          return res.status(403).json({
+            error: "Failed to unlock user data with SSO credentials",
+          });
+        }
+      } else {
+        return res.status(403).json({
+          error: "User data is locked. Please log in again.",
+        });
+      }
+    }
+
+    apiLogger.info("Exporting user data as SQLite", {
+      operation: "user_data_sqlite_export_api",
+      userId,
+    });
+
+    const userDataKey = DataCrypto.getUserDataKey(userId);
+    if (!userDataKey) {
+      throw new Error("User data not unlocked");
+    }
+
+    const tempDir = path.join(os.tmpdir(), "termix-exports");
+
+    try {
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
+    } catch (dirError) {
+      apiLogger.error("Failed to create temp directory", dirError, {
+        operation: "export_temp_dir_error",
+        tempDir,
+      });
+      throw new Error(`Failed to create temp directory: ${dirError.message}`, {
+        cause: dirError,
+      });
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const filename = `termix-export-${user.username}-${timestamp}.sqlite`;
+    const tempPath = path.join(tempDir, filename);
+
+    apiLogger.info("Creating export database", {
+      operation: "export_db_creation",
+      userId,
+      tempPath,
+    });
+
+    const exportDb = new Database(tempPath);
+
+    try {
+      exportDb.exec(`
+        CREATE TABLE users (
+          id TEXT PRIMARY KEY,
+          username TEXT NOT NULL,
+          password_hash TEXT NOT NULL,
+          is_admin INTEGER NOT NULL DEFAULT 0,
+          is_oidc INTEGER NOT NULL DEFAULT 0,
+          oidc_identifier TEXT,
+          client_id TEXT,
+          client_secret TEXT,
+          issuer_url TEXT,
+          authorization_url TEXT,
+          token_url TEXT,
+          identifier_path TEXT,
+          name_path TEXT,
+          scopes TEXT DEFAULT 'openid email profile'
+        );
+
+        CREATE TABLE settings (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+
+        CREATE TABLE ssh_data (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id TEXT NOT NULL,
+          connection_type TEXT NOT NULL DEFAULT 'ssh',
+          name TEXT,
+          ip TEXT NOT NULL,
+          port INTEGER NOT NULL,
+          username TEXT NOT NULL,
+          folder TEXT,
+          tags TEXT,
+          pin INTEGER NOT NULL DEFAULT 0,
+          auth_type TEXT NOT NULL,
+          force_keyboard_interactive TEXT,
+          password TEXT,
+          key TEXT,
+          key_password TEXT,
+          key_type TEXT,
+          sudo_password TEXT,
+          credential_id INTEGER,
+          override_credential_username INTEGER,
+          jump_hosts TEXT,
+          status_check_enabled INTEGER NOT NULL DEFAULT 1,
+          status_check_interval INTEGER,
+          terminal_config TEXT,
+          ssh_options TEXT,
+          quick_actions TEXT,
+          notes TEXT,
+          use_socks5 INTEGER,
+          socks5_host TEXT,
+          socks5_port INTEGER,
+          socks5_username TEXT,
+          socks5_password TEXT,
+          socks5_proxy_chain TEXT,
+          port_knock_sequence TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE plugin_settings (
+          plugin_id TEXT NOT NULL,
+          host_id INTEGER NOT NULL,
+          key TEXT NOT NULL,
+          value TEXT
+        );
+
+        CREATE TABLE host_protocol_auth (
+          host_id INTEGER NOT NULL,
+          protocol TEXT NOT NULL,
+          auth_type TEXT NOT NULL,
+          credential_id INTEGER,
+          username TEXT,
+          password TEXT,
+          fields TEXT
+        );
+
+        CREATE TABLE ssh_credentials (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          description TEXT,
+          folder TEXT,
+          tags TEXT,
+          auth_type TEXT NOT NULL,
+          username TEXT,
+          password TEXT,
+          key TEXT,
+          private_key TEXT,
+          public_key TEXT,
+          key_password TEXT,
+          key_type TEXT,
+          detected_key_type TEXT,
+          usage_count INTEGER NOT NULL DEFAULT 0,
+          last_used TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE ssh_credential_usage (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          credential_id INTEGER NOT NULL,
+          host_id INTEGER NOT NULL,
+          user_id TEXT NOT NULL,
+          used_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+
+      const userRecord = user;
+      const insertUser = exportDb.prepare(`
+        INSERT INTO users (id, username, password_hash, is_admin, is_oidc, oidc_identifier, client_id, client_secret, issuer_url, authorization_url, token_url, identifier_path, name_path, scopes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      insertUser.run(
+        userRecord.id,
+        userRecord.username,
+        "[EXPORTED_USER_NO_PASSWORD]",
+        userRecord.isAdmin ? 1 : 0,
+        userRecord.isOidc ? 1 : 0,
+        userRecord.oidcIdentifier || null,
+        userRecord.clientId || null,
+        userRecord.clientSecret || null,
+        userRecord.issuerUrl || null,
+        userRecord.authorizationUrl || null,
+        userRecord.tokenUrl || null,
+        userRecord.identifierPath || null,
+        userRecord.namePath || null,
+        userRecord.scopes || null,
+      );
+
+      const sshHosts =
+        await createCurrentHostRepository().listDecryptedByUserId(userId);
+      const insertHost = exportDb.prepare(`
+        INSERT INTO ssh_data (id, user_id, connection_type, name, ip, port, username, folder, tags, pin, auth_type, force_keyboard_interactive, password, key, key_password, key_type, sudo_password, credential_id, override_credential_username, jump_hosts, status_check_enabled, status_check_interval, terminal_config, ssh_options, quick_actions, notes, use_socks5, socks5_host, socks5_port, socks5_username, socks5_password, socks5_proxy_chain, port_knock_sequence, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      for (const decrypted of sshHosts) {
+        insertHost.run(
+          decrypted.id,
+          decrypted.userId,
+          decrypted.connectionType || "ssh",
+          decrypted.name || null,
+          decrypted.ip,
+          decrypted.port,
+          decrypted.username,
+          decrypted.folder || null,
+          decrypted.tags || null,
+          decrypted.pin ? 1 : 0,
+          decrypted.authType,
+          decrypted.forceKeyboardInteractive || null,
+          decrypted.password || null,
+          decrypted.key || null,
+          decrypted.keyPassword || null,
+          decrypted.keyType || null,
+          decrypted.sudoPassword || null,
+          decrypted.credentialId || null,
+          decrypted.overrideCredentialUsername ? 1 : 0,
+          decrypted.jumpHosts || null,
+          decrypted.statusCheckEnabled === false ? 0 : 1,
+          decrypted.statusCheckInterval ?? null,
+          decrypted.terminalConfig || null,
+          decrypted.sshOptions || null,
+          decrypted.quickActions || null,
+          decrypted.notes || null,
+          decrypted.useSocks5 ? 1 : 0,
+          decrypted.socks5Host || null,
+          decrypted.socks5Port || null,
+          decrypted.socks5Username || null,
+          decrypted.socks5Password || null,
+          decrypted.socks5ProxyChain || null,
+          decrypted.portKnockSequence || null,
+          decrypted.createdAt,
+          decrypted.updatedAt,
+        );
+      }
+
+      // Host-scope plugin settings travel with their hosts. Secrets are sealed
+      // with this server's key, which the importing server does not have.
+      const insertPluginSetting = exportDb.prepare(
+        "INSERT INTO plugin_settings (plugin_id, host_id, key, value) VALUES (?, ?, ?, ?)",
+      );
+      const hostPluginRows =
+        await createCurrentPluginSettingsRepository().getAllForScopeIds(
+          "host",
+          sshHosts.map((host) => String(host.id)),
+        );
+      for (const row of hostPluginRows) {
+        if (row.encrypted) continue;
+        insertPluginSetting.run(
+          row.pluginId,
+          Number(row.scopeId),
+          row.key,
+          row.value,
+        );
+      }
+
+      // Plugin protocol logins, decrypted like the host's own secrets.
+      const insertProtocolAuth = exportDb.prepare(
+        "INSERT INTO host_protocol_auth (host_id, protocol, auth_type, credential_id, username, password, fields) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      );
+      for (const host of sshHosts) {
+        const logins = toPortableLogins(
+          await listProtocolLogins(host.id as number, userId),
+        );
+        for (const [protocol, login] of Object.entries(logins)) {
+          insertProtocolAuth.run(
+            host.id,
+            protocol,
+            login.authType,
+            login.credentialId,
+            login.username,
+            login.password,
+            JSON.stringify(login.fields),
+          );
+        }
+      }
+
+      const credentials =
+        await createCurrentCredentialRepository().listDecryptedByUserId(userId);
+      const insertCred = exportDb.prepare(`
+        INSERT INTO ssh_credentials (id, user_id, name, description, folder, tags, auth_type, username, password, key, private_key, public_key, key_password, key_type, detected_key_type, usage_count, last_used, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      for (const decrypted of credentials) {
+        insertCred.run(
+          decrypted.id,
+          decrypted.userId,
+          decrypted.name,
+          decrypted.description || null,
+          decrypted.folder || null,
+          decrypted.tags || null,
+          decrypted.authType,
+          decrypted.username,
+          decrypted.password || null,
+          decrypted.key || null,
+          decrypted.privateKey || null,
+          decrypted.publicKey || null,
+          decrypted.keyPassword || null,
+          decrypted.keyType || null,
+          decrypted.detectedKeyType || null,
+          decrypted.usageCount || 0,
+          decrypted.lastUsed || null,
+          decrypted.createdAt,
+          decrypted.updatedAt,
+        );
+      }
+
+      // Rows the user owns in plugin tables travel with the export.
+      await writeUserPluginTables(exportDb, userId);
+
+      const sshCredentialUsageRepository =
+        createCurrentSshCredentialUsageRepository();
+      const usage = await sshCredentialUsageRepository.listByUserId(userId);
+      const insertUsage = exportDb.prepare(`
+        INSERT INTO ssh_credential_usage (id, credential_id, host_id, user_id, used_at)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+      for (const item of usage) {
+        insertUsage.run(
+          item.id,
+          item.credentialId,
+          item.hostId,
+          item.userId,
+          item.usedAt,
+        );
+      }
+
+      writeSettingsToExportDatabase(exportDb, await getExportableSettings());
+      await writeHostDefaultsToExport(exportDb, userId);
+    } finally {
+      exportDb.close();
+    }
+
+    res.setHeader("Content-Type", "application/x-sqlite3");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+
+    const fileStream = fs.createReadStream(tempPath);
+
+    fileStream.on("error", (streamError) => {
+      apiLogger.error("File stream error during export", streamError, {
+        operation: "export_file_stream_error",
+        userId,
+        tempPath,
+      });
+      if (!res.headersSent) {
+        res.status(500).json({
+          error: "Failed to stream export file",
+          details: streamError.message,
+        });
+      }
+    });
+
+    fileStream.on("end", () => {
+      apiLogger.success("User data exported as SQLite successfully", {
+        operation: "user_data_sqlite_export_success",
+        userId,
+        filename,
+      });
+
+      fs.unlink(tempPath, (err) => {
+        if (err) {
+          apiLogger.warn("Failed to clean up export file", {
+            operation: "export_cleanup_failed",
+            path: tempPath,
+            error: err.message,
+          });
+        }
+      });
+    });
+
+    fileStream.pipe(res);
+  } catch (error) {
+    apiLogger.error("User data SQLite export failed", error, {
+      operation: "user_data_sqlite_export_failed",
+    });
+    res.status(500).json({
+      error: "Failed to export user data",
+      details: getErrorMessage(error),
+    });
+  }
+});
+
+/**
+ * @openapi
+ * /database/import:
+ *   post:
+ *     summary: Import user data
+ *     description: Imports user data from a SQLite database file.
+ *     tags:
+ *       - Database
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *               password:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Incremental import completed successfully.
+ *       400:
+ *         description: No file uploaded or password required for import.
+ *       401:
+ *         description: Invalid password.
+ *       500:
+ *         description: Failed to import SQLite data.
+ */
+app.post(
+  "/database/import",
+  authenticateJWT,
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      const userId = (req as AuthenticatedRequest).userId;
+      const deviceInfo = parseUserAgent(req);
+
+      const userRepository = createCurrentUserRepository();
+      const userRecord = await userRepository.findById(userId);
+
+      if (!userRecord) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const isOidcUser = !!userRecord.isOidc;
+
+      if (!DataCrypto.getUserDataKey(userId)) {
+        if (isOidcUser) {
+          const oidcUnlocked = await authManager.authenticateExternalUser(
+            userId,
+            deviceInfo.type,
+          );
+          if (!oidcUnlocked) {
+            return res.status(403).json({
+              error: "Failed to unlock user data with SSO credentials",
+            });
+          }
+        } else {
+          return res.status(403).json({
+            error: "User data is locked. Please log in again.",
+          });
+        }
+      }
+
+      apiLogger.info("Importing SQLite data", {
+        operation: "sqlite_import_api",
+        userId,
+        filename: req.file.originalname,
+        fileSize: req.file.size,
+        mimetype: req.file.mimetype,
+      });
+
+      const userDataKey = DataCrypto.getUserDataKey(userId);
+      if (!userDataKey) {
+        throw new Error("User data not unlocked");
+      }
+
+      if (!fs.existsSync(req.file.path)) {
+        return res.status(400).json({
+          error: "Uploaded file not found",
+          details: "File was not properly uploaded",
+        });
+      }
+
+      const fileHeader = Buffer.alloc(16);
+      const fd = fs.openSync(req.file.path, "r");
+      fs.readSync(fd, fileHeader, 0, 16, 0);
+      fs.closeSync(fd);
+
+      const sqliteHeader = "SQLite format 3";
+      if (fileHeader.toString("utf8", 0, 15) !== sqliteHeader) {
+        return res.status(400).json({
+          error: "Invalid file format - not a SQLite database",
+          details: `Expected SQLite file, got file starting with: ${fileHeader.toString("utf8", 0, 15)}`,
+        });
+      }
+
+      let importDb;
+      try {
+        importDb = new Database(req.file.path, { readonly: true });
+
+        importDb
+          .prepare("SELECT name FROM sqlite_master WHERE type='table'")
+          .all();
+      } catch (sqliteError) {
+        return res.status(400).json({
+          error: "Failed to open SQLite database",
+          details: sqliteError.message,
+        });
+      }
+
+      const result = {
+        success: false,
+        summary: {
+          sshHostsImported: 0,
+          sshCredentialsImported: 0,
+          pluginItemsImported: 0,
+          credentialUsageImported: 0,
+          settingsImported: 0,
+          skippedItems: 0,
+          errors: [],
+        },
+      };
+
+      try {
+        await withCurrentSqliteForeignKeysDisabled(async () => {
+          try {
+            const importedHosts = importDb
+              .prepare("SELECT * FROM ssh_data")
+              .all();
+            for (const host of importedHosts) {
+              try {
+                const hostRepository = createCurrentHostRepository();
+                const exists = await hostRepository.existsForImportIdentity(
+                  userId,
+                  host.ip,
+                  host.port,
+                  host.username,
+                );
+
+                if (exists) {
+                  result.summary.skippedItems++;
+                  continue;
+                }
+
+                const hostData = {
+                  userId: userId,
+                  name: host.name,
+                  ip: host.ip,
+                  port: host.port,
+                  username: host.username,
+                  folder: host.folder,
+                  tags: host.tags,
+                  pin: Boolean(host.pin),
+                  authType: host.auth_type,
+                  forceKeyboardInteractive: host.force_keyboard_interactive,
+                  password: host.password,
+                  key: host.key,
+                  keyPassword: host.key_password,
+                  keyType: host.key_type,
+                  sudoPassword: host.sudo_password,
+                  credentialId: host.credential_id || null,
+                  overrideCredentialUsername: Boolean(
+                    host.override_credential_username,
+                  ),
+                  jumpHosts: host.jump_hosts,
+                  ...legacyStatusCheck(host),
+                  terminalConfig: host.terminal_config,
+                  // Exports from before 2.9.0 carry these in terminal_config.
+                  sshOptions:
+                    host.ssh_options ??
+                    sshOptionsForWrite({
+                      terminalConfig: host.terminal_config,
+                    }) ??
+                    null,
+                  quickActions: host.quick_actions,
+                  notes: host.notes,
+                  useSocks5: Boolean(host.use_socks5),
+                  socks5Host: host.socks5_host,
+                  socks5Port: host.socks5_port,
+                  socks5Username: host.socks5_username,
+                  socks5Password: host.socks5_password,
+                  socks5ProxyChain: host.socks5_proxy_chain,
+                  createdAt: host.created_at || new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                };
+
+                (hostData as Record<string, unknown>).defaultOverrides =
+                  JSON.stringify(
+                    await applyHostDefaultsToWrite({
+                      ownerId: userId,
+                      hostId: null,
+                      columns: hostData as Record<string, unknown>,
+                      body: hostData as Record<string, unknown>,
+                    }),
+                  );
+                const created = await hostRepository.createEncryptedForUser(
+                  userId,
+                  hostData,
+                );
+                await applyPluginHostImportSettings(
+                  Number(created.id),
+                  importedHostPluginSettings(importDb, host),
+                );
+                await applyDefaultsAfterHostWrite(Number(created.id));
+                await importHostProtocolLogins(
+                  importDb,
+                  host,
+                  Number(created.id),
+                  userId,
+                );
+                result.summary.sshHostsImported++;
+              } catch (hostError) {
+                result.summary.errors.push(
+                  `SSH host import error: ${hostError.message}`,
+                );
+              }
+            }
+          } catch {
+            apiLogger.info("ssh_data table not found in import file, skipping");
+          }
+
+          try {
+            const importedCreds = importDb
+              .prepare("SELECT * FROM ssh_credentials")
+              .all();
+            for (const cred of importedCreds) {
+              try {
+                const credentialRepository =
+                  createCurrentCredentialRepository();
+                const exists =
+                  await credentialRepository.existsForImportIdentity(
+                    userId,
+                    cred.name,
+                    cred.username,
+                  );
+
+                if (exists) {
+                  result.summary.skippedItems++;
+                  continue;
+                }
+
+                const credData = {
+                  userId: userId,
+                  name: cred.name,
+                  description: cred.description,
+                  folder: cred.folder,
+                  tags: cred.tags,
+                  authType: cred.auth_type,
+                  username: cred.username,
+                  password: cred.password,
+                  key: cred.key,
+                  privateKey: cred.private_key,
+                  publicKey: cred.public_key,
+                  keyPassword: cred.key_password,
+                  keyType: cred.key_type,
+                  detectedKeyType: cred.detected_key_type,
+                  usageCount: cred.usage_count || 0,
+                  lastUsed: cred.last_used,
+                  createdAt: cred.created_at || new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                };
+
+                await credentialRepository.createEncryptedForUser(
+                  userId,
+                  credData,
+                );
+                result.summary.sshCredentialsImported++;
+              } catch (credError) {
+                result.summary.errors.push(
+                  `SSH credential import error: ${credError.message}`,
+                );
+              }
+            }
+          } catch {
+            apiLogger.info(
+              "ssh_credentials table not found in import file, skipping",
+            );
+          }
+
+          const pluginRows = await importUserPluginRows(importDb, userId);
+          result.summary.pluginItemsImported += pluginRows.imported;
+          result.summary.skippedItems += pluginRows.skipped;
+          result.summary.errors.push(...pluginRows.errors);
+
+          const hostDefaults = await importHostDefaults(importDb, userId);
+          result.summary.skippedItems += hostDefaults.skipped;
+          if (hostDefaults.imported > 0) {
+            await recompute({ userIds: [userId] });
+          }
+
+          const targetUser = await userRepository.findById(userId);
+          if (targetUser?.isAdmin) {
+            try {
+              const importedSettings = readImportedSettings(importDb);
+              for (const setting of importedSettings) {
+                try {
+                  await upsertImportedSetting(setting);
+                  result.summary.settingsImported++;
+                } catch (settingError) {
+                  result.summary.errors.push(
+                    `Setting import error (${setting.key}): ${settingError.message}`,
+                  );
+                }
+              }
+            } catch {
+              apiLogger.info(
+                "settings table not found in import file, skipping",
+              );
+            }
+          } else {
+            apiLogger.info(
+              "Settings import skipped - only admin users can import settings",
+            );
+          }
+
+          result.success = true;
+
+          try {
+            await DatabaseSaveTrigger.forceSave("database_import");
+          } catch (saveError) {
+            apiLogger.error(
+              "Failed to persist imported data to disk",
+              saveError,
+              {
+                operation: "import_force_save_failed",
+                userId,
+              },
+            );
+          }
+        });
+      } finally {
+        if (importDb) {
+          importDb.close();
+        }
+      }
+
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch {
+        apiLogger.warn("Failed to clean up uploaded file", {
+          operation: "file_cleanup_warning",
+          filePath: req.file.path,
+        });
+      }
+
+      res.json({
+        success: result.success,
+        message: result.success
+          ? "Incremental import completed successfully"
+          : "Import failed",
+        summary: result.summary,
+      });
+
+      if (result.success) {
+        apiLogger.success("SQLite data imported successfully", {
+          operation: "sqlite_import_api_success",
+          userId,
+          summary: result.summary,
+        });
+      }
+    } catch (error) {
+      if (req.file?.path && fs.existsSync(req.file.path)) {
+        try {
+          fs.unlinkSync(req.file.path);
+        } catch {
+          apiLogger.warn("Failed to clean up uploaded file after error", {
+            operation: "file_cleanup_error",
+            filePath: req.file.path,
+          });
+        }
+      }
+
+      apiLogger.error("SQLite import failed", error, {
+        operation: "sqlite_import_api_failed",
+        userId: (req as AuthenticatedRequest).userId,
+      });
+      res.status(500).json({
+        error: "Failed to import SQLite data",
+        details: getErrorMessage(error),
+      });
+    }
+  },
+);
+
+/**
+ * @openapi
+ * /database/export/preview:
+ *   post:
+ *     summary: Preview user data export
+ *     description: Generates a preview of the user data export, including statistics about the data.
+ *     tags:
+ *       - Database
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               scope:
+ *                 type: string
+ *               includeCredentials:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Export preview generated successfully.
+ *       500:
+ *         description: Failed to generate export preview.
+ */
+app.post("/database/export/preview", authenticateJWT, async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).userId;
+    const { scope = "user_data", includeCredentials = true } = req.body;
+
+    const exportData = await UserDataExport.exportUserData(userId, {
+      format: "encrypted",
+      scope,
+      includeCredentials,
+    });
+
+    const stats = UserDataExport.getExportStats(exportData);
+
+    res.json({
+      preview: true,
+      stats,
+      estimatedSize: JSON.stringify(exportData).length,
+    });
+
+    apiLogger.success("Export preview generated", {
+      operation: "export_preview_api_success",
+      userId,
+      totalRecords: stats.totalRecords,
+    });
+  } catch (error) {
+    apiLogger.error("Export preview failed", error, {
+      operation: "export_preview_api_failed",
+    });
+    res.status(500).json({
+      error: "Failed to generate export preview",
+      details: getErrorMessage(error),
+    });
+  }
+});
+
+/**
+ * @openapi
+ * /database/restore:
+ *   post:
+ *     summary: Restore database from backup
+ *     description: Restores the database from an encrypted backup file.
+ *     tags:
+ *       - Database
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               backupPath:
+ *                 type: string
+ *               targetPath:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Database restored successfully.
+ *       400:
+ *         description: Backup path is required or invalid encrypted backup file.
+ *       500:
+ *         description: Database restore failed.
+ */
+app.post("/database/restore", requireAdmin, async (req, res) => {
+  try {
+    const { backupPath, targetPath } = req.body;
+
+    if (!backupPath) {
+      return res.status(400).json({ error: "Backup path is required" });
+    }
+
+    if (!DatabaseFileEncryption.isEncryptedDatabaseFile(backupPath)) {
+      return res.status(400).json({ error: "Invalid encrypted backup file" });
+    }
+
+    const restoredPath =
+      await DatabaseFileEncryption.restoreFromEncryptedBackup(
+        backupPath,
+        targetPath,
+      );
+
+    res.json({
+      success: true,
+      message: "Database restored successfully",
+      restoredPath,
+    });
+  } catch (error) {
+    apiLogger.error("Database restore failed", error, {
+      operation: "database_restore_api_failed",
+    });
+    res.status(500).json({
+      error: "Database restore failed",
+      details: getErrorMessage(error),
+    });
+  }
+});
+
+app.use("/users", userRoutes);
+app.use("/host", hostRoutes);
+app.use("/credentials", credentialsRoutes);
+app.use("/ssh-auth", sshAuthRoutes);
+app.use("/rbac", rbacRoutes);
+app.use("/open-tabs", openTabsRoutes);
+app.use("/user-preferences", userPreferencesRoutes);
+app.use("/host-sidebar/preferences", hostSidebarPreferencesRoutes);
+app.use("/credential-sidebar/preferences", credentialSidebarPreferencesRoutes);
+app.use("/ui-preferences", uiPreferencesRoutes);
+registerAuditLogRoutes(app, authenticateJWT);
+app.use("/sync", syncRoutes);
+app.use("/sync", syncLinkRoutes);
+app.use("/dashboard", dashboardRoutes);
+app.use("/plugins", pluginRoutes);
+app.use(
+  "/plugin-assets",
+  createPluginAssetsRouter((id) => getPluginRuntime().loader.get(id)),
+);
+mountPluginApi(app);
+mountPluginLegacyPaths(app, () =>
+  getPluginRuntime()
+    .loader.list()
+    .filter((plugin) => plugin.state === "active")
+    .map((plugin) => ({
+      id: plugin.id,
+      legacyPaths: plugin.manifest.contributes?.http?.legacyPaths ?? [],
+      legacyRedirects: plugin.manifest.contributes?.http?.legacyRedirects ?? [],
+    }))
+    .filter(
+      (plugin) =>
+        plugin.legacyPaths.length > 0 || plugin.legacyRedirects.length > 0,
+    ),
+);
+
+const frontendDistPaths = [
+  path.join(__dirname, "../../../dist"),
+  path.join(__dirname, "../../dist"),
+  path.join(process.cwd(), "dist"),
+];
+
+const frontendDist = frontendDistPaths.find((p) =>
+  fs.existsSync(path.join(p, "index.html")),
+);
+
+if (frontendDist) {
+  databaseLogger.info(`Serving frontend from: ${frontendDist}`, {
+    operation: "static_files",
+  });
+  app.use(
+    express.static(frontendDist, {
+      setHeaders: (res, filePath) => {
+        const relativePath = path
+          .relative(frontendDist, filePath)
+          .replaceAll(path.sep, "/");
+
+        if (relativePath.startsWith("assets/")) {
+          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+          return;
+        }
+
+        if (
+          relativePath === "index.html" ||
+          relativePath === "sw.js" ||
+          relativePath === "manifest.json"
+        ) {
+          res.setHeader(
+            "Cache-Control",
+            "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+          );
+        }
+      },
+    }),
+  );
+
+  app.use((req, res, next) => {
+    if (
+      req.method === "GET" &&
+      req.accepts("html") &&
+      !req.headers.authorization
+    ) {
+      res.setHeader(
+        "Cache-Control",
+        "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+      );
+      res.sendFile(path.join(frontendDist, "index.html"));
+    } else {
+      next();
+    }
+  });
+}
+
+app.use(
+  (
+    err: unknown,
+    req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction,
+  ) => {
+    void _next;
+    apiLogger.error("Unhandled error in request", err, {
+      operation: "error_handler",
+      method: req.method,
+      url: req.url,
+      userAgent: req.get("User-Agent"),
+    });
+    res.status(500).json({ error: "Internal Server Error" });
+  },
+);
+
+const HTTP_PORT = 30001;
+
+async function initializeSecurity() {
+  try {
+    const authManager = AuthManager.getInstance();
+    await authManager.initialize();
+
+    DataCrypto.initialize();
+
+    const isValid = true;
+    if (!isValid) {
+      throw new Error("Security system validation failed");
+    }
+  } catch (error) {
+    databaseLogger.error("Failed to initialize security system", error, {
+      operation: "security_init_error",
+    });
+    throw error;
+  }
+}
+
+/**
+ * @openapi
+ * /database/migration/status:
+ *   get:
+ *     summary: Get database migration status
+ *     description: Returns the status of the database migration.
+ *     tags:
+ *       - Database
+ *     responses:
+ *       200:
+ *         description: Migration status.
+ *       500:
+ *         description: Failed to get migration status.
+ */
+app.get(
+  "/database/migration/status",
+  authenticateJWT,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const dataDir = process.env.DATA_DIR || "./db/data";
+      const migration = new DatabaseMigration(dataDir);
+      const status = migration.checkMigrationStatus();
+
+      const dbPath = path.join(dataDir, "db.sqlite");
+      const encryptedDbPath = `${dbPath}.encrypted`;
+
+      const files = fs.readdirSync(dataDir);
+      const backupFiles = files.filter((f) => f.includes(".migration-backup-"));
+      const migratedFiles = files.filter((f) => f.includes(".migrated-"));
+
+      let unencryptedSize = 0;
+      let encryptedSize = 0;
+
+      if (status.hasUnencryptedDb) {
+        try {
+          unencryptedSize = fs.statSync(dbPath).size;
+        } catch {
+          // expected - file may not exist
+        }
+      }
+
+      if (status.hasEncryptedDb) {
+        try {
+          encryptedSize = fs.statSync(encryptedDbPath).size;
+        } catch {
+          // expected - file may not exist
+        }
+      }
+
+      res.json({
+        migrationStatus: status,
+        files: {
+          unencryptedDbSize: unencryptedSize,
+          encryptedDbSize: encryptedSize,
+          backupFiles: backupFiles.length,
+          migratedFiles: migratedFiles.length,
+        },
+      });
+    } catch (error) {
+      apiLogger.error("Failed to get migration status", error, {
+        operation: "migration_status_api_failed",
+      });
+      res.status(500).json({
+        error: "Failed to get migration status",
+        details: getErrorMessage(error),
+      });
+    }
+  },
+);
+
+/**
+ * @openapi
+ * /database/migration/history:
+ *   get:
+ *     summary: Get database migration history
+ *     description: Returns the history of database migrations.
+ *     tags:
+ *       - Database
+ *     responses:
+ *       200:
+ *         description: Migration history.
+ *       500:
+ *         description: Failed to get migration history.
+ */
+app.get(
+  "/database/migration/history",
+  authenticateJWT,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const dataDir = process.env.DATA_DIR || "./db/data";
+
+      const files = fs.readdirSync(dataDir);
+
+      const backupFiles = files
+        .filter((f) => f.includes(".migration-backup-"))
+        .map((f) => {
+          const filePath = path.join(dataDir, f);
+          const stats = fs.statSync(filePath);
+          return {
+            name: f,
+            size: stats.size,
+            created: stats.birthtime,
+            modified: stats.mtime,
+            type: "backup",
+          };
+        })
+        .sort((a, b) => b.modified.getTime() - a.modified.getTime());
+
+      const migratedFiles = files
+        .filter((f) => f.includes(".migrated-"))
+        .map((f) => {
+          const filePath = path.join(dataDir, f);
+          const stats = fs.statSync(filePath);
+          return {
+            name: f,
+            size: stats.size,
+            created: stats.birthtime,
+            modified: stats.mtime,
+            type: "migrated",
+          };
+        })
+        .sort((a, b) => b.modified.getTime() - a.modified.getTime());
+
+      res.json({
+        files: [...backupFiles, ...migratedFiles],
+        summary: {
+          totalBackups: backupFiles.length,
+          totalMigrated: migratedFiles.length,
+          oldestBackup:
+            backupFiles.length > 0
+              ? backupFiles[backupFiles.length - 1].created
+              : null,
+          newestBackup: backupFiles.length > 0 ? backupFiles[0].created : null,
+        },
+      });
+    } catch (error) {
+      apiLogger.error("Failed to get migration history", error, {
+        operation: "migration_history_api_failed",
+      });
+      res.status(500).json({
+        error: "Failed to get migration history",
+        details: getErrorMessage(error),
+      });
+    }
+  },
+);
+
+const httpServer = http.createServer(app);
+
+// Plugin sockets ride this server at /plugin-ws/<id>/<path>. Anything else is
+// left alone, so core's own upgrade handling is unaffected.
+attachPluginWebSockets(httpServer);
+
+httpServer.on("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EADDRINUSE") {
+    databaseLogger.error(
+      `Port ${HTTP_PORT} is already in use. Kill the existing process and retry.`,
+      err,
+      {
+        operation: "http_server_port_conflict",
+        port: HTTP_PORT,
+      },
+    );
+    process.exit(1);
+  }
+  throw err;
+});
+
+export const serverReady = new Promise<void>((resolve) => {
+  httpServer.listen(HTTP_PORT, "127.0.0.1", async () => {
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    await initializeSecurity();
+    resolve();
+  });
+});
+
+const sslConfig = getTlsConfig();
+if (sslConfig.enabled) {
+  databaseLogger.info(`SSL is enabled`, {
+    operation: "ssl_info",
+    ssl_port: sslConfig.port,
+    backend_http_port: HTTP_PORT,
+  });
+}
+
+// Built through the TLS service so a new certificate can be swapped in, or
+// HTTPS started, without a restart.
+void configureDirectHttps((options) => {
+  const port = getTlsConfig().port;
+  const httpsServer = https.createServer(options, app);
+
+  attachPluginWebSockets(httpsServer);
+
+  httpsServer.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      databaseLogger.error(
+        `SSL port ${port} is already in use. Kill the existing process and retry.`,
+        err,
+        {
+          operation: "https_server_port_conflict",
+          port,
+        },
+      );
+      return;
+    }
+    databaseLogger.error("HTTPS server error", err, {
+      operation: "https_server_error",
+    });
+  });
+
+  httpsServer.listen(port, "127.0.0.1", () => {
+    databaseLogger.success(`Backend is now also listening for HTTPS directly`, {
+      operation: "https_server_started",
+      port,
+    });
+  });
+  return httpsServer;
+});
+
+/**
+ * Status check columns from an export row. Exports from before 2.9.0 only
+ * have stats_config, which carried them.
+ */
+function legacyStatusCheck(row: Record<string, unknown>): {
+  statusCheckEnabled: boolean;
+  statusCheckInterval: number | null;
+} {
+  if (row.status_check_enabled !== undefined) {
+    return {
+      statusCheckEnabled: Boolean(row.status_check_enabled),
+      statusCheckInterval:
+        typeof row.status_check_interval === "number"
+          ? row.status_check_interval
+          : null,
+    };
+  }
+  let legacy: Record<string, unknown> = {};
+  try {
+    legacy =
+      typeof row.stats_config === "string" && row.stats_config
+        ? JSON.parse(row.stats_config)
+        : {};
+  } catch {
+    legacy = {};
+  }
+  const seconds = Number(legacy.statusCheckInterval);
+  return {
+    statusCheckEnabled:
+      legacy.statusCheckEnabled !== false && legacy.disableTcpPing !== true,
+    statusCheckInterval:
+      legacy.useGlobalStatusInterval === false &&
+      Number.isInteger(seconds) &&
+      seconds >= 5
+        ? seconds
+        : null,
+  };
+}
+
+/**
+ * A host's plugin protocol logins from an export. The file's credential ids
+ * belong to the server that wrote it, so a login keeps one only when it is
+ * a credential the importing user can use.
+ */
+async function importHostProtocolLogins(
+  importDb: Database.Database,
+  host: Record<string, unknown>,
+  hostId: number,
+  userId: string,
+): Promise<void> {
+  let rows: Array<Record<string, unknown>>;
+  try {
+    rows = importDb
+      .prepare("SELECT * FROM host_protocol_auth WHERE host_id = ?")
+      .all(host.id) as Array<Record<string, unknown>>;
+  } catch {
+    // An export from before 2.9.0 has no protocol logins.
+    return;
+  }
+  const protocolAuth: Record<string, unknown> = {};
+  for (const row of rows) {
+    let fields: unknown = {};
+    try {
+      fields = JSON.parse(String(row.fields ?? "{}"));
+    } catch {
+      fields = {};
+    }
+    protocolAuth[String(row.protocol)] = {
+      authType: row.auth_type,
+      credentialId: row.credential_id,
+      username: row.username,
+      password: row.password,
+      fields,
+    };
+  }
+  const patch = readProtocolAuthPayload({ protocolAuth });
+  if (!patch) return;
+  await writeProtocolAuth(
+    userId,
+    hostId,
+    await keepUsableProtocolCredentials(patch, userId),
+    { isOwner: true },
+  );
+}
+
+/**
+ * What an exported host carries for plugins: the plugin_settings rows a 2.9
+ * export writes, plus the whole row in camelCase so a plugin's import
+ * normalizer can read the columns a 2.8 export still had.
+ */
+function importedHostPluginSettings(
+  importDb: Database.Database,
+  host: Record<string, unknown>,
+): Record<string, unknown> {
+  const raw: Record<string, unknown> = {};
+  for (const [column, value] of Object.entries(host)) {
+    raw[column.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())] = value;
+  }
+
+  const pluginSettings: Record<string, Record<string, unknown>> = {};
+  try {
+    const rows = importDb
+      .prepare(
+        "SELECT plugin_id, key, value FROM plugin_settings WHERE host_id = ?",
+      )
+      .all(host.id) as Array<{
+      plugin_id: string;
+      key: string;
+      value: string | null;
+    }>;
+    for (const row of rows) {
+      let value: unknown = null;
+      try {
+        value = row.value === null ? null : JSON.parse(row.value);
+      } catch {
+        continue;
+      }
+      (pluginSettings[row.plugin_id] ??= {})[row.key] = value;
+    }
+  } catch {
+    // A 2.8 export has no plugin_settings table.
+  }
+  raw.pluginSettings = pluginSettings;
+  return raw;
+}

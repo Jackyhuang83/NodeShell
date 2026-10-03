@@ -1,0 +1,117 @@
+import { getCurrentRepositorySqlite } from "../database/repositories/factory.js";
+
+export interface UserEncryptionMigrationRecord {
+  id: number | string;
+  [key: string]: unknown;
+}
+
+export interface UserEncryptionMigrationStore {
+  listHostRecords(userId: string): UserEncryptionMigrationRecord[];
+  listCredentialRecords(userId: string): UserEncryptionMigrationRecord[];
+  updateHostSensitiveFields(
+    recordId: number | string,
+    record: Record<string, unknown>,
+  ): void;
+  updateCredentialSensitiveFields(
+    recordId: number | string,
+    record: Record<string, unknown>,
+  ): void;
+  updatePasswordResetFields(
+    table: "ssh_data" | "ssh_credentials" | "users",
+    recordId: number | string,
+    fields: string[],
+    record: Record<string, unknown>,
+  ): void;
+}
+
+export interface LegacyDatabaseInstance {
+  prepare: (sql: string) => {
+    all: (param?: unknown) => UserEncryptionMigrationRecord[];
+    get: (param?: unknown) => UserEncryptionMigrationRecord | undefined;
+    run: (...params: unknown[]) => unknown;
+  };
+}
+
+export class RawSqliteUserEncryptionMigrationStore implements UserEncryptionMigrationStore {
+  constructor(private readonly db: LegacyDatabaseInstance) {}
+
+  listHostRecords(userId: string): UserEncryptionMigrationRecord[] {
+    return this.db
+      .prepare("SELECT * FROM ssh_data WHERE user_id = ?")
+      .all(userId);
+  }
+
+  listCredentialRecords(userId: string): UserEncryptionMigrationRecord[] {
+    return this.db
+      .prepare("SELECT * FROM ssh_credentials WHERE user_id = ?")
+      .all(userId);
+  }
+
+  updateHostSensitiveFields(
+    recordId: number | string,
+    record: Record<string, unknown>,
+  ): void {
+    this.db
+      .prepare(
+        `
+          UPDATE ssh_data
+          SET password = ?, key = ?, key_password = ?, key_type = ?, sudo_password = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `,
+      )
+      .run(
+        record.password || null,
+        record.key || null,
+        record.key_password || null,
+        record.key_type || null,
+        record.sudo_password || null,
+        recordId,
+      );
+  }
+
+  updateCredentialSensitiveFields(
+    recordId: number | string,
+    record: Record<string, unknown>,
+  ): void {
+    this.db
+      .prepare(
+        `
+          UPDATE ssh_credentials
+          SET password = ?, key = ?, key_password = ?, private_key = ?, public_key = ?, key_type = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `,
+      )
+      .run(
+        record.password || null,
+        record.key || null,
+        record.key_password || null,
+        record.private_key || null,
+        record.public_key || null,
+        record.key_type || null,
+        recordId,
+      );
+  }
+
+  updatePasswordResetFields(
+    table: "ssh_data" | "ssh_credentials" | "users",
+    recordId: number | string,
+    fields: string[],
+    record: Record<string, unknown>,
+  ): void {
+    const setClause = fields.map((field) => `${field} = ?`).join(", ");
+    const updateQuery =
+      table === "users"
+        ? `UPDATE ${table} SET ${setClause} WHERE id = ?`
+        : `UPDATE ${table} SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`;
+    const updateValues = fields.map((field) => record[field]);
+    updateValues.push(recordId);
+
+    this.db.prepare(updateQuery).run(...updateValues);
+  }
+}
+
+export async function createCurrentUserEncryptionMigrationStore(): Promise<UserEncryptionMigrationStore> {
+  return new RawSqliteUserEncryptionMigrationStore(
+    getCurrentRepositorySqlite(),
+  );
+}

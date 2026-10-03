@@ -1,0 +1,466 @@
+import type { Request, RequestHandler, Response, Router } from "express";
+import type { AuthenticatedRequest } from "../../../types/index.js";
+import { databaseLogger, sshLogger } from "../../utils/logger.js";
+import { pluginEvents, TOPICS } from "../../plugins/events.js";
+import {
+  createCurrentCredentialRepository,
+  createCurrentHostFolderRepository,
+  createCurrentFolderAccessRepository,
+  createCurrentRecentActivityRepository,
+  createCurrentRbacAccessRepository,
+  createCurrentSshCredentialUsageRepository,
+} from "../repositories/factory.js";
+import { isNonEmptyString } from "./host-normalizers.js";
+import { recompute } from "../../hosts/defaults/recompute.js";
+import { setFolderCredentialDefault } from "../../hosts/defaults/service.js";
+
+type HostFolderRoutesDeps = {
+  authenticateJWT: RequestHandler;
+  requireViewPermission: RequestHandler;
+  requireEditPermission: RequestHandler;
+  requireDeletePermission: RequestHandler;
+  requireCredentialEditPermission: RequestHandler;
+  requireDataAccess: RequestHandler;
+};
+
+export function registerHostFolderRoutes(
+  router: Router,
+  {
+    authenticateJWT,
+    requireViewPermission,
+    requireEditPermission,
+    requireDeletePermission,
+    requireCredentialEditPermission,
+    requireDataAccess,
+  }: HostFolderRoutesDeps,
+): void {
+  /**
+   * @openapi
+   * /host/folders/rename:
+   *   put:
+   *     summary: Rename folder
+   *     description: Renames a folder for SSH hosts and credentials.
+   *     tags:
+   *       - SSH
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               oldName:
+   *                 type: string
+   *               newName:
+   *                 type: string
+   *     responses:
+   *       200:
+   *         description: Folder renamed successfully.
+   *       400:
+   *         description: Old name and new name are required.
+   *       500:
+   *         description: Failed to rename folder.
+   */
+  router.put(
+    "/folders/rename",
+    authenticateJWT,
+    requireEditPermission,
+    requireCredentialEditPermission,
+    requireDataAccess,
+    async (req: Request, res: Response) => {
+      const userId = (req as AuthenticatedRequest).userId;
+      const { oldName, newName } = req.body;
+
+      if (!isNonEmptyString(userId) || !oldName || !newName) {
+        sshLogger.warn("Invalid data for folder rename");
+        return res
+          .status(400)
+          .json({ error: "Old name and new name are required" });
+      }
+
+      if (oldName === newName) {
+        return res.json({ message: "Folder name unchanged" });
+      }
+
+      try {
+        const { updatedHosts, updatedCredentials } =
+          await createCurrentHostFolderRepository().renameFolder(
+            userId,
+            oldName,
+            newName,
+          );
+        await createCurrentFolderAccessRepository().renameFolder(
+          userId,
+          oldName,
+          newName,
+        );
+        // Subfolders change parents with a rename, so their chains do too.
+        void recompute({ userIds: [userId] }).catch(() => {});
+
+        res.json({
+          message: "Folder renamed successfully",
+          updatedHosts,
+          updatedCredentials,
+        });
+      } catch (err) {
+        sshLogger.error("Failed to rename folder", err, {
+          operation: "folder_rename",
+          userId,
+          oldName,
+          newName,
+        });
+        res.status(500).json({ error: "Failed to rename folder" });
+      }
+    },
+  );
+
+  /**
+   * @openapi
+   * /host/folders:
+   *   get:
+   *     summary: Get all folders
+   *     description: Retrieves all folders for the authenticated user.
+   *     tags:
+   *       - SSH
+   *     responses:
+   *       200:
+   *         description: A list of folders.
+   *       400:
+   *         description: Invalid user ID.
+   *       500:
+   *         description: Failed to fetch folders.
+   */
+  router.get(
+    "/folders",
+    authenticateJWT,
+    requireViewPermission,
+    requireDataAccess,
+    async (req: Request, res: Response) => {
+      const userId = (req as AuthenticatedRequest).userId;
+
+      if (!isNonEmptyString(userId)) {
+        return res.status(400).json({ error: "Invalid user ID" });
+      }
+
+      try {
+        const folders =
+          await createCurrentHostFolderRepository().listFolders(userId);
+
+        res.json(folders);
+      } catch (err) {
+        sshLogger.error("Failed to fetch folders", err, {
+          operation: "fetch_folders",
+          userId,
+        });
+        res.status(500).json({ error: "Failed to fetch folders" });
+      }
+    },
+  );
+
+  /**
+   * @openapi
+   * /host/folders/metadata:
+   *   put:
+   *     summary: Update folder metadata
+   *     description: Updates the metadata (color, icon, assigned credential) of a folder.
+   *     tags:
+   *       - SSH
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               name:
+   *                 type: string
+   *               color:
+   *                 type: string
+   *               icon:
+   *                 type: string
+   *               credentialId:
+   *                 type: integer
+   *                 nullable: true
+   *               localOnly:
+   *                 type: boolean
+   *                 description: Desktop only. Keeps the folder and its hosts on this device instead of syncing them.
+   *     responses:
+   *       200:
+   *         description: Folder metadata updated successfully.
+   *       400:
+   *         description: Folder name is required.
+   *       500:
+   *         description: Failed to update folder metadata.
+   */
+  router.put(
+    "/folders/metadata",
+    authenticateJWT,
+    requireEditPermission,
+    requireDataAccess,
+    async (req: Request, res: Response) => {
+      const userId = (req as AuthenticatedRequest).userId;
+      const { name, color, icon, credentialId, localOnly } = req.body;
+
+      if (!isNonEmptyString(userId) || !name) {
+        return res.status(400).json({ error: "Folder name is required" });
+      }
+
+      const normalizedCredentialId =
+        credentialId === undefined
+          ? undefined
+          : credentialId === null || credentialId === ""
+            ? null
+            : Number(credentialId);
+
+      if (
+        normalizedCredentialId !== undefined &&
+        normalizedCredentialId !== null &&
+        !Number.isInteger(normalizedCredentialId)
+      ) {
+        return res.status(400).json({ error: "Invalid credential ID" });
+      }
+
+      try {
+        if (normalizedCredentialId) {
+          const credential =
+            await createCurrentCredentialRepository().findByIdForUser(
+              userId,
+              normalizedCredentialId,
+            );
+          if (!credential) {
+            return res.status(404).json({ error: "Credential not found" });
+          }
+        }
+
+        const { folder, created } =
+          await createCurrentHostFolderRepository().upsertMetadata(
+            userId,
+            name,
+            color,
+            icon,
+            normalizedCredentialId,
+          );
+        if (typeof localOnly === "boolean") {
+          await createCurrentHostFolderRepository().setLocalOnly(
+            userId,
+            name,
+            localOnly,
+          );
+        }
+        if (normalizedCredentialId !== undefined) {
+          await setFolderCredentialDefault(
+            userId,
+            folder.id,
+            normalizedCredentialId,
+          );
+          void recompute({ userIds: [userId] }).catch(() => {});
+        }
+
+        if (!created) {
+          databaseLogger.info("Updating SSH folder", {
+            operation: "folder_update",
+            userId,
+            folderId: folder.id,
+          });
+        } else {
+          databaseLogger.info("Creating SSH folder", {
+            operation: "folder_create",
+            userId,
+            name,
+          });
+        }
+
+        res.json({ message: "Folder metadata updated successfully" });
+      } catch (err) {
+        sshLogger.error("Failed to update folder metadata", err, {
+          operation: "update_folder_metadata",
+          userId,
+          name,
+        });
+        res.status(500).json({ error: "Failed to update folder metadata" });
+      }
+    },
+  );
+
+  /**
+   * @openapi
+   * /host/folders/reorder:
+   *   put:
+   *     summary: Reorder folders
+   *     description: Sets a manual sortOrder for multiple sibling folders, used by drag-to-reorder in the sidebar's manual sort mode. Folders with no existing metadata row are created.
+   *     tags:
+   *       - SSH
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               positions:
+   *                 type: array
+   *                 items:
+   *                   type: object
+   *                   properties:
+   *                     name:
+   *                       type: string
+   *                     sortOrder:
+   *                       type: integer
+   *     responses:
+   *       200:
+   *         description: Folders reordered successfully.
+   *       400:
+   *         description: Invalid positions array.
+   *       500:
+   *         description: Failed to reorder folders.
+   */
+  router.put(
+    "/folders/reorder",
+    authenticateJWT,
+    requireEditPermission,
+    requireDataAccess,
+    async (req: Request, res: Response) => {
+      const userId = (req as AuthenticatedRequest).userId;
+      const { positions } = req.body as {
+        positions?: { name?: unknown; sortOrder?: unknown }[];
+      };
+
+      if (!isNonEmptyString(userId) || !Array.isArray(positions)) {
+        return res.status(400).json({ error: "positions array is required" });
+      }
+
+      const normalized: { name: string; sortOrder: number }[] = [];
+      for (const entry of positions) {
+        if (
+          typeof entry?.name !== "string" ||
+          !entry.name ||
+          typeof entry.sortOrder !== "number" ||
+          !Number.isFinite(entry.sortOrder)
+        ) {
+          return res.status(400).json({
+            error: "Each position requires a name and a numeric sortOrder",
+          });
+        }
+        normalized.push({ name: entry.name, sortOrder: entry.sortOrder });
+      }
+
+      if (normalized.length === 0) {
+        return res.status(400).json({ error: "positions array is required" });
+      }
+
+      try {
+        const updated =
+          await createCurrentHostFolderRepository().reorderFolders(
+            userId,
+            normalized,
+          );
+        res.json({ updated });
+      } catch (err) {
+        sshLogger.error("Failed to reorder folders", err, {
+          operation: "folders_reorder",
+          userId,
+        });
+        res.status(500).json({ error: "Failed to reorder folders" });
+      }
+    },
+  );
+
+  /**
+   * @openapi
+   * /host/folders/{name}/hosts:
+   *   delete:
+   *     summary: Delete all hosts in folder
+   *     description: Deletes all SSH hosts within a specific folder.
+   *     tags:
+   *       - SSH
+   *     parameters:
+   *       - in: path
+   *         name: name
+   *         required: true
+   *         schema:
+   *           type: string
+   *     responses:
+   *       200:
+   *         description: Hosts deleted successfully.
+   *       400:
+   *         description: Invalid folder name.
+   *       500:
+   *         description: Failed to delete hosts in folder.
+   */
+  router.delete(
+    "/folders/:name/hosts",
+    authenticateJWT,
+    requireDeletePermission,
+    requireDataAccess,
+    async (req: Request, res: Response) => {
+      const userId = (req as AuthenticatedRequest).userId;
+      const folderName = Array.isArray(req.params.name)
+        ? req.params.name[0]
+        : req.params.name;
+
+      if (!isNonEmptyString(userId) || !folderName) {
+        return res.status(400).json({ error: "Invalid folder name" });
+      }
+      databaseLogger.info("Deleting SSH folder", {
+        operation: "folder_delete",
+        userId,
+        folderId: folderName,
+      });
+
+      try {
+        const hostFolderRepository = createCurrentHostFolderRepository();
+        const hostsToDelete = await hostFolderRepository.listHostsInFolder(
+          userId,
+          folderName,
+        );
+
+        const hostIds = hostsToDelete.map((host) => host.id);
+
+        if (hostIds.length > 0) {
+          // Plugin rows tied to a host cascade on their refHost() foreign keys.
+
+          await createCurrentSshCredentialUsageRepository().deleteByHostIds(
+            hostIds,
+          );
+
+          await createCurrentRecentActivityRepository().deleteByHostIds(
+            hostIds,
+          );
+
+          await createCurrentRbacAccessRepository().deleteHostAccessForHosts(
+            hostIds,
+          );
+        }
+
+        await hostFolderRepository.deleteHostsAndFolderRecords(
+          userId,
+          folderName,
+        );
+
+        try {
+          for (const host of hostsToDelete) {
+            pluginEvents.emit(TOPICS.hostDeleted, { hostId: host.id, userId });
+          }
+        } catch (err) {
+          sshLogger.warn("Failed to publish host deletion events", {
+            operation: "folder_hosts_delete",
+            folderName,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+
+        res.json({
+          message: "All hosts in folder deleted successfully",
+          deletedCount: hostsToDelete.length,
+        });
+      } catch (err) {
+        sshLogger.error("Failed to delete hosts in folder", err, {
+          operation: "delete_folder_hosts",
+          userId,
+          folderName,
+        });
+        res.status(500).json({ error: "Failed to delete hosts in folder" });
+      }
+    },
+  );
+}

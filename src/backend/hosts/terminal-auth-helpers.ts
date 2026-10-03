@@ -1,0 +1,218 @@
+import dgram from "dgram";
+import net from "net";
+import ssh2Pkg, {
+  type BaseAgent as BaseAgentType,
+  type GetStreamCallback,
+  type IdentityCallback,
+  type KnownPublicKeys,
+  type ParsedKey,
+  type SignCallback,
+  type SigningRequestOptions,
+} from "ssh2";
+
+import type { HostSshOptions } from "./ssh-options.js";
+
+type KnownPublicKey = KnownPublicKeys[number];
+
+const { BaseAgent } = ssh2Pkg;
+const DEFAULT_PORT_KNOCK_TIMEOUT_MS = 1000;
+
+type Sleep = (ms: number) => Promise<void>;
+
+type PortKnockingOptions = {
+  tcpTimeoutMs?: number;
+  udpTimeoutMs?: number;
+  createTcpSocket?: () => net.Socket;
+  createUdpSocket?: () => dgram.Socket;
+  wait?: Sleep;
+};
+
+const sleep: Sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export async function resolveAgentSocket(
+  sshOptions: HostSshOptions | null | undefined,
+): Promise<{ socketPath: string } | { error: string }> {
+  const explicit = sshOptions?.agentSocketPath?.trim();
+  const resolved = explicit || process.env.SSH_AUTH_SOCK;
+
+  if (!resolved) {
+    return {
+      error: "SSH_AUTH_SOCK is not set and no socket path was provided.",
+    };
+  }
+
+  if (process.platform !== "win32") {
+    const { access } = await import("fs/promises");
+    try {
+      await access(resolved);
+    } catch {
+      return {
+        error: `SSH agent socket not found at ${resolved}. Make sure your agent is running.`,
+      };
+    }
+  }
+
+  return { socketPath: resolved };
+}
+
+/**
+ * Wraps an agent so only identities matching a specific public key are
+ * offered to the server, mirroring ssh_config's IdentityFile + IdentitiesOnly
+ * for agent auth. Prevents exhausting the server's MaxAuthTries when the
+ * agent holds many keys.
+ */
+export class FilteredAgent extends BaseAgent {
+  private inner: BaseAgentType;
+  private publicKeyBlob: Buffer;
+
+  constructor(inner: BaseAgentType, publicKeyBlob: Buffer) {
+    super();
+    this.inner = inner;
+    this.publicKeyBlob = publicKeyBlob;
+  }
+
+  private matches(key: KnownPublicKey): boolean {
+    try {
+      const blob =
+        typeof key === "string"
+          ? Buffer.from(key)
+          : Buffer.isBuffer(key)
+            ? key
+            : "getPublicSSH" in key
+              ? key.getPublicSSH()
+              : null;
+      return (
+        Buffer.isBuffer(blob) && Buffer.compare(blob, this.publicKeyBlob) === 0
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  getIdentities(cb: IdentityCallback): void {
+    this.inner.getIdentities((err, keys) => {
+      if (err || !keys) return cb(err, keys);
+      cb(
+        null,
+        keys.filter((key) => this.matches(key)),
+      );
+    });
+  }
+
+  getStream(cb: GetStreamCallback): void {
+    if (typeof this.inner.getStream !== "function") {
+      return cb(new Error("Agent does not support forwarding."));
+    }
+    this.inner.getStream(cb);
+  }
+
+  sign(
+    pubKey: ParsedKey | Buffer | string,
+    data: Buffer,
+    optionsOrCb: SigningRequestOptions | SignCallback,
+    cb?: SignCallback,
+  ): void {
+    this.inner.sign(
+      pubKey,
+      data,
+      optionsOrCb as SigningRequestOptions,
+      cb as SignCallback,
+    );
+  }
+}
+
+function parseAgentIdentityBlob(agentIdentity: string): Buffer | null {
+  const { utils } = ssh2Pkg;
+  const parsed = utils.parseKey(agentIdentity.trim());
+  if (parsed instanceof Error || !parsed) return null;
+  const key = Array.isArray(parsed) ? parsed[0] : parsed;
+  try {
+    return key.getPublicSSH();
+  } catch {
+    return null;
+  }
+}
+
+export async function applyAgentAuth(
+  connectConfig: Record<string, unknown>,
+  sshOptions: HostSshOptions | null | undefined,
+): Promise<{ socketPath: string } | { error: string }> {
+  const result = await resolveAgentSocket(sshOptions);
+  if ("error" in result) return result;
+
+  const { createAgent } = ssh2Pkg;
+  const agent = createAgent(result.socketPath);
+
+  const agentIdentity = sshOptions?.agentIdentity?.trim();
+  if (agentIdentity) {
+    const publicKeyBlob = parseAgentIdentityBlob(agentIdentity);
+    if (!publicKeyBlob) {
+      return { error: "Invalid public key provided for agent identity." };
+    }
+    connectConfig.agent = new FilteredAgent(agent, publicKeyBlob);
+  } else {
+    connectConfig.agent = agent;
+  }
+
+  return result;
+}
+
+export async function performPortKnocking(
+  host: string,
+  sequence: Array<{ port: number; protocol?: string; delay?: number }>,
+  options: PortKnockingOptions = {},
+): Promise<void> {
+  const createTcpSocket = options.createTcpSocket ?? (() => new net.Socket());
+  const createUdpSocket =
+    options.createUdpSocket ?? (() => dgram.createSocket("udp4"));
+  const wait = options.wait ?? sleep;
+  const tcpTimeoutMs = options.tcpTimeoutMs ?? DEFAULT_PORT_KNOCK_TIMEOUT_MS;
+  const udpTimeoutMs = options.udpTimeoutMs ?? DEFAULT_PORT_KNOCK_TIMEOUT_MS;
+
+  for (const knock of sequence) {
+    const port = Number(knock.port);
+    if (!Number.isInteger(port) || port <= 0 || port > 65535) continue;
+
+    const protocol = (knock.protocol || "tcp").toLowerCase();
+    const delay = Number(knock.delay ?? 100);
+
+    await new Promise<void>((resolve) => {
+      if (protocol === "udp") {
+        const client = createUdpSocket();
+        let settled = false;
+        const timeout = setTimeout(() => finish(), udpTimeoutMs);
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          client.close();
+          resolve();
+        };
+        client.once("error", finish);
+        client.send(Buffer.alloc(0), port, host, () => {
+          finish();
+        });
+      } else {
+        const socket = createTcpSocket();
+        let settled = false;
+        const timeout = setTimeout(() => finish(), tcpTimeoutMs);
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          socket.removeAllListeners("connect");
+          socket.removeAllListeners("error");
+          socket.destroy();
+          resolve();
+        };
+        socket.once("connect", finish);
+        socket.once("error", finish);
+        socket.connect(port, host);
+      }
+    });
+
+    if (delay > 0) {
+      await wait(delay);
+    }
+  }
+}
