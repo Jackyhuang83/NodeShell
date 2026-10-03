@@ -21,14 +21,14 @@ describe("isCorsOriginAllowed", () => {
   it("allows the externally forwarded same origin", () => {
     const req = request({
       "x-forwarded-proto": "https",
-      "x-forwarded-host": "termix.example",
+      "x-forwarded-host": "nodeshell.example",
     });
-    expect(isCorsOriginAllowed(req, "https://termix.example")).toBe(true);
+    expect(isCorsOriginAllowed(req, "https://nodeshell.example")).toBe(true);
   });
 
-  it("allows any origin when no allowlist is configured (self-hosted default)", () => {
-    const req = request({ host: "termix.example" });
-    expect(isCorsOriginAllowed(req, "https://anything.example")).toBe(true);
+  it("rejects cross-origin requests when no allowlist is configured", () => {
+    const req = request({ host: "nodeshell.example" });
+    expect(isCorsOriginAllowed(req, "https://anything.example")).toBe(false);
   });
 
   it("allows an explicitly configured origin", () => {
@@ -38,7 +38,7 @@ describe("isCorsOriginAllowed", () => {
 
   it("rejects an unlisted origin once an allowlist is configured", () => {
     process.env.CORS_ALLOWED_ORIGINS = "https://portal.example";
-    const req = request({ host: "termix.example" });
+    const req = request({ host: "nodeshell.example" });
     expect(isCorsOriginAllowed(req, "https://attacker.example")).toBe(false);
   });
 });
