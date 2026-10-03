@@ -98,12 +98,13 @@ describe("verifyPluginArtifact", () => {
 });
 
 describe("requireSignedPlugins", () => {
-  it("is on only for the exact value true", () => {
+  it("is always enabled in NodeShell", () => {
     const before = process.env.TERMIX_REQUIRE_SIGNED_PLUGINS;
-    process.env.TERMIX_REQUIRE_SIGNED_PLUGINS = "true";
-    expect(requireSignedPlugins()).toBe(true);
-    process.env.TERMIX_REQUIRE_SIGNED_PLUGINS = "1";
-    expect(requireSignedPlugins()).toBe(false);
+    for (const value of [undefined, "false", "0", "1", "true"]) {
+      if (value === undefined) delete process.env.TERMIX_REQUIRE_SIGNED_PLUGINS;
+      else process.env.TERMIX_REQUIRE_SIGNED_PLUGINS = value;
+      expect(requireSignedPlugins()).toBe(true);
+    }
     if (before === undefined) delete process.env.TERMIX_REQUIRE_SIGNED_PLUGINS;
     else process.env.TERMIX_REQUIRE_SIGNED_PLUGINS = before;
   });
