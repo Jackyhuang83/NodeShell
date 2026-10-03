@@ -129,36 +129,6 @@ jobs:
       - name: Regenerate lockfile for reduced workspaces
         run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
 
-      - name: Add NodeShell CI
-        run: |
-          mkdir -p .github/workflows
-          cat > .github/workflows/ci.yml <<'EOF'
-          name: NodeShell CI
-
-          on:
-            push:
-              branches: [main, security-baseline]
-            pull_request:
-              branches: [main]
-
-          permissions:
-            contents: read
-
-          jobs:
-            verify:
-              runs-on: ubuntu-latest
-              timeout-minutes: 30
-              steps:
-                - uses: actions/checkout@v4
-                - uses: actions/setup-node@v4
-                  with:
-                    node-version: "22.12.0"
-                    cache: npm
-                - run: npm ci --no-audit --no-fund
-                - run: npm run type-check
-                - run: npm run build
-          EOF
-
       - name: Commit security baseline
         run: |
           git config user.name "NodeShell Bootstrap"
