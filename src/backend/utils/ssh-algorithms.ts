@@ -102,6 +102,9 @@ export function buildSSHAlgorithms(
     "aes256-ctr",
     "aes192-ctr",
     "aes128-ctr",
+    "aes256-cbc",
+    "aes192-cbc",
+    "aes128-cbc",
   ]);
 
   if (allowLegacy) {

@@ -18,10 +18,13 @@ import {
   type InteractiveDeps,
 } from "./interactive.js";
 import type { MetricsLogger } from "./log.js";
+import { registerManagerRoutes } from "./managers/index.js";
+import { AccessDeniedError } from "./managers/route-helpers.js";
 import type { HealthCheckEvent } from "./managers/types.js";
 import type { MetricsPoller } from "./poller.js";
 import { sqlTimestamp, type HostMetricsRepository } from "./repository.js";
 import { sessionKey, type MetricsSessions } from "./sessions.js";
+import { sudoPasswordOf } from "./helpers.js";
 
 export interface RouteDeps {
   ctx: PluginContext;

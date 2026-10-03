@@ -346,7 +346,7 @@ registerCredentialBulkRoutes(
  * /credentials/{id}:
  *   get:
  *     summary: Get a specific credential
- *     description: Retrieves credential metadata. Stored secrets are never returned.
+ *     description: Retrieves a specific credential by its ID, including secrets.
  *     tags:
  *       - Credentials
  *     parameters:
@@ -395,7 +395,9 @@ router.get(
 
       const output = formatCredentialOutput(credential);
 
-      output.hasPassword = !!credential.password;
+      if (credential.password) {
+        output.password = credential.password;
+      }
       output.hasKey = !!credential.key;
       output.hasKeyPassword = !!credential.keyPassword;
       if (credential.publicKey) {
@@ -403,6 +405,9 @@ router.get(
       }
       if (credential.certPublicKey) {
         output.certPublicKey = credential.certPublicKey;
+      }
+      if (credential.keyPassword) {
+        output.keyPassword = credential.keyPassword;
       }
 
       res.json(output);

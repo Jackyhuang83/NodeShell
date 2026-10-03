@@ -406,7 +406,7 @@
             "type": "boolean",
             "labelKey": "settings.host.enableCommandHistory.label",
             "descriptionKey": "settings.host.enableCommandHistory.description",
-            "default": false
+            "default": true
           },
           {
             "key": "inheritAppearance",

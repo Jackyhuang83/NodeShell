@@ -104,20 +104,6 @@ import {
 const router = express.Router();
 router.use(rejectSharedCopyWrites("host", /^\/db\/host\/(\d+)$/));
 
-router.use((req, res, next) => {
-  const blockedSecretRead =
-    req.method === "GET" &&
-    (/^\/db\/host\/\d+\/password$/.test(req.path) ||
-      /^\/db\/host\/\d+\/export$/.test(req.path) ||
-      req.path === "/db/hosts/export");
-
-  if (blockedSecretRead) {
-    return res.status(404).json({ error: "Not found" });
-  }
-
-  next();
-});
-
 const upload = multer({ storage: multer.memoryStorage() });
 
 /**
@@ -651,13 +637,6 @@ router.post(
       return res
         .status(400)
         .json({ error: "That auth type cannot be used for Quick Connect" });
-    }
-
-    if (authType === "credential") {
-      return res.status(400).json({
-        error:
-          "Saved credentials are disabled in Quick Connect until backend-only references are complete.",
-      });
     }
 
     try {
