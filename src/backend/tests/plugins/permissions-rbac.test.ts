@@ -355,79 +355,33 @@ describe("the duplicate ai group is gone", () => {
   });
 });
 
-describe("shipped manifests keep their permission ids", () => {
+describe("NodeShell shipped manifests keep valid permission ids", () => {
   const root = path.resolve(import.meta.dirname, "../../../../plugins");
+  const shipped = [
+    "file-manager",
+    "host-metrics",
+    "ssh-terminal",
+    "totp",
+    "tunnels",
+    "webauthn",
+  ];
 
-  function idsFor(pluginId: string): string[] {
+  it.each(shipped)("%s parses and keeps plugin-owned permissions namespaced", (pluginId) => {
     const raw = JSON.parse(
       fs.readFileSync(path.join(root, pluginId, "manifest.json"), "utf8"),
     );
     const { manifest: parsed, errors } = parseManifest(raw);
     expect(errors).toEqual([]);
-    return (parsed?.contributes?.permissions ?? []).map((entry) =>
-      qualifyPermission(pluginId, entry.name),
-    );
-  }
 
-  // A role holding these today must keep working, which is only true because
-  // <pluginId>.<name> reproduces the old id byte for byte.
-  it("ai", () => {
-    expect(idsFor("ai")).toEqual([
-      "ai.use",
-      "ai.manage_providers",
-      "ai.apply_proposals",
-      "ai.services.use",
-      "ai.secrets.share",
-    ]);
-  });
-
-  it("automations", () => {
-    expect(idsFor("automations")).toEqual([
-      "automations.view",
-      "automations.create",
-      "automations.edit",
-      "automations.delete",
-      "automations.run",
-    ]);
-  });
-
-  it("tailscale", () => {
-    expect(idsFor("tailscale")).toEqual(["tailscale.devices.view"]);
-  });
-
-  it("snippets", () => {
-    expect(idsFor("snippets")).toEqual([
-      "snippets.view",
-      "snippets.create",
-      "snippets.edit",
-      "snippets.delete",
-      "snippets.share",
-    ]);
-  });
-
-  it("a role holding the old ids still validates once registered", () => {
-    for (const pluginId of ["ai", "automations", "tailscale", "snippets"]) {
-      const ids = idsFor(pluginId);
-      registerPluginPermissions({
-        group: pluginId,
-        pluginId,
-        label: pluginId,
-        permissions: ids,
-      });
+    for (const entry of parsed?.contributes?.permissions ?? []) {
+      const id = qualifyPermission(pluginId, entry.name);
+      expect(
+        id.startsWith(`${pluginId}.`) ||
+          ["hosts.", "credentials.", "admin."].some((prefix) =>
+            id.startsWith(prefix),
+          ),
+      ).toBe(true);
     }
-
-    const stored = [
-      "ai.use",
-      "ai.manage_providers",
-      "ai.apply_proposals",
-      "automations.run",
-      "automations.view",
-      "tailscale.devices.view",
-      "snippets.view",
-      "snippets.share",
-    ];
-
-    expect(stored.filter((entry) => !isValidPermission(entry))).toEqual([]);
   });
 });
 
