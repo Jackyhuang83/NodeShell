@@ -1,0 +1,168 @@
+name: Bootstrap NodeShell security baseline
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/bootstrap-security-baseline.yml"
+      - "scripts/nodeshell-phase1a-security-baseline.py"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nodeshell-security-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout NodeShell
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare tools
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.12.0"
+
+      - name: Save NodeShell patcher
+        run: cp scripts/nodeshell-phase1a-security-baseline.py /tmp/nodeshell-phase1a.py
+
+      - name: Clone audited Termix commit
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/Termix-SSH/Termix.git /tmp/termix
+          git -C /tmp/termix checkout --detach 5786eaccbb6134d77a567d4abfb876953730d07a
+          test "$(git -C /tmp/termix rev-parse HEAD)" = "5786eaccbb6134d77a567d4abfb876953730d07a"
+
+      - name: Rebuild security-baseline from audited source
+        run: |
+          git fetch origin security-baseline
+          git switch security-baseline
+          git rm -rf . >/dev/null 2>&1 || true
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+
+          rsync -a /tmp/termix/ ./             --exclude='.git/'             --exclude='.github/'             --exclude='charts/'             --exclude='Casks/'             --exclude='packaging/'             --exclude='docs/'             --exclude='crowdin.yml'             --exclude='FUNDING.json'             --exclude='RELEASE_NOTES.md'             --exclude='CONTRIBUTING.md'
+
+          for plugin in plugins/*; do
+            [ -d "$plugin" ] || continue
+            case "$(basename "$plugin")" in
+              ssh-terminal|file-manager|tunnels|host-metrics|totp|webauthn) ;;
+              *) rm -rf "$plugin" ;;
+            esac
+          done
+
+          cp /tmp/nodeshell-phase1a.py scripts/nodeshell-phase1a-security-baseline.py
+          python3 scripts/nodeshell-phase1a-security-baseline.py . --force
+
+      - name: Apply NodeShell identity and attribution
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          package = Path("package.json")
+          data = json.loads(package.read_text())
+          data["name"] = "nodeshell"
+          data["version"] = "0.1.0-alpha.1"
+          data["description"] = "Privacy-first self-hosted SSH and server manager."
+          package.write_text(json.dumps(data, indent=2) + "\n")
+          PY
+
+          cat > README.md <<'EOF'
+          # NodeShell
+
+          **Privacy-first, self-hosted SSH & server manager.**
+
+          NodeShell is an independent project derived from
+          [Termix](https://github.com/Termix-SSH/Termix). The initial security
+          baseline is pinned to upstream commit
+          `5786eaccbb6134d77a567d4abfb876953730d07a`.
+
+          > **Status:** early security-baseline development. Do not expose this
+          > build directly to the public Internet.
+
+          ## v0.1 scope
+
+          - SSH terminal
+          - SFTP without automatic sudo escalation
+          - SSH tunnels bound to loopback
+          - read-only server metrics
+          - TOTP
+          - WebAuthn / passkeys
+
+          Stored SSH credentials are intended to be usable by the backend
+          without being readable back through the browser.
+
+          ## Upstream and license
+
+          NodeShell contains code derived from Termix, Copyright 2025 Luke
+          Gustafson, licensed under Apache License 2.0. See [LICENSE](LICENSE)
+          and [UPSTREAM.md](UPSTREAM.md).
+          EOF
+
+          cat > UPSTREAM.md <<'EOF'
+          # Upstream attribution
+
+          NodeShell began from selected source code from
+          [Termix](https://github.com/Termix-SSH/Termix).
+
+          - Audited/imported upstream commit:
+            `5786eaccbb6134d77a567d4abfb876953730d07a`
+          - Upstream commit date: 2026-10-03
+          - Upstream license: Apache License 2.0
+          - Upstream copyright: Copyright 2025 Luke Gustafson
+
+          NodeShell is an independent project and is not an official Termix
+          project.
+
+          The initial baseline changes security defaults, deployment exposure,
+          SSH host-key verification, credential readback, SSH algorithm policy,
+          plugin surface, SFTP privilege escalation, tunnel binding, and
+          metrics management behavior.
+          EOF
+
+      - name: Regenerate lockfile for reduced workspaces
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Add NodeShell CI
+        run: |
+          mkdir -p .github/workflows
+          cat > .github/workflows/ci.yml <<'EOF'
+          name: NodeShell CI
+
+          on:
+            push:
+              branches: [main, security-baseline]
+            pull_request:
+              branches: [main]
+
+          permissions:
+            contents: read
+
+          jobs:
+            verify:
+              runs-on: ubuntu-latest
+              timeout-minutes: 30
+              steps:
+                - uses: actions/checkout@v4
+                - uses: actions/setup-node@v4
+                  with:
+                    node-version: "22.12.0"
+                    cache: npm
+                - run: npm ci --no-audit --no-fund
+                - run: npm run type-check
+                - run: npm run build
+          EOF
+
+      - name: Commit security baseline
+        run: |
+          git config user.name "NodeShell Bootstrap"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: establish NodeShell Phase 1A security baseline"
+          git push --force-with-lease origin security-baseline
