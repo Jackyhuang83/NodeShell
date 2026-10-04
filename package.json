@@ -5,7 +5,7 @@
     "packages/*",
     "plugins/*"
   ],
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "Privacy-first self-hosted SSH and server manager.",
   "author": "Karmaa",
   "main": "electron/main.cjs",
