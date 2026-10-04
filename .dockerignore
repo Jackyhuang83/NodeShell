@@ -31,15 +31,12 @@ Thumbs.db
 .gitignore
 
 README.md
-CONTRIBUTING.md
 LICENSE
 
 docs/repo-images/
 
 uploads/
 
-electron/
-electron-builder.json
 
 *.log
 *.tmp
