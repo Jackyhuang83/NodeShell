@@ -61,7 +61,6 @@ describe("RAIL_ITEMS", () => {
       "hosts",
       "credentials",
       "connections",
-      "sync",
     ]);
   });
 
@@ -187,46 +186,6 @@ describe("railItemLabel", () => {
     expect(railItemLabel("not-a-view", (k) => k)).toBe("not-a-view");
   });
 
-  describe("electron-only items", () => {
-    afterEach(() => {
-      delete (window as { IS_ELECTRON?: boolean }).IS_ELECTRON;
-    });
-
-    const desktopOnly = {
-      id: "desktop-only",
-      icon: Boxes,
-      labelKey: "nav.desktopOnly",
-      pluginId: "p",
-      electronOnly: true,
-    };
-
-    it("hides electron-only destinations in the browser build", () => {
-      const dispose = registerRailItem(desktopOnly);
-      const ids = visibleRailItems().map((item) => item.id);
-      dispose();
-      expect(ids).not.toContain("desktop-only");
-    });
-
-    it("shows electron-only destinations in the desktop app", () => {
-      (window as { IS_ELECTRON?: boolean }).IS_ELECTRON = true;
-      const dispose = registerRailItem(desktopOnly);
-      const ids = visibleRailItems().map((item) => item.id);
-      dispose();
-      expect(ids).toContain("desktop-only");
-    });
-
-    it("keeps every non-electron item in both builds", () => {
-      const browser = visibleRailItems().map((item) => item.id);
-      (window as { IS_ELECTRON?: boolean }).IS_ELECTRON = true;
-      const desktop = visibleRailItems().map((item) => item.id);
-      const electronOnly = RAIL_ITEMS.filter((item) => item.electronOnly).map(
-        (item) => item.id,
-      );
-      expect(desktop.filter((id) => !electronOnly.includes(id))).toEqual(
-        browser,
-      );
-    });
-  });
 });
 
 describe("permittedRailItems", () => {

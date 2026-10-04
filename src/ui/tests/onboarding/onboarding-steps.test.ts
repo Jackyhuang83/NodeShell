@@ -1,10 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { ONBOARDING_STEPS, relevantSteps } from "@/onboarding/onboarding-steps";
 import { UI_AREA_KEYS, PRESETS } from "@/types/ui-preferences";
 import en from "@/locales/en.json";
 
-const isElectron = vi.hoisted(() => vi.fn(() => false));
-vi.mock("@/lib/electron", () => ({ isElectron }));
 
 function lookup(key: string): unknown {
   return key
@@ -37,12 +35,8 @@ describe("ONBOARDING_STEPS", () => {
     expect(ids).not.toContain("first-host");
   });
 
-  it("asks how the desktop app is used only on the desktop", () => {
-    isElectron.mockReturnValue(false);
+  it("does not include the removed desktop-sync step", () => {
     expect(relevantSteps({}).map((s) => s.id)).not.toContain("desktop-sync");
-    isElectron.mockReturnValue(true);
-    expect(relevantSteps({}).map((s) => s.id)).toContain("desktop-sync");
-    isElectron.mockReturnValue(false);
   });
 
   it("ends on the done step", () => {

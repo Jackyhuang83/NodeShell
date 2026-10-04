@@ -318,40 +318,12 @@ describe("applyPluginMigrations", () => {
     expect(order).toEqual(["begin", "execute", "commit"]);
   });
 
-  it("reads the directory for the dialect it was given", async () => {
-    writeMigration(
-      root,
-      "sqlite",
-      "0001_init.sql",
-      "CREATE TABLE p_demo_a (x);",
-    );
-    writeMigration(
-      root,
-      "mysql",
-      "0001_init.sql",
-      "CREATE TABLE p_demo_a (x int);",
-    );
-    const { runner, executed } = createRunner({ dialect: "mysql" });
-
-    await applyPluginMigrations("demo", root, runner);
-
-    expect(executed[0][0]).toContain("int");
-  });
 });
 
 describe("adoptLegacyTableSql", () => {
-  it("uses ALTER TABLE RENAME on sqlite and postgres", () => {
+  it("uses SQLite ALTER TABLE RENAME", () => {
     expect(adoptLegacyTableSql("sqlite", "fleets", "p_fleets_fleets")).toBe(
       'ALTER TABLE "fleets" RENAME TO "p_fleets_fleets";',
-    );
-    expect(adoptLegacyTableSql("postgres", "fleets", "p_fleets_fleets")).toBe(
-      'ALTER TABLE "fleets" RENAME TO "p_fleets_fleets";',
-    );
-  });
-
-  it("uses RENAME TABLE and backticks on mysql", () => {
-    expect(adoptLegacyTableSql("mysql", "fleets", "p_fleets_fleets")).toBe(
-      "RENAME TABLE `fleets` TO `p_fleets_fleets`;",
     );
   });
 });

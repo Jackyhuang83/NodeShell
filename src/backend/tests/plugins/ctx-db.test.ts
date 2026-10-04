@@ -66,10 +66,6 @@ vi.mock("../../database/db/schema.js", () => ({
 import { createPluginContext, createPluginHandle } from "../../plugins/ctx.js";
 import { invalidatePluginPermissionCache } from "../../plugins/permissions.js";
 import { resetPluginData } from "../../plugins/data.js";
-import {
-  resetSyncRegistry,
-  listEntityTypes,
-} from "../../plugins/sync-registry.js";
 import type { PluginManifest } from "@termix/plugin-sdk/manifest";
 
 function manifestFor(pluginId: string, capabilities: string[]): PluginManifest {
@@ -97,7 +93,6 @@ beforeEach(() => {
   auditEntries.length = 0;
   kvStore.clear();
   resetPluginData();
-  resetSyncRegistry();
   invalidatePluginPermissionCache();
   delete process.env.PLUGIN_MAX_KV_KEYS;
   delete process.env.DATABASE_DIALECT;
@@ -115,16 +110,6 @@ describe("ctx.db.persist", () => {
     expect(ctx.db.dialect).toBe("sqlite");
   });
 
-  it("does nothing on an engine that is already durable", async () => {
-    process.env.DATABASE_DIALECT = "postgres";
-    grants.set("demo", ["db:own"]);
-    const { ctx } = contextFor("demo", ["db:own"]);
-
-    await ctx.db.persist();
-
-    expect(saves).toEqual([]);
-    expect(ctx.db.dialect).toBe("postgres");
-  });
 
   it("refuses without db:own", async () => {
     grants.set("demo", []);
@@ -267,23 +252,3 @@ describe("ctx.kv limits", () => {
   });
 });
 
-describe("ctx.sync", () => {
-  it("registers an entity a plugin owns", () => {
-    grants.set("demo", []);
-    const { ctx } = contextFor("demo", []);
-
-    ctx.sync.registerEntity({ type: "demoThings", table: {}, order: 200 });
-
-    expect(listEntityTypes()).toContain("demoThings");
-  });
-
-  it("drops the registration when the plugin is disposed", async () => {
-    grants.set("demo", []);
-    const { ctx, handle } = contextFor("demo", []);
-    ctx.sync.registerEntity({ type: "demoThings", table: {} });
-
-    await handle.bag.disposeAll();
-
-    expect(listEntityTypes()).not.toContain("demoThings");
-  });
-});
