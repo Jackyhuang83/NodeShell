@@ -8,7 +8,7 @@ import {
   createCurrentRoleRepository,
   createCurrentUserRepository,
 } from "../repositories/factory.js";
-import { isLoopbackRequest } from "./desktop-auto-session.js";
+import { isLoopbackRequest } from "../../utils/loopback-request.js";
 import { resetUserPassword } from "./user-password-reset-routes.js";
 
 const router = express.Router();
