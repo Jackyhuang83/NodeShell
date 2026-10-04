@@ -1041,13 +1041,7 @@ export {
 } from "@/api/credentials-api";
 
 // ============================================================================
-export type { UptimeInfo, RecentActivityItem } from "@/api/dashboard-api";
-export {
-  getUptime,
-  getRecentActivity,
-  logActivity,
-  resetRecentActivity,
-} from "@/api/dashboard-api";
+export { logActivity } from "@/api/dashboard-api";
 
 // ============================================================================
 
