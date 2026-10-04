@@ -13,7 +13,6 @@ import {
 export interface TerminalClientSettings {
   sessionTimeoutMinutes: number;
   sessionPersistence: boolean;
-  commandHistoryEnabled: boolean;
   touchInput: TouchInputSettings;
   user: TerminalUserSettings;
 }
@@ -35,37 +34,6 @@ export async function enableHostAutoTmux(
   hostId: number,
 ): Promise<void> {
   await api.put(`/hosts/${hostId}/auto-tmux`, { enabled: true });
-}
-
-export async function saveCommandToHistory(
-  api: PluginApiClient,
-  hostId: number,
-  command: string,
-): Promise<void> {
-  await api.post("/command-history", { hostId, command });
-}
-
-export async function getCommandHistory(
-  api: PluginApiClient,
-  hostId: number,
-): Promise<string[]> {
-  const { data } = await api.get<string[]>(`/command-history/${hostId}`);
-  return Array.isArray(data) ? data : [];
-}
-
-export async function deleteCommandFromHistory(
-  api: PluginApiClient,
-  hostId: number,
-  command: string,
-): Promise<void> {
-  await api.post("/command-history/delete", { hostId, command });
-}
-
-export async function clearCommandHistory(
-  api: PluginApiClient,
-  hostId: number,
-): Promise<void> {
-  await api.delete(`/command-history/${hostId}`);
 }
 
 /** A host-scope setting of this plugin, as the host payload carries it. */
