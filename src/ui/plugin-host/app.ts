@@ -57,8 +57,6 @@ import {
   toPluginHostRecord,
 } from "./bridge";
 import { shell, shellHost, tabsApi } from "./shell-bridge";
-import { onRemoteServerChange, remoteServerUrl } from "./desktop";
-import { isElectron } from "@/lib/electron";
 import { withPluginScope, withIconBoundary, guardCallback } from "./scope";
 import {
   scopeHostArgs,
@@ -547,9 +545,9 @@ export function createPluginApp(
     },
 
     desktop: {
-      available: isElectron(),
-      remoteServerUrl,
-      onRemoteServerChange: (listener) => track(onRemoteServerChange(listener)),
+      available: false,
+      remoteServerUrl: async () => null,
+      onRemoteServerChange: () => () => {},
     },
 
     onSettingsChanged: (listener) => {
