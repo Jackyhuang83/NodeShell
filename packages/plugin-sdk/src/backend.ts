@@ -1111,6 +1111,20 @@ export interface PluginSsh {
   ) => Promise<PluginSshHost | null>;
 
   /**
+   * Resolves a saved SSH credential for an unsaved Quick Connect target.
+   * The returned object is redacted; core keeps the decrypted secret in
+   * server memory and restores it only when this exact object is handed back
+   * to ctx.ssh.prepare/connect/openTransport.
+   */
+  resolveQuickConnectCredential: (input: {
+    credentialId: number;
+    ip: string;
+    port: number;
+    username?: string | null;
+    sshOptions?: HostSshOptions | null;
+  }) => Promise<PluginSshHost | null>;
+
+  /**
    * Lower level: fills an ssh2 config for a client the plugin drives itself,
    * for transports with their own prompt flow. Never connects.
    */
