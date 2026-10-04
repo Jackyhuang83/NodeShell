@@ -16,6 +16,51 @@ if [ "$(id -u)" = "0" ]; then
 
         chown -R node:node /app/data /app/uploads /app/html /tmp/nginx 2>/dev/null || true
 
+        # Host secret files can remain root:root 0600. Copy only the four
+        # NodeShell runtime secrets into an in-container directory owned by the
+        # unprivileged service account before dropping privileges.
+        RUNTIME_SECRET_DIR=/run/nodeshell-runtime-secrets
+        rm -rf "$RUNTIME_SECRET_DIR"
+        mkdir -p "$RUNTIME_SECRET_DIR"
+        chown node:node "$RUNTIME_SECRET_DIR"
+        chmod 700 "$RUNTIME_SECRET_DIR"
+
+        copy_runtime_secret() {
+            src="$1"
+            name="$2"
+            if [ -z "$src" ]; then
+                return 0
+            fi
+            if [ ! -r "$src" ]; then
+                echo "ERROR: configured secret file is not readable: $src" >&2
+                exit 1
+            fi
+            cp -- "$src" "$RUNTIME_SECRET_DIR/$name"
+            chown node:node "$RUNTIME_SECRET_DIR/$name"
+            chmod 400 "$RUNTIME_SECRET_DIR/$name"
+        }
+
+        if [ -n "${JWT_SECRET_FILE:-}" ]; then
+            copy_runtime_secret "$JWT_SECRET_FILE" jwt_secret
+            JWT_SECRET_FILE="$RUNTIME_SECRET_DIR/jwt_secret"
+            export JWT_SECRET_FILE
+        fi
+        if [ -n "${DATABASE_KEY_FILE:-}" ]; then
+            copy_runtime_secret "$DATABASE_KEY_FILE" database_key
+            DATABASE_KEY_FILE="$RUNTIME_SECRET_DIR/database_key"
+            export DATABASE_KEY_FILE
+        fi
+        if [ -n "${ENCRYPTION_KEY_FILE:-}" ]; then
+            copy_runtime_secret "$ENCRYPTION_KEY_FILE" encryption_key
+            ENCRYPTION_KEY_FILE="$RUNTIME_SECRET_DIR/encryption_key"
+            export ENCRYPTION_KEY_FILE
+        fi
+        if [ -n "${INTERNAL_AUTH_TOKEN_FILE:-}" ]; then
+            copy_runtime_secret "$INTERNAL_AUTH_TOKEN_FILE" internal_auth_token
+            INTERNAL_AUTH_TOKEN_FILE="$RUNTIME_SECRET_DIR/internal_auth_token"
+            export INTERNAL_AUTH_TOKEN_FILE
+        fi
+
         echo "User node is now UID: $PUID, GID: $PGID"
 
         exec gosu node:node "$0" "$@"
