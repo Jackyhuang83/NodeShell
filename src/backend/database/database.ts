@@ -16,6 +16,7 @@ import bodyParser from "body-parser";
 import multer from "multer";
 import cookieParser from "cookie-parser";
 import userRoutes from "./routes/users.js";
+import internalAdminRoutes from "./routes/internal-admin-routes.js";
 import hostRoutes from "./routes/host.js";
 import credentialsRoutes from "./routes/credentials.js";
 import sshAuthRoutes from "./routes/ssh-auth-routes.js";
@@ -1527,6 +1528,10 @@ app.post("/database/restore", requireAdmin, async (req, res) => {
     });
   }
 });
+
+// Internal Owner operations never pass through the public reverse proxy.
+// The router itself also requires true loopback plus INTERNAL_AUTH_TOKEN.
+app.use("/internal/admin", internalAdminRoutes);
 
 app.use("/users", userRoutes);
 app.use("/host", hostRoutes);
