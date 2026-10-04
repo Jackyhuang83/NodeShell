@@ -250,6 +250,8 @@ const SENSITIVE_FIELDS = [
   "keyPassword",
   "password",
   "sudoPassword",
+  // Legacy rows/imports may still carry this removed proxy secret.
+  "socks5Password",
 ];
 
 export function stripSensitiveFields(
