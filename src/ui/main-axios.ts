@@ -8,7 +8,6 @@ import axios, {
 import { toast } from "sonner";
 import i18n from "i18next";
 import { getBasePath } from "@/lib/base-path";
-import { isElectron } from "@/lib/electron";
 import { clearTermixSessionStorage } from "@/shell/TabContext";
 import type { SSHHost } from "@/types/index";
 
@@ -121,24 +120,10 @@ interface UserCount {
   count: number;
 }
 
-type ElectronApi = {
-  isElectron?: boolean;
-  getSetting?: (key: string) => Promise<string | null | undefined>;
-  setSetting?: (key: string, value: string) => Promise<void>;
-};
-
-type ElectronWindow = Window &
-  typeof globalThis & {
-    IS_ELECTRON?: boolean;
-    electronAPI?: ElectronApi;
-    ReactNativeWebView?: unknown;
-  };
-
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
 
-export { isElectron };
 
 function getLoggerForService(serviceName: string) {
   if (serviceName.includes("SSH") || serviceName.includes("ssh")) {
@@ -157,96 +142,21 @@ function getLoggerForService(serviceName: string) {
   }
 }
 
-const electronSettingsCache = new Map<string, string>();
-
-if (isElectron()) {
-  (async () => {
-    try {
-      const electronAPI = (window as ElectronWindow).electronAPI;
-
-      if (electronAPI?.getSetting) {
-        const settingsToLoad = ["rightClickCopyPaste", "copyOnSelect"];
-        for (const key of settingsToLoad) {
-          const value = await electronAPI.getSetting(key);
-          if (value !== null && value !== undefined) {
-            // Only populate if not already set to prevent overwriting new values during login
-            if (!localStorage.getItem(key)) {
-              electronSettingsCache.set(key, value);
-              localStorage.setItem(key, value);
-              console.log(`[Electron] Loaded setting ${key} from main process`);
-            } else {
-              // Even if we don't overwrite localStorage, update the cache
-              electronSettingsCache.set(key, localStorage.getItem(key)!);
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.error("[Electron] Failed to load settings cache:", error);
-    }
-  })();
-}
-
 export function setCookie(
   name: string,
   value: string,
   days = 7,
-): void | Promise<void> {
-  if (isElectron()) {
-    try {
-      if (name === "jwt") {
-        return;
-      }
-
-      const electronAPI = (window as ElectronWindow).electronAPI;
-
-      if (electronAPI?.setSetting) {
-        electronSettingsCache.set(name, value);
-        localStorage.setItem(name, value);
-        electronAPI.setSetting(name, value).catch((err: Error) => {
-          console.error(`[Electron] Failed to persist setting ${name}:`, err);
-        });
-      }
-
-      console.log(`[Electron] Set setting: ${name}`);
-    } catch (error) {
-      console.error(`[Electron] Failed to set setting: ${name}`, error);
-    }
-  } else {
-    const expires = new Date(Date.now() + days * 864e5).toUTCString();
-    document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/`;
-  }
+): void {
+  const expires = new Date(Date.now() + days * 864e5).toUTCString();
+  document.cookie =
+    `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/; SameSite=Strict`;
 }
 
 export function getCookie(name: string): string | undefined {
-  if (isElectron()) {
-    try {
-      if (name === "jwt") {
-        return undefined;
-      }
-
-      if (electronSettingsCache.has(name)) {
-        return electronSettingsCache.get(name);
-      }
-
-      const token = localStorage.getItem(name) || undefined;
-      if (token) {
-        electronSettingsCache.set(name, token);
-      }
-      console.log(`[Electron] Get setting: ${name} = ${token}`);
-      return token;
-    } catch (error) {
-      console.error(`[Electron] Failed to get setting: ${name}`, error);
-      return undefined;
-    }
-  } else {
-    const value = `; ${document.cookie}`;
-    const parts = value.split(`; ${name}=`);
-    const encodedToken =
-      parts.length === 2 ? parts.pop()?.split(";").shift() : undefined;
-    const token = encodedToken ? decodeURIComponent(encodedToken) : undefined;
-    return token;
-  }
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  const encoded = parts.length === 2 ? parts.pop()?.split(";").shift() : undefined;
+  return encoded ? decodeURIComponent(encoded) : undefined;
 }
 
 let userWasAuthenticated = false;
@@ -264,23 +174,17 @@ function clearClientAuthState(): void {
   clearTermixSessionStorage();
   try {
     localStorage.removeItem("jwt");
+    localStorage.removeItem("nodeshell_auth");
     localStorage.removeItem("termix_auth");
   } catch {
     // localStorage may be unavailable in restricted contexts.
   }
 
-  if (isElectron()) {
-    const electronAPI = (
-      window as unknown as {
-        electronAPI?: { clearSessionCookies?: () => Promise<void> };
-      }
-    ).electronAPI;
-    electronAPI?.clearSessionCookies?.().catch(() => {});
-  } else if (typeof window !== "undefined") {
-    const isSecure = window.location.protocol === "https:";
-    document.cookie = isSecure
-      ? "jwt=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; Secure; SameSite=Lax"
-      : "jwt=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; SameSite=Lax";
+  if (typeof window !== "undefined") {
+    const secure = window.location.protocol === "https:";
+    document.cookie = secure
+      ? "jwt=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; Secure; SameSite=Strict"
+      : "jwt=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; SameSite=Strict";
   }
 }
 
@@ -353,7 +257,7 @@ function createApiInstance(
     }
 
     const unsafeMethod = ["POST", "PUT", "PATCH", "DELETE"].includes(method);
-    if (unsafeMethod && !isElectron()) {
+    if (unsafeMethod) {
       const csrfToken = getCookie("nodeshell_csrf");
       if (csrfToken) {
         if (config.headers.set) {
@@ -367,48 +271,9 @@ function createApiInstance(
     const deviceId = getDeviceId();
     if (deviceId) {
       if (config.headers.set) {
-        config.headers.set("X-Termix-Device-ID", deviceId);
+        config.headers.set("X-NodeShell-Device-ID", deviceId);
       } else {
-        config.headers["X-Termix-Device-ID"] = deviceId;
-      }
-    }
-
-    if (isElectron()) {
-      if (config.headers.set) {
-        config.headers.set("X-Electron-App", "true");
-      } else {
-        config.headers["X-Electron-App"] = "true";
-      }
-      const jwt = localStorage.getItem("jwt");
-      if (jwt) {
-        if (config.headers.set) {
-          config.headers.set("Authorization", `Bearer ${jwt}`);
-        } else {
-          config.headers["Authorization"] = `Bearer ${jwt}`;
-        }
-      }
-    }
-
-    if (
-      typeof window !== "undefined" &&
-      (window as ElectronWindow).ReactNativeWebView
-    ) {
-      let platform = "Unknown";
-      if (typeof navigator !== "undefined" && navigator.userAgent) {
-        if (navigator.userAgent.includes("Android")) {
-          platform = "Android";
-        } else if (
-          navigator.userAgent.includes("iPhone") ||
-          navigator.userAgent.includes("iPad") ||
-          navigator.userAgent.includes("iOS")
-        ) {
-          platform = "iOS";
-        }
-      }
-      if (config.headers.set) {
-        config.headers.set("User-Agent", `Termix-Mobile/${platform}`);
-      } else {
-        config.headers["User-Agent"] = `Termix-Mobile/${platform}`;
+        config.headers["X-NodeShell-Device-ID"] = deviceId;
       }
     }
 
@@ -572,10 +437,6 @@ function createApiInstance(
 // ============================================================================
 
 function isDev(): boolean {
-  if (isElectron()) {
-    return false;
-  }
-
   return (
     process.env.NODE_ENV === "development" &&
     (window.location.port === "3000" ||
@@ -606,76 +467,15 @@ export function getBackendUrl(path: string): string {
 }
 
 function getApiUrl(path: string, defaultPort: number): string {
-  const devMode = isDev();
-  const electronMode = isElectron();
-
-  if (electronMode) {
-    // The desktop app always talks to its embedded backend. The server it
-    // may be linked to is reached through createRemoteOriginApiInstance.
-    return `http://localhost:${defaultPort}${path}`;
-  } else if (devMode) {
+  if (isDev()) {
     if (!import.meta.env.VITE_API_HOST) {
       return `/__termix_api/${defaultPort}${path}`;
     }
     const protocol = window.location.protocol === "https:" ? "https" : "http";
     const sslPort = protocol === "https" ? 8443 : defaultPort;
-    const url = `${protocol}://${apiHost}:${sslPort}${path}`;
-    return url;
-  } else {
-    return getBasePath() + path;
+    return `${protocol}://${apiHost}:${sslPort}${path}`;
   }
-}
-
-// ============================================================================
-// PER-HOST ORIGIN ROUTING (Electron desktop only)
-// ============================================================================
-//
-// hostApi above always points at the embedded local backend. When a host's
-// connection origin resolves to "remote" (see src/ui/lib/connection-origin.ts),
-// the backend that holds that host's live session is the connected remote
-// server instead, so calls for that host must follow it there.
-//
-// These instances look up the linked server and its session on every
-// request, so linking or unlinking needs no reload.
-
-export function createRemoteOriginApiInstance(path: string): AxiosInstance {
-  const instance = axios.create({
-    headers: { "Content-Type": "application/json" },
-    timeout: 30000,
-  });
-
-  instance.interceptors.request.use(
-    async (config: InternalAxiosRequestConfig) => {
-      const { getLinkedSession } = await import("@/lib/linked-server");
-      const linked = await getLinkedSession();
-      config.baseURL = linked
-        ? `${linked.serverUrl}${path}`
-        : "http://no-server-configured";
-
-      if (config.headers.set) {
-        config.headers.set("X-Electron-App", "true");
-        if (linked)
-          config.headers.set("Authorization", `Bearer ${linked.token}`);
-      } else {
-        config.headers["X-Electron-App"] = "true";
-        if (linked) config.headers["Authorization"] = `Bearer ${linked.token}`;
-      }
-
-      return config;
-    },
-  );
-
-  return instance;
-}
-
-let remoteCoreApi: AxiosInstance | null = null;
-
-/** The linked server's core routes, unprefixed. */
-export function getRemoteCoreApi(): AxiosInstance {
-  if (!remoteCoreApi) {
-    remoteCoreApi = createRemoteOriginApiInstance("");
-  }
-  return remoteCoreApi;
+  return getBasePath() + path;
 }
 
 function initializeApiInstances() {
