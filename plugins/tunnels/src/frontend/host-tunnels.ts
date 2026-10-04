@@ -30,7 +30,7 @@ export function parseConnections(value: unknown): TunnelConnection[] {
 
 export function tunnelMode(
   _tunnel: Pick<TunnelConnection, "mode" | "tunnelType">,
-): "local" {
+): "local" | "remote" | "dynamic" {
   return "local";
 }
 
