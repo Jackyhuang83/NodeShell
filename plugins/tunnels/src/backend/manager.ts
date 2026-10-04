@@ -1,5 +1,5 @@
 import { createServer, Socket, type Server } from "node:net";
-import type { Client } from "ssh2";
+import type { Client, ClientChannel } from "ssh2";
 import type {
   PluginContext,
   PluginSshConnection,
@@ -462,12 +462,6 @@ export function createTunnelManager(ctx: PluginContext) {
     }
 
     try {
-      if (getTunnelScope(config) !== "s2s") {
-        throw new Error(
-          "Client tunnels must be started from the desktop app's local configuration",
-        );
-      }
-
       const runtime = await establish(config);
       connecting.delete(name);
 
