@@ -77,7 +77,10 @@ function sqliteSchemaSql(): string {
   if (cachedSqliteSchema) return cachedSqliteSchema;
 
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const dir = path.resolve(here, "../../../../..", "drizzle", "sqlite");
+  const dir = path.resolve(
+    here,
+    "../../fixtures/sqlite-schema-migrations",
+  );
   const files = fs
     .readdirSync(dir)
     .filter((name) => name.endsWith(".sql"))
