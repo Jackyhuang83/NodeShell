@@ -283,6 +283,7 @@ export function Auth({ onLogin }: AuthProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [setupToken, setSetupToken] = useState("");
   const [rememberMe, setRememberMe] = useState(() => {
     try {
       return localStorage.getItem("rememberMe") === "true";
@@ -815,9 +816,17 @@ export function Auth({ onLogin }: AuthProps) {
       toast.error(t("errors.passwordMismatch"));
       return;
     }
+    if (firstUser && !setupToken.trim()) {
+      toast.error(t("auth.setupTokenRequired", "Setup token is required"));
+      return;
+    }
     setLoading(true);
     try {
-      await registerUser(username.trim(), password);
+      await registerUser(
+        username.trim(),
+        password,
+        firstUser ? setupToken.trim() : undefined,
+      );
       const res = await loginUser(username.trim(), password, rememberMe);
       await finishLogin(res, "auth_component", {
         fallbackUsername: username.trim(),
@@ -1666,6 +1675,20 @@ export function Auth({ onLogin }: AuthProps) {
                     onSubmit={handleRegister}
                     className="flex flex-col gap-4"
                   >
+                    {firstUser && (
+                      <Field
+                        label={t("auth.setupToken", "Setup token")}
+                        htmlFor="reg-setup-token"
+                      >
+                        <PasswordInput
+                          id="reg-setup-token"
+                          value={setupToken}
+                          onChange={setSetupToken}
+                          placeholder="NODESHELL_SETUP_TOKEN"
+                          disabled={loading}
+                        />
+                      </Field>
+                    )}
                     <Field label={t("common.username")} htmlFor="reg-user">
                       <div className="relative">
                         <User className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
