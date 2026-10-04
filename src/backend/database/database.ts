@@ -39,6 +39,7 @@ import pluginRoutes from "./routes/plugins.js";
 import { createPluginAssetsRouter } from "../plugins/assets.js";
 import { getPluginRuntime } from "../plugins/index.js";
 import { createCorsMiddleware } from "../utils/cors-config.js";
+import { createCsrfProtectionMiddleware } from "../utils/csrf-protection.js";
 import { createCompressionMiddleware } from "../utils/compression-config.js";
 import fs from "fs";
 import path from "path";
@@ -98,6 +99,7 @@ const authenticateJWT = authManager.createAuthMiddleware();
 const requireAdmin = authManager.createAdminMiddleware();
 app.use(createCompressionMiddleware());
 app.use(createCorsMiddleware());
+app.use(createCsrfProtectionMiddleware());
 
 type SettingData = {
   key: string;
