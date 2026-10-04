@@ -144,7 +144,7 @@
           "labelKey": "settings.admin.commandHistoryEnabled.label",
           "descriptionKey": "settings.admin.commandHistoryEnabled.description",
           "group": "settings.admin.group.sessions",
-          "default": true
+          "default": false
         },
         {
           "key": "commandHistoryForNewHosts",
