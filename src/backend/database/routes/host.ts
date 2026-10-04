@@ -69,7 +69,6 @@ import {
   requiresPersonalHostAuthentication,
   resolveRecipientSharedHostAuthentication,
 } from "../../utils/shared-host-auth-resolver.js";
-import { rejectSharedCopyWrites } from "../../sync/shared-copy-guard.js";
 import { sshOptionsForWrite } from "../../hosts/ssh-options.js";
 import {
   applyDefaultsAfterHostWrite,
@@ -100,7 +99,6 @@ import {
 } from "./host-terminal-fields.js";
 
 const router = express.Router();
-router.use(rejectSharedCopyWrites("host", /^\/db\/host\/(\d+)$/));
 router.use((req, res, next) => {
   const blocked = req.method === "GET" && (/^\/db\/host\/\d+\/password$/.test(req.path) || /^\/db\/host\/\d+\/export$/.test(req.path) || req.path === "/db/hosts/export");
   if (blocked) return res.status(404).json({ error: "Not found" });
