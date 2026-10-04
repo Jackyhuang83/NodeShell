@@ -54,35 +54,74 @@ NodeShell v0.1 deliberately uses a smaller trust boundary than upstream:
 No passwords, SSH private keys, setup tokens, API keys, or service tokens belong
 in this repository.
 
-## First Owner setup
+## First secure initialization
 
-Build NodeShell, create a password file locally on the NodeShell server, and
-restrict it to the current operating-system user:
+NodeShell does not expose browser registration or browser password recovery.
+
+Create the four installation secrets on the NodeShell server. They remain
+`root:root` and mode `0600` on the host:
 
 ```bash
-printf '%s\n' 'replace-with-a-strong-password' > /tmp/nodeshell-owner-password
-chmod 600 /tmp/nodeshell-owner-password
-npm run admin:create-owner -- --username owner --password-file /tmp/nodeshell-owner-password
-rm -f /tmp/nodeshell-owner-password
+sudo install -d -m 700 /etc/nodeshell/secrets
+for name in jwt_secret database_key encryption_key internal_auth_token; do
+  openssl rand -hex 32 | sudo tee "/etc/nodeshell/secrets/$name" >/dev/null
+  sudo chown root:root "/etc/nodeshell/secrets/$name"
+  sudo chmod 600 "/etc/nodeshell/secrets/$name"
+done
 ```
 
-The CLI refuses plaintext `--password` arguments and refuses password files
-that are group/world accessible or symbolic links. It only succeeds while the
-database has no existing account.
+Set the HTTPS URL users will actually open. WebAuthn/passkeys use this as the
+fixed Origin and RP-ID security boundary:
+
+```bash
+export NODESHELL_PUBLIC_URL="https://ssh.example.com"
+```
+
+Start NodeShell:
+
+```bash
+docker compose -f docker/docker-compose.yml up -d
+```
+
+The management port remains bound to `127.0.0.1:8080`.
+
+Create the first Owner from inside the running container. The password is
+prompted with terminal echo disabled and is never accepted as a plaintext
+command-line argument:
+
+```bash
+docker exec -it nodeshell nodeshell admin create-owner --username admin
+```
+
+Check initialization state:
+
+```bash
+docker exec -it nodeshell nodeshell admin status
+```
+
+A password file can be used for non-interactive administration:
+
+```bash
+docker exec -it nodeshell nodeshell admin create-owner \
+  --username admin \
+  --password-file /path/inside/container/owner-password
+```
+
+Password files must be regular, non-symlink files and inaccessible to
+group/others (mode `0600` or stricter).
 
 ## Local Owner password recovery
 
-Recovery is deliberately unavailable from the browser. On the NodeShell server:
+Recovery is deliberately unavailable from the browser. Use the local container
+command:
 
 ```bash
-printf '%s\n' 'replace-with-a-new-strong-password' > /tmp/nodeshell-new-password
-chmod 600 /tmp/nodeshell-new-password
-npm run admin:reset-password -- --username owner --password-file /tmp/nodeshell-new-password
-rm -f /tmp/nodeshell-new-password
+docker exec -it nodeshell nodeshell admin reset-password --username admin
 ```
 
-If an old pre-migration password-wrapped encryption key cannot be recovered,
-the CLI refuses destructive recovery unless the operator explicitly adds
+For current v3 system-wrapped data keys, this preserves encrypted user data.
+A legacy password-wrapped key fails closed. NodeShell will not erase encrypted
+user data unless the operator deliberately repeats the command with
 `--confirm-data-wipe`.
 
 ## Recommended access path
@@ -108,10 +147,9 @@ SSH -> managed servers
 
 ## Development branches
 
-- `security-baseline` — audited Phase 1A baseline plus security fixes that were
-  developed in parallel
-- `phase1b-final` — final Phase 1B authentication/session/credential
-  hardening for `0.1.0-alpha.2`
+- `security-baseline` — CI-green finalized Phase 1B baseline
+- `phase1b-hardening` — final operator-channel, secret-handoff and WebAuthn
+  hardening candidate for `0.1.0-alpha.2`
 
 ## Upstream and license
 
