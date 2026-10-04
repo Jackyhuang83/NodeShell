@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect } from "react";
-import { AuthEnrollmentSections } from "./AuthEnrollmentSections";
 import { useTranslation } from "react-i18next";
 import { copyToClipboard } from "@/lib/clipboard";
 import {
@@ -529,7 +528,6 @@ export function UserProfilePanel({
   // User info
   const [userId, setUserId] = useState("");
   const [accountUsername, setAccountUsername] = useState(username ?? "");
-  const [accountTotpEnabled, setAccountTotpEnabled] = useState(false);
   const [userRole, setUserRole] = useState("");
   const [authMethod, setAuthMethod] = useState("");
   const [version, setVersion] = useState("");
@@ -653,7 +651,6 @@ export function UserProfilePanel({
         setLinkedAccount(linked);
         // A linked desktop is the account it is signed in to on the server.
         setAccountUsername(linked?.username || info.username);
-        setAccountTotpEnabled(info.totp_enabled ?? false);
         setUserRole(
           (linked ? linked.isAdmin : info.is_admin)
             ? t("newUi.sidebar.userProfile.roleAdministrator")
@@ -1331,25 +1328,6 @@ export function UserProfilePanel({
                       {authMethod || "—"}
                     </span>
                   </div>
-                  <div className="flex flex-col py-2">
-                    <span className="text-[10px] text-muted-foreground uppercase tracking-widest font-semibold">
-                      {t("newUi.sidebar.userProfile.twoFaLabel")}
-                    </span>
-                    <span className="flex items-center gap-1 mt-0.5">
-                      {accountTotpEnabled ? (
-                        <>
-                          <ShieldCheck className="size-3.5 text-accent-brand" />
-                          <span className="text-sm font-semibold text-accent-brand">
-                            {t("newUi.sidebar.userProfile.twoFaOn")}
-                          </span>
-                        </>
-                      ) : (
-                        <span className="text-sm font-semibold text-muted-foreground">
-                          {t("newUi.sidebar.userProfile.twoFaOff")}
-                        </span>
-                      )}
-                    </span>
-                  </div>
                 </>
               )}
             </div>
@@ -1816,8 +1794,6 @@ export function UserProfilePanel({
         onToggle={() => toggle("security")}
       >
         <div className="flex flex-col gap-4 pt-3">
-          <AuthEnrollmentSections />
-
           {canChangePasword && (
             <PasswordChangeSection
               showPassword={showPassword}
