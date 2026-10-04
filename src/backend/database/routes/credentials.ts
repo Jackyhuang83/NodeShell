@@ -24,7 +24,6 @@ import {
   createCurrentHostResolutionRepository,
   createCurrentHostRepository,
 } from "../repositories/factory.js";
-import { rejectSharedCopyWrites } from "../../sync/shared-copy-guard.js";
 import { parseSharedSource } from "./host-normalizers.js";
 
 /** Built-in password and key, plus any type a plugin offers for credentials. */
@@ -34,7 +33,6 @@ function getCredentialTypes(): string[] {
 }
 
 const router = express.Router();
-router.use(rejectSharedCopyWrites("credential", /^\/(\d+)$/));
 
 function isNonEmptyString(val: unknown): val is string {
   return typeof val === "string" && val.trim().length > 0;
