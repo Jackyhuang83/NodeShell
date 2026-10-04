@@ -155,7 +155,7 @@ export function createTotpService(
     async replaceBackupCodes(userId: string): Promise<string[]> {
       const codes = generateBackupCodes();
       await repository.save(userId, {
-        backupCodes: await sealBackupCodes(codes),
+        backupCodes: encodeBackupCodes(codes),
       });
       return codes;
     },
