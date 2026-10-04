@@ -694,7 +694,7 @@
             "type": "boolean",
             "labelKey": "settings.host.passwordPromptAutoFill.label",
             "hidden": true,
-            "default": true
+            "default": false
           },
           {
             "key": "sudoPasswordAutoFill",
