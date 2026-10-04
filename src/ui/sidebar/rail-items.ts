@@ -5,7 +5,6 @@ import {
   Server,
   Settings,
   User,
-  Zap,
   type LucideIcon,
 } from "lucide-react";
 import { useMemo, useSyncExternalStore } from "react";
@@ -86,13 +85,6 @@ export const RAIL_ITEMS: RailItemDef[] = [
     labelKey: "nav.connections",
     separatorAfter: true,
     rightDockable: true,
-  },
-  {
-    id: "quick-connect",
-    icon: Zap,
-    labelKey: "nav.quickConnect",
-    separatorAfter: true,
-    mobilePrimary: true,
   },
   {
     id: "sync",
