@@ -12,11 +12,7 @@ import {
   updateSSHHost,
   getUserInfo,
   getHostPassword,
-  adminCreateUserHost,
-  adminUpdateUserHost,
-  adminGetHostPassword,
   createCredential,
-  adminCreateUserCredential,
 } from "@/main-axios";
 import {
   getHostDefaultsLevel,
@@ -418,16 +414,9 @@ export function HostEditor({
       const data = lockAuthReferences
         ? omitOwnerSshAuthFromSharedEdit(fullData)
         : fullData;
-      let saved: SSHHost;
-      if (adminTargetUserId) {
-        saved = host
-          ? await adminUpdateUserHost(adminTargetUserId, Number(host.id), data)
-          : await adminCreateUserHost(adminTargetUserId, data);
-      } else {
-        saved = host
-          ? await updateSSHHost(Number(host.id), data)
-          : await createSSHHost(data);
-      }
+      let saved: SSHHost = host
+        ? await updateSSHHost(Number(host.id), data)
+        : await createSSHHost(data);
       // After the host: a new one has no id to scope settings to until it
       // exists. A failure here must not claim the host itself failed to save.
       // Values that follow the defaults were written by the server already.
@@ -525,9 +514,7 @@ export function HostEditor({
     setCreatingQuickCredential(true);
     try {
       const fetchField = (field: "password" | "key" | "keyPassword") =>
-        adminTargetUserId
-          ? adminGetHostPassword(adminTargetUserId, Number(host?.id), field)
-          : getHostPassword(Number(host?.id), field);
+        getHostPassword(Number(host?.id), field);
 
       const data: Record<string, unknown> = {
         name: quickCredentialName,
@@ -565,9 +552,7 @@ export function HostEditor({
             : null;
       }
 
-      const created = adminTargetUserId
-        ? await adminCreateUserCredential(adminTargetUserId, data)
-        : await createCredential(data);
+      const created = await createCredential(data);
       const credential = toCredentialOption(created);
       if (!credential) throw new Error(t("hosts.failedToSaveCredential"));
 
@@ -578,9 +563,7 @@ export function HostEditor({
         credentialId: credential.id,
       }));
       toast.success(t("hosts.credentialCreated"));
-      if (!adminTargetUserId) {
-        window.dispatchEvent(new CustomEvent("termix:credentials-changed"));
-      }
+      window.dispatchEvent(new CustomEvent("termix:credentials-changed"));
       setShowQuickCredentialDialog(false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : null;

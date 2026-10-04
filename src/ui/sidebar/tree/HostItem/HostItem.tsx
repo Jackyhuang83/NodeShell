@@ -48,13 +48,8 @@ import { copyToClipboard } from "@/lib/clipboard";
 import {
   canDeleteHost,
   canEditHost,
-  canOverrideHostAuth,
   canShareHost,
-  authOverrideProtocols as listAuthOverrideProtocols,
-  authProtocolLabel,
 } from "@/sidebar/host-permissions";
-import { HostAuthOverrideModal } from "@/sidebar/HostAuthOverrideModal";
-import type { AuthOverrideProtocol } from "@/types/auth-protocols";
 import {
   useStatusColorScheme,
   getStatusClasses,
@@ -321,11 +316,6 @@ export function HostItem({
     !alwaysShowTray && !actionsOnly && (trayTrigger === "click" || isTouchOnly);
   const showPasswordCopy = !host.isShared && canCopyHostPassword(host);
   const showSudoPasswordCopy = !host.isShared && canCopyHostSudoPassword(host);
-  const authOverrideProtocols = listAuthOverrideProtocols().filter((protocol) =>
-    canOverrideHostAuth(host, protocol),
-  );
-  const [authOverrideProtocol, setAuthOverrideProtocol] =
-    useState<AuthOverrideProtocol | null>(null);
   const [parentDragOver, setParentDragOver] = useState(false);
   const [contextMenuPosition, setContextMenuPosition] = useState<{
     x: number;
@@ -795,20 +785,6 @@ export function HostItem({
             <Copy className="size-3.5 mr-2" />
             {t("hosts.copyAddress")}
           </DropdownMenuItem>
-          {authOverrideProtocols.map((protocol) => (
-            <DropdownMenuItem
-              key={protocol}
-              onClick={(e) => {
-                e.stopPropagation();
-                setAuthOverrideProtocol(protocol);
-              }}
-            >
-              <KeyRound className="size-3.5 mr-2" />
-              {t("hosts.sharing.authOverrideActionProtocol", {
-                protocol: authProtocolLabel(protocol, t),
-              })}
-            </DropdownMenuItem>
-          ))}
           {showPasswordCopy && (
             <DropdownMenuItem
               onClick={(e) => handleCopyPassword(e, "password")}
@@ -1306,16 +1282,6 @@ export function HostItem({
             </div>
           </div>
         </div>
-        {authOverrideProtocol && (
-          <HostAuthOverrideModal
-            open
-            onOpenChange={(open) => {
-              if (!open) setAuthOverrideProtocol(null);
-            }}
-            host={host}
-            protocol={authOverrideProtocol}
-          />
-        )}
       </div>
     </div>
   );

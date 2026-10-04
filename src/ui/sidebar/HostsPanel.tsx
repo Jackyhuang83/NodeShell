@@ -27,7 +27,6 @@ import {
 import { toast } from "sonner";
 import { SidebarTree, isFolder } from "@/sidebar/SidebarTree";
 import { HostManager } from "@/sidebar/HostManager";
-import { HostShareModal } from "@/sidebar/HostShareModal";
 import { HostExportDialog } from "@/sidebar/HostExportDialog";
 import { CustomizeSidebarPanel } from "@/sidebar/CustomizeSidebarPanel";
 import { ComponentSlot } from "@/shell/ActionSlot";
@@ -236,7 +235,6 @@ export function HostsPanel({
   const [selectionMode, setSelectionMode] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [rawHosts, setRawHosts] = useState<SSHHostWithStatus[]>([]);
-  const [shareModalHost, setShareModalHost] = useState<Host | null>(null);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportPreselection, setExportPreselection] = useState<Set<string>>(
     new Set(),
@@ -1042,7 +1040,6 @@ export function HostsPanel({
             }
             onOpenTab={onOpenTab}
             onEditHost={onEditHost}
-            onShareHost={(host) => setShareModalHost(host)}
             query={hostSearch.trim().toLowerCase()}
             selectionMode={selectionMode}
             onToggleSelectionMode={toggleSelectionMode}
@@ -1068,11 +1065,6 @@ export function HostsPanel({
         <HostManager onEditingChange={handleEditingChange} active={active} />
       </div>
 
-      <HostShareModal
-        open={shareModalHost !== null}
-        onClose={() => setShareModalHost(null)}
-        host={shareModalHost}
-      />
 
       <HostExportDialog
         open={exportDialogOpen}

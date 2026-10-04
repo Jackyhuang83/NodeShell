@@ -54,7 +54,6 @@ import type {
 import { resolveHostTabType } from "@/lib/host-connection-tabs";
 import { canEditHost } from "@/sidebar/host-permissions";
 import { FolderMetadataDialog } from "@/sidebar/FolderMetadataDialog";
-import { HostShareModal } from "@/sidebar/HostShareModal";
 import { HostItem } from "./HostItem/HostItem";
 import { FolderItem, folderHostCount } from "./FolderItem/FolderItem";
 import {
@@ -189,9 +188,6 @@ export function SidebarTree({
     mode: "create" | "edit";
     folder?: HostFolder;
   } | null>(null);
-  const [shareFolderTarget, setShareFolderTarget] = useState<string | null>(
-    null,
-  );
   // Tracks the single item being dragged in manual sort mode, separate from
   // draggedHostIds (which drives multi-select folder-assignment drops).
   const [draggedReorderKey, setDraggedReorderKey] = useState<string | null>(
@@ -1068,9 +1064,6 @@ export function SidebarTree({
                       onManageFolder={handleManageFolder}
                       onDeleteFolder={handleDeleteFolder}
                       onOpenAllSessions={handleOpenAllSessions}
-                      onShareFolder={(folder) =>
-                        setShareFolderTarget(folder.path ?? folder.name)
-                      }
                       onMoveHostsToFolder={handleMoveHostsToFolder}
                       draggedHostIds={draggedHostIds}
                       onDragHostStart={handleDragHostStart}
@@ -1486,12 +1479,6 @@ export function SidebarTree({
         onSubmit={handleSaveFolderMetadata}
       />
 
-      <HostShareModal
-        open={shareFolderTarget !== null}
-        onClose={() => setShareFolderTarget(null)}
-        host={null}
-        folder={shareFolderTarget}
-      />
     </div>
   );
 }

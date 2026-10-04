@@ -15,8 +15,6 @@ import {
   generatePublicKeyFromPrivate,
   updateCredential,
   duplicateCredential,
-  adminCreateUserCredential,
-  adminUpdateUserCredential,
 } from "@/main-axios";
 import type { Credential, Host } from "@/types/ui-types";
 import { FolderPathPicker } from "./FolderPathPicker";
@@ -121,28 +119,15 @@ export function CredentialEditorView({
     setSaving(true);
     try {
       const { data } = buildCredentialData();
-      let saved: Record<string, unknown>;
-      if (adminTargetUserId) {
-        saved = credential
-          ? await adminUpdateUserCredential(
-              adminTargetUserId,
-              Number(credential.id),
-              data,
-            )
-          : await adminCreateUserCredential(adminTargetUserId, data);
-      } else {
-        saved = credential
-          ? await updateCredential(Number(credential.id), data)
-          : await createCredential(data);
-      }
+      const saved: Record<string, unknown> = credential
+        ? await updateCredential(Number(credential.id), data)
+        : await createCredential(data);
       toast.success(
         credential
           ? t("hosts.credentialUpdated")
           : t("hosts.credentialCreated"),
       );
-      if (!adminTargetUserId) {
-        window.dispatchEvent(new CustomEvent("termix:credentials-changed"));
-      }
+      window.dispatchEvent(new CustomEvent("termix:credentials-changed"));
       onSave(saved);
     } catch (err) {
       const msg = err instanceof Error ? err.message : null;
@@ -153,7 +138,7 @@ export function CredentialEditorView({
   };
 
   const handleSaveAsNew = async () => {
-    if (!credential || adminTargetUserId) return;
+    if (!credential) return;
     if (!validateForm()) return;
     setSavingAsNew(true);
     try {
@@ -554,7 +539,7 @@ export function CredentialEditorView({
         >
           {t("hosts.cancelBtn")}
         </Button>
-        {saveAsNewHost && credential && !adminTargetUserId && (
+        {saveAsNewHost && credential && (
           <Button
             variant="outline"
             className="px-6"

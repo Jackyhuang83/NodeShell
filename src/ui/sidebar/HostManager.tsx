@@ -18,7 +18,6 @@ import {
   type HostDefaultsEditorTarget,
 } from "./host-defaults/HostDefaultsEditorView";
 import type { HostDraft } from "@termix/plugin-sdk/frontend";
-import { CredentialShareModal } from "./CredentialShareModal";
 
 import { Button } from "@/components/button";
 import { ArrowLeft, ChevronDown, Search, X } from "lucide-react";
@@ -98,9 +97,6 @@ export function HostManager({
     key: number;
     draft: HostDraft;
   } | null>(null);
-  const [shareCredential, setShareCredential] = useState<Credential | null>(
-    null,
-  );
   const [editingCredential, setEditingCredential] = useState<
     Credential | "new" | null
   >(null);
@@ -776,16 +772,11 @@ export function HostManager({
               onEditCredential={handleEditCredential}
               onCloneCredential={handleCloneCredential}
               onDeleteCredential={handleConfirmDeleteCredential}
-              onShareCredential={setShareCredential}
             />
           )}
         </div>
       )}
 
-      <CredentialShareModal
-        credential={shareCredential}
-        onClose={() => setShareCredential(null)}
-      />
 
       {/* Confirm dialog */}
       {confirmDialog && (
