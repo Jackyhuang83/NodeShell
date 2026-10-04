@@ -614,6 +614,31 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
       fitAddonRef.current?.fit();
     }
 
+    function performFit() {
+      if (!fitAddonRef.current || !terminal || isFittingRef.current) return;
+      isFittingRef.current = true;
+      try {
+        fitTerminal();
+        if (terminal.cols > 0 && terminal.rows > 0) {
+          const lastSize = lastFittedSizeRef.current;
+          if (
+            !lastSize ||
+            lastSize.cols !== terminal.cols ||
+            lastSize.rows !== terminal.rows
+          ) {
+            scheduleNotify(terminal.cols, terminal.rows);
+            lastFittedSizeRef.current = {
+              cols: terminal.cols,
+              rows: terminal.rows,
+            };
+          }
+        }
+        setIsFitted(true);
+      } finally {
+        isFittingRef.current = false;
+      }
+    }
+
     function changeTerminalFontSize(direction: -1 | 1) {
       const currentFontSize =
         terminal.options.fontSize ??
@@ -1440,9 +1465,7 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
             pongReceivedRef.current = true;
             return;
           }
-          if (msg.type === "resized") {
-            applySharedSize(msg);
-          } else if (msg.type === "data") {
+          if (msg.type === "data") {
             if (typeof msg.data === "string") {
               outputListenersRef.current.forEach((listener) =>
                 listener(msg.data),

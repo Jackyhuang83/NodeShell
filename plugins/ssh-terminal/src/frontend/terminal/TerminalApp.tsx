@@ -1,7 +1,12 @@
 import React from "react";
+import {
+  useHosts,
+  useTranslation,
+  type PluginHostRecord,
+} from "@termix/plugin-sdk/frontend";
+import { ConnectionScreen } from "@termix/plugin-sdk/ui";
 import { Terminal } from "./Terminal";
-import { FullScreenAppWrapper, ConnectionScreen } from "@termix/plugin-sdk/ui";
-import { useTranslation } from "@termix/plugin-sdk/frontend";
+import type { TerminalHostConfig } from "./terminal-types";
 
 interface TerminalAppProps {
   hostId?: string;
@@ -9,54 +14,71 @@ interface TerminalAppProps {
   tmuxSession?: string;
 }
 
-// Only the session name travels in the URL (never a raw command), so a crafted
-// link cannot execute arbitrary input. `=` forces exact-name matching in tmux.
 function tmuxAttachCommand(session: string): string {
   return `tmux attach-session -t '=${session.replace(/'/g, "'\\''")}'`;
 }
 
+function toTerminalHost(host: PluginHostRecord): TerminalHostConfig {
+  return {
+    id: Number(host.id),
+    instanceId: host.instanceId,
+    name: host.name,
+    ip: host.ip,
+    port: host.sshPort ?? host.port ?? 22,
+    username: host.username ?? "",
+    authType: host.authType,
+    credentialId:
+      host.credentialId == null ? undefined : Number(host.credentialId),
+    sshOptions: host.sshOptions,
+    jumpHosts: host.jumpHosts,
+    connectionType: host.connectionType,
+    connectionOrigin: host.connectionOrigin,
+    pluginSettings: host.pluginSettings,
+  };
+}
+
 const TerminalApp: React.FC<TerminalAppProps> = ({ hostId, tmuxSession }) => {
   const { t } = useTranslation();
+  const { hosts, loaded } = useHosts();
+  const host = hostId
+    ? hosts.find((candidate) => candidate.id === String(hostId))
+    : undefined;
+
+  if (!loaded) {
+    return (
+      <div className="relative h-full w-full">
+        <ConnectionScreen
+          status="connecting"
+          message={t("hosts.loadingHost")}
+        />
+      </div>
+    );
+  }
+
+  if (!host) {
+    return (
+      <div className="relative h-full w-full">
+        <ConnectionScreen
+          status="disconnected"
+          message={t("hosts.hostNotFound")}
+        />
+      </div>
+    );
+  }
+
+  const hostConfig = toTerminalHost(host);
   return (
-    <FullScreenAppWrapper hostId={hostId}>
-      {(hostConfig, phase) => {
-        if (phase === "loading") {
-          return (
-            <div className="relative h-full w-full">
-              <ConnectionScreen
-                status="connecting"
-                message={t("hosts.loadingHost")}
-              />
-            </div>
-          );
-        }
-
-        if (!hostConfig) {
-          return (
-            <div className="relative h-full w-full">
-              <ConnectionScreen
-                status="disconnected"
-                message={t("hosts.hostNotFound")}
-              />
-            </div>
-          );
-        }
-
-        return (
-          <Terminal
-            hostConfig={hostConfig}
-            isVisible={true}
-            title={hostConfig.name || `${hostConfig.username}@${hostConfig.ip}`}
-            showTitle={false}
-            splitScreen={false}
-            onClose={() => {}}
-            executeCommand={
-              tmuxSession ? tmuxAttachCommand(tmuxSession) : undefined
-            }
-          />
-        );
-      }}
-    </FullScreenAppWrapper>
+    <Terminal
+      hostConfig={hostConfig}
+      isVisible={true}
+      title={hostConfig.name || `${hostConfig.username}@${hostConfig.ip}`}
+      showTitle={false}
+      splitScreen={false}
+      onClose={() => {}}
+      executeCommand={
+        tmuxSession ? tmuxAttachCommand(tmuxSession) : undefined
+      }
+    />
   );
 };
 

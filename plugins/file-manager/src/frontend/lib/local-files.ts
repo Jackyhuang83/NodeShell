@@ -9,12 +9,9 @@ import type {
   LocalTrashResult,
   LocalWalkResult,
 } from "@termix/plugin-sdk/frontend";
-import { isElectron } from "@termix/plugin-sdk/ui";
 
 export function isLocalFileBrowserAvailable(): boolean {
-  if (!isElectron()) return false;
-  const api = window.electronAPI;
-  return !!api?.localFs && !!api?.localTransfer;
+  return false;
 }
 
 function requireLocalFs() {
