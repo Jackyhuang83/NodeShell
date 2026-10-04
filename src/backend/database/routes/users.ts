@@ -27,7 +27,6 @@ import { registerUserSettingsRoutes } from "./user-settings-routes.js";
 import { registerTlsRoutes } from "./tls-routes.js";
 import { registerUserSessionRoutes } from "./user-session-routes.js";
 import { registerUserExternalAccountRoutes } from "./user-external-account-routes.js";
-import { registerUserPasswordResetRoutes } from "./user-password-reset-routes.js";
 import { registerUserAdminRoutes } from "./user-admin-routes.js";
 import { registerUserDataAccessRoutes } from "./user-data-access-routes.js";
 import { listExternalLoginMethods, registerAuthRoutes } from "./auth-routes.js";
@@ -73,26 +72,13 @@ function isNonEmptyString(val: unknown): val is string {
   return typeof val === "string" && val.trim().length > 0;
 }
 
-function isRegistrationAllowed(): boolean {
-  const envVal = process.env.ALLOW_REGISTRATION;
-  if (envVal !== undefined) return envVal.trim().toLowerCase() === "true";
-  try {
-    const value = getCurrentSettingValue("allow_registration");
-    return value ? value === "true" : true;
-  } catch {
-    return true;
-  }
+async function isFirstOwnerSetupAllowed(req: Request): Promise<boolean> {
+  if (!isLoopbackRequest(req)) return false;
+  return (await createCurrentUserRepository().countAll()) === 0;
 }
 
 function isPasswordResetAllowed(): boolean {
-  const envVal = process.env.ALLOW_PASSWORD_RESET;
-  if (envVal !== undefined) return envVal.trim().toLowerCase() === "true";
-  try {
-    const value = getCurrentSettingValue("allow_password_reset");
-    return value ? value === "true" : true;
-  } catch {
-    return true;
-  }
+  return false;
 }
 
 async function findCurrentUser(userId: string): Promise<UserRecord | null> {
@@ -139,10 +125,11 @@ const requireAdmin = authManager.createAdminMiddleware();
  *         description: Failed to create user.
  */
 router.post("/create", async (req, res) => {
-  if (!isRegistrationAllowed()) {
-    return res
-      .status(403)
-      .json({ error: "Registration is currently disabled" });
+  if (!(await isFirstOwnerSetupAllowed(req))) {
+    return res.status(403).json({
+      error:
+        "Public registration is disabled. The first NodeShell owner can only be created from a local loopback connection.",
+    });
   }
 
   const { username, password } = req.body;
@@ -883,7 +870,7 @@ router.get("/db-health", requireAdmin, async (req, res) => {
  */
 router.get("/registration-allowed", async (req, res) => {
   try {
-    res.json({ allowed: isRegistrationAllowed() });
+    res.json({ allowed: await isFirstOwnerSetupAllowed(req) });
   } catch (err) {
     authLogger.error("Failed to get registration allowed", err);
     res.status(500).json({ error: "Failed to get registration allowed" });
@@ -917,26 +904,10 @@ router.get("/registration-allowed", async (req, res) => {
  *       500:
  *         description: Failed to set registration allowed status.
  */
-router.patch("/registration-allowed", authenticateJWT, async (req, res) => {
-  const userId = (req as AuthenticatedRequest).userId;
-  try {
-    const user = await requireCurrentAdmin(userId);
-    if (!user) {
-      return res.status(403).json({ error: "Not authorized" });
-    }
-    const { allowed } = req.body;
-    if (typeof allowed !== "boolean") {
-      return res.status(400).json({ error: "Invalid value for allowed" });
-    }
-    await createCurrentSettingsRepository().set(
-      "allow_registration",
-      allowed ? "true" : "false",
-    );
-    res.json({ allowed });
-  } catch (err) {
-    authLogger.error("Failed to set registration allowed", err);
-    res.status(500).json({ error: "Failed to set registration allowed" });
-  }
+router.patch("/registration-allowed", authenticateJWT, async (_req, res) => {
+  return res.status(403).json({
+    error: "Public registration is permanently disabled in NodeShell v0.1",
+  });
 });
 
 /**
@@ -1248,26 +1219,11 @@ router.get("/password-reset-allowed", async (req, res) => {
  *       500:
  *         description: Failed to set password reset allowed status.
  */
-router.patch("/password-reset-allowed", authenticateJWT, async (req, res) => {
-  const userId = (req as AuthenticatedRequest).userId;
-  try {
-    const user = await requireCurrentAdmin(userId);
-    if (!user) {
-      return res.status(403).json({ error: "Not authorized" });
-    }
-    const { allowed } = req.body;
-    if (typeof allowed !== "boolean") {
-      return res.status(400).json({ error: "Invalid value for allowed" });
-    }
-    await createCurrentSettingsRepository().set(
-      "allow_password_reset",
-      allowed ? "true" : "false",
-    );
-    res.json({ allowed });
-  } catch (err) {
-    authLogger.error("Failed to set password reset allowed", err);
-    res.status(500).json({ error: "Failed to set password reset allowed" });
-  }
+router.patch("/password-reset-allowed", authenticateJWT, async (_req, res) => {
+  return res.status(403).json({
+    error:
+      "Browser-based password recovery is disabled in NodeShell v0.1. Use the local recovery CLI.",
+  });
 });
 
 /**
@@ -1351,7 +1307,6 @@ router.delete("/delete-account", authenticateJWT, async (req, res) => {
   }
 });
 
-registerUserPasswordResetRoutes(router, { authManager });
 
 /**
  * @openapi
