@@ -37,7 +37,6 @@ import {
   getCredentials,
   resetRecentActivity,
   getUserInfo,
-  isElectron,
 } from "@/main-axios";
 import type { RecentActivityItem } from "@/main-axios";
 import { useTranslation } from "react-i18next";
@@ -1125,9 +1124,7 @@ export function DashboardTab({
 
     getUserInfo()
       .then((info) => {
-        // A desktop on its own has one implicit user and nothing to
-        // administer; linked, it is an admin when the server account is.
-        setIsAdmin(isElectron() ? !!info.linked?.isAdmin : !!info.is_admin);
+        setIsAdmin(!!info.is_admin);
       })
       .catch(() => {});
     getUptime()

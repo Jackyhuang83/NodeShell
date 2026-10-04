@@ -1,5 +1,4 @@
 import { useEffect, useState, useCallback } from "react";
-import { isElectron } from "@/lib/electron";
 import { getBasePath } from "@/lib/base-path";
 
 interface ServiceWorkerState {
@@ -33,8 +32,7 @@ export function useServiceWorker(): ServiceWorkerState {
   );
 
   useEffect(() => {
-    const isSupported =
-      "serviceWorker" in navigator && !isElectron() && import.meta.env.PROD;
+    const isSupported = "serviceWorker" in navigator && import.meta.env.PROD;
 
     setState((prev) => ({ ...prev, isSupported }));
 

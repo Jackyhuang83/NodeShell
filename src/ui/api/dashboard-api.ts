@@ -17,3 +17,46 @@ export async function logActivity(
     throw handleApiError(error, "log activity");
   }
 }
+
+export interface RecentActivityItem {
+  id: number;
+  userId: string;
+  type: string;
+  hostId: number;
+  hostName: string;
+  timestamp: string;
+}
+
+export async function getUptime(): Promise<{
+  uptimeMs: number;
+  uptimeSeconds: number;
+  formatted: string;
+}> {
+  try {
+    const response = await authApi.get("/dashboard/uptime");
+    return response.data;
+  } catch (error) {
+    throw handleApiError(error, "fetch server uptime");
+  }
+}
+
+export async function getRecentActivity(
+  limit = 20,
+): Promise<RecentActivityItem[]> {
+  try {
+    const response = await authApi.get("/dashboard/activity/recent", {
+      params: { limit },
+    });
+    return response.data;
+  } catch (error) {
+    throw handleApiError(error, "fetch recent activity");
+  }
+}
+
+export async function resetRecentActivity(): Promise<void> {
+  try {
+    await authApi.delete("/dashboard/activity/reset");
+  } catch (error) {
+    throw handleApiError(error, "reset recent activity");
+  }
+}

@@ -661,6 +661,13 @@ export {
   updateSessionTimeout,
 } from "@/api/settings-api";
 
+export {
+  getUptime,
+  getRecentActivity,
+  resetRecentActivity,
+  type RecentActivityItem,
+} from "@/api/dashboard-api";
+
 // ============================================================================
 // AUTHENTICATION
 // ============================================================================

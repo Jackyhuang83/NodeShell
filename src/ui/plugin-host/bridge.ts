@@ -352,7 +352,6 @@ export const pluginHostBridge: PluginHostBridge = {
           pluginId: option.pluginId,
           credentialType: option.credentialType,
           supportsBackground: option.supportsBackground,
-          quickConnect: option.quickConnect === true,
         })),
     };
   },

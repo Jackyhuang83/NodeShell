@@ -9,9 +9,7 @@ import type { Host } from "@/types/ui-types";
 import { Activity, Globe, Plus, Tag, Terminal, Trash2, X } from "lucide-react";
 import { FolderPathPicker } from "./FolderPathPicker";
 import { HostParentPicker } from "./HostParentPicker";
-import { getSSHFolders, isElectron } from "@/main-axios";
-import { connectionOriginAppliesTo } from "./HostEditorData";
-import { useSyncStatus } from "@/hooks/use-sync-status";
+import { getSSHFolders } from "@/main-axios";
 import type { HostEditorForm, HostProtocols } from "./HostEditorData";
 import { Select2 } from "@/components/select2";
 import { useHostProtocols } from "./host-protocols";
@@ -45,7 +43,6 @@ export function HostEditorGeneralTab({
   simpleMode?: boolean;
 }) {
   const { t } = useTranslation();
-  const syncLinked = !!useSyncStatus()?.linked;
   const pluginProtocols = useHostProtocols();
 
   // Tracks which picker is shown, independent of whether a value is set yet
@@ -323,17 +320,6 @@ export function HostEditorGeneralTab({
                 onChange={(v) => setField("pin", v)}
               />
             </SettingRow>
-            {syncLinked && (
-              <SettingRow
-                label={t("hosts.localOnly")}
-                description={t("hosts.localOnlyDesc")}
-              >
-                <FakeSwitch
-                  checked={form.localOnly}
-                  onChange={(v) => setField("localOnly", v)}
-                />
-              </SettingRow>
-            )}
           </div>
         </HostOnly>
         <div className="flex flex-col gap-3 border-t border-border pt-4 pb-0">
@@ -732,44 +718,6 @@ export function HostEditorGeneralTab({
                 </div>
               ) : null}
             </div>
-          )}
-          {isElectron() && connectionOriginAppliesTo(protocols) && (
-            <HostOnly>
-              <SettingRow
-                label={t("hosts.connectionOrigin")}
-                description={[
-                  t("hosts.connectionOriginDesc"),
-                  ...new Set(
-                    pluginProtocols
-                      .filter(
-                        (protocol) =>
-                          protocols[protocol.settingKey] &&
-                          protocol.connectionOriginNoteKey,
-                      )
-                      .map((protocol) => t(protocol.connectionOriginNoteKey!)),
-                  ),
-                ].join(" ")}
-              >
-                <select
-                  className="flex h-7 border border-border bg-background px-2 py-0 text-xs outline-none focus:ring-1 focus:ring-ring"
-                  value={form.connectionOrigin ?? ""}
-                  onChange={(e) =>
-                    setField(
-                      "connectionOrigin",
-                      (e.target.value || null) as "local" | "remote" | null,
-                    )
-                  }
-                >
-                  <option value="">{t("hosts.connectionOriginDefault")}</option>
-                  <option value="local">
-                    {t("hosts.connectionOriginLocal")}
-                  </option>
-                  <option value="remote">
-                    {t("hosts.connectionOriginRemote")}
-                  </option>
-                </select>
-              </SettingRow>
-            </HostOnly>
           )}
           <DefaultsOnly settingKey="core.jumpHosts">
             <div className="flex flex-col gap-3">

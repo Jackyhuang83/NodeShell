@@ -19,8 +19,6 @@ import {
 } from "@/components/folder-style";
 import { normalizePath, splitPath } from "./FolderPathPicker";
 import { getCredentials } from "@/main-axios";
-import { useSyncStatus } from "@/hooks/use-sync-status";
-import { FakeSwitch, SettingRow } from "@/components/section-card";
 
 export type FolderMetadataValue = {
   name: string;
@@ -63,7 +61,6 @@ export function FolderMetadataDialog({
   const [icon, setIcon] = useState(DEFAULT_FOLDER_ICON);
   const [credentialId, setCredentialId] = useState<string>("");
   const [localOnly, setLocalOnly] = useState(false);
-  const syncLinked = !!useSyncStatus()?.linked;
   const [credentials, setCredentials] = useState<CredentialOption[]>([]);
 
   const parentPath =
@@ -194,14 +191,6 @@ export function FolderMetadataDialog({
               {t("hosts.folderCredentialHint")}
             </p>
           </div>
-          {syncLinked && (
-            <SettingRow
-              label={t("hosts.folderLocalOnly")}
-              description={t("hosts.folderLocalOnlyDesc")}
-            >
-              <FakeSwitch checked={localOnly} onChange={setLocalOnly} />
-            </SettingRow>
-          )}
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-semibold">
               {t("hosts.folderPreview")}

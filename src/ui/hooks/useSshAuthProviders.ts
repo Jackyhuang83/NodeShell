@@ -17,7 +17,6 @@ function builtinSummary(type: string): SshAuthProviderSummary {
     credentialType: type === "password" || type === "key",
     needsUserInteraction: false,
     supportsBackground: type !== "none",
-    quickConnect: true,
     available: true,
   };
 }

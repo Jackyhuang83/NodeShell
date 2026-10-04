@@ -30,7 +30,6 @@ import {
 } from "lucide-react";
 import { tabIcon } from "@/shell/tabUtils";
 import { isSessionTabType } from "@/shell/tab-registry";
-import { isElectron } from "@/lib/electron";
 import type { Tab, TabType } from "@/types/ui-types";
 import { ActionSlot } from "@/shell/ActionSlot";
 import {
@@ -642,10 +641,9 @@ export function TabBar({
               </Button>
             </>
           )}
-          {!isElectron() && (
-            <>
-              <Separator orientation="vertical" />
-              <Button
+          <>
+            <Separator orientation="vertical" />
+            <Button
                 variant="ghost"
                 size="icon"
                 className="h-full w-12.5 rounded-none border-y-0 border-border text-muted-foreground hover:text-foreground"
@@ -667,8 +665,7 @@ export function TabBar({
                   <Maximize2 className="size-4" />
                 )}
               </Button>
-            </>
-          )}
+          </>
           <Separator orientation="vertical" />
           <Button
             variant="ghost"
