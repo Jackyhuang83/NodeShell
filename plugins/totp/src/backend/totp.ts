@@ -47,19 +47,48 @@ export function createTotpService(
   const unseal = (value: string | null) =>
     value ? ctx.secrets.unseal(value) : Promise.resolve(null);
 
-  async function readBackupCodes(sealed: string | null): Promise<string[]> {
-    const raw = await unseal(sealed);
-    if (!raw) return [];
+  type BackupCodeHash = { salt: string; hash: string };
+
+  function encodeBackupCodes(codes: string[]): string {
+    const hashes: BackupCodeHash[] = codes.map((code) => {
+      const salt = crypto.randomBytes(16);
+      const hash = crypto.scryptSync(code, salt, 32);
+      return {
+        salt: salt.toString("base64url"),
+        hash: hash.toString("base64url"),
+      };
+    });
+    return JSON.stringify(hashes);
+  }
+
+  function readBackupCodes(value: string | null): BackupCodeHash[] {
+    if (!value) return [];
     try {
-      const codes = JSON.parse(raw);
-      return Array.isArray(codes) ? codes : [];
+      const parsed = JSON.parse(value);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter(
+        (entry): entry is BackupCodeHash =>
+          !!entry &&
+          typeof entry.salt === "string" &&
+          typeof entry.hash === "string",
+      );
     } catch {
       return [];
     }
   }
 
-  async function sealBackupCodes(codes: string[]): Promise<string> {
-    return ctx.secrets.seal(JSON.stringify(codes));
+  function matchesBackupCode(code: string, stored: BackupCodeHash): boolean {
+    try {
+      const salt = Buffer.from(stored.salt, "base64url");
+      const expected = Buffer.from(stored.hash, "base64url");
+      const actual = crypto.scryptSync(code, salt, expected.length);
+      return (
+        actual.length === expected.length &&
+        crypto.timingSafeEqual(actual, expected)
+      );
+    } catch {
+      return false;
+    }
   }
 
   return {
@@ -83,12 +112,12 @@ export function createTotpService(
       if (!code) return false;
       if (verifyTotpCode(secret, code)) return true;
 
-      const codes = await readBackupCodes(row.backupCodes);
-      const index = codes.indexOf(code);
+      const codes = readBackupCodes(row.backupCodes);
+      const index = codes.findIndex((stored) => matchesBackupCode(code, stored));
       if (index === -1) return false;
       codes.splice(index, 1);
       await repository.save(userId, {
-        backupCodes: await sealBackupCodes(codes),
+        backupCodes: JSON.stringify(codes),
       });
       return true;
     },
@@ -118,7 +147,7 @@ export function createTotpService(
       await repository.save(userId, {
         secret: await ctx.secrets.seal(secret),
         pendingSecret: null,
-        backupCodes: await sealBackupCodes(codes),
+        backupCodes: encodeBackupCodes(codes),
       });
       return codes;
     },
