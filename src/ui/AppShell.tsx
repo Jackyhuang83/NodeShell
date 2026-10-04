@@ -278,10 +278,6 @@ export function AppShell({
   const [allHosts, setAllHosts] = useState<Host[]>([]);
   const allHostsRef = useRef(allHosts);
   allHostsRef.current = allHosts;
-  const [isAdmin, setIsAdmin] = useState(false);
-  // The standalone desktop backend still owns system settings such as the
-  // Tailscale API key, even though it has only one implicit user.
-  const showAdminUI = isAdmin;
   const [showDonationModal, setShowDonationModal] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [backgroundTabRecords, setBackgroundTabRecords] = useState<
@@ -429,10 +425,9 @@ export function AppShell({
   useEffect(() => {
     getUserInfo()
       .then((info) => {
-        setIsAdmin(info.is_admin);
         setShowDonationModal(!!info.show_donation_modal);
       })
-      .catch(() => setIsAdmin(false));
+.catch(() => {});
   }, []);
 
   const handleDismissDonationModal = useCallback(() => {
@@ -2967,7 +2962,6 @@ export function AppShell({
               railView={railView}
               sidebarOpen={sidebarOpen}
               username={username}
-              isAdmin={showAdminUI}
               pluginsSettled={pluginsSettled}
               onRailClick={handleRailClick}
               onOpenTab={openSingletonTab}
