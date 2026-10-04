@@ -5,7 +5,6 @@ import {
   LogOut,
   PanelRight,
   Pin,
-  Settings,
   SlidersHorizontal,
   SquareArrowOutUpRight,
   User,
@@ -124,6 +123,7 @@ export function AppRail({
   onLogout: (options?: { manual?: boolean }) => void;
 }) {
   const { t } = useTranslation();
+  void isAdmin;
   const [hovered, setHovered] = useState(false);
   const [pinned, setPinned] = useState(() => readRailPreference("pinAppRail"));
   const [expandOnHover, setExpandOnHover] = useState(() =>
@@ -469,15 +469,6 @@ export function AppRail({
               icon: <User size={16} />,
               title: t("nav.userProfile"),
             },
-            ...(isAdmin
-              ? [
-                  {
-                    view: "admin-settings" as RailView,
-                    icon: <Settings size={16} />,
-                    title: t("nav.admin"),
-                  },
-                ]
-              : []),
           ] as {
             view: RailView;
             icon: ReactElement;
