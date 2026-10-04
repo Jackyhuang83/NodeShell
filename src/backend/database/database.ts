@@ -16,6 +16,7 @@ import bodyParser from "body-parser";
 import multer from "multer";
 import cookieParser from "cookie-parser";
 import userRoutes from "./routes/users.js";
+import internalAdminRoutes from "./routes/internal-admin-routes.js";
 import hostRoutes from "./routes/host.js";
 import credentialsRoutes from "./routes/credentials.js";
 import sshAuthRoutes from "./routes/ssh-auth-routes.js";
@@ -1543,6 +1544,10 @@ app.post("/database/restore", requireAdmin, async (req, res) => {
     });
   }
 });
+
+// This route is additionally protected by a true loopback check and the
+// installation's INTERNAL_AUTH_TOKEN. It is used only by `docker exec ... nodeshell admin`.
+app.use("/internal/admin", internalAdminRoutes);
 
 app.use("/users", userRoutes);
 app.use("/host", hostRoutes);
