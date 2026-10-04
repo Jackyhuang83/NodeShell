@@ -34,8 +34,6 @@ import {
 import { classifyKeyboardInteractive } from "../hosts/connect/keyboard-interactive.js";
 import { ensureCoreSshAuthProviders } from "../hosts/connect/core-providers.js";
 import { isHostKeyVerificationError } from "../hosts/status/host-status.js";
-import { findUsableCredential } from "../hosts/usable-credential.js";
-import { expandExternalUsername } from "../hosts/credential-username.js";
 import {
   getLoginMethod,
   registerLoginMethod,
@@ -368,94 +366,6 @@ export function createPluginSsh({ manifest, bag, audit }: Deps): PluginSsh {
         return full as unknown as PluginSshHost;
       }
       return handOut(resolved as unknown as SshConnectHost, userId);
-    },
-
-    resolveQuickConnect: async (input) => {
-      await checkSsh(true);
-      const userId = actingUser();
-      const valid =
-        Number.isInteger(input.id) &&
-        input.id <= 0 &&
-        typeof input.ip === "string" &&
-        input.ip.trim().length > 0 &&
-        Number.isInteger(input.port) &&
-        input.port > 0 &&
-        input.port <= 65535 &&
-        Number.isInteger(input.credentialId) &&
-        input.credentialId > 0;
-
-      if (!valid) {
-        await audit("ssh_resolve_quick_connect", "quick connect", {
-          success: false,
-          errorMessage: "Invalid Quick Connect target",
-        });
-        return null;
-      }
-
-      const credential = await findUsableCredential(
-        input.credentialId,
-        userId,
-      );
-      if (!credential) {
-        await audit(
-          "ssh_resolve_quick_connect",
-          `credential ${input.credentialId}`,
-          { success: false, errorMessage: "Credential not found" },
-        );
-        return null;
-      }
-
-      const key = (credential.privateKey || credential.key || null) as
-        | string
-        | null;
-      const password = (credential.password || null) as string | null;
-      const credentialUsername =
-        typeof credential.username === "string" ? credential.username : "";
-      const requestedUsername =
-        typeof input.username === "string" ? input.username.trim() : "";
-      const username = await expandExternalUsername(
-        input.overrideCredentialUsername
-          ? requestedUsername
-          : credentialUsername || requestedUsername,
-        userId,
-      );
-
-      if (!username || (!key && !password)) {
-        await audit(
-          "ssh_resolve_quick_connect",
-          `credential ${input.credentialId}`,
-          {
-            success: false,
-            errorMessage: !username
-              ? "Credential username is missing"
-              : "Credential has no usable SSH secret",
-          },
-        );
-        return null;
-      }
-
-      const full: SshConnectHost = {
-        id: input.id,
-        ip: input.ip.trim(),
-        port: input.port,
-        username,
-        userId,
-        authType: key ? "key" : "password",
-        password,
-        key,
-        keyPassword: credential.keyPassword as string | null,
-        keyType: credential.keyType as string | null,
-        certPublicKey: credential.certPublicKey as string | null,
-        jumpHosts: [],
-        sshOptions: input.sshOptions ?? undefined,
-      } as SshConnectHost;
-
-      await audit(
-        "ssh_resolve_quick_connect",
-        `credential ${input.credentialId}`,
-        { success: true },
-      );
-      return handOut(full, userId);
     },
 
     // The config it returns carries the password and private key, so it
