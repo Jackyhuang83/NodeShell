@@ -45,16 +45,43 @@ function header(
   return typeof value === "string" ? value : undefined;
 }
 
-/** The browser's origin, or the one a proxy reports. */
+/**
+ * WebAuthn security boundary.
+ *
+ * Production never derives the relying-party origin from request headers.
+ * Operators pin the external URL so a proxy/header mistake cannot change the
+ * RP ID used for registration or authentication.
+ */
 export function requestOrigin(headers: Record<string, unknown>): string {
+  const configured = process.env.NODESHELL_PUBLIC_URL?.trim();
+  if (configured) {
+    const url = new URL(configured);
+    const loopback =
+      url.hostname === "localhost" ||
+      url.hostname === "127.0.0.1" ||
+      url.hostname === "[::1]";
+    if (url.protocol !== "https:" && !loopback) {
+      throw new Error("NODESHELL_PUBLIC_URL must use HTTPS");
+    }
+    return url.origin;
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "NODESHELL_PUBLIC_URL is required for WebAuthn in production",
+    );
+  }
+
   const origin = header(headers, "origin");
-  if (origin) return origin;
+  if (origin) return new URL(origin).origin;
   const proto = header(headers, "x-forwarded-proto") || "http";
   const host =
     header(headers, "x-forwarded-host") ||
     header(headers, "host") ||
     "localhost";
-  return `${proto.split(",")[0]}://${host.split(",")[0]}`;
+  return new URL(
+    `${proto.split(",")[0]}://${host.split(",")[0]}`,
+  ).origin;
 }
 
 export function parseTransports(
