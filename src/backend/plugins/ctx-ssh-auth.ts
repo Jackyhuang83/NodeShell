@@ -368,6 +368,87 @@ export function createPluginSsh({ manifest, bag, audit }: Deps): PluginSsh {
       return handOut(resolved as unknown as SshConnectHost, userId);
     },
 
+    resolveQuickConnectCredential: async (input) => {
+      await checkSsh(true);
+      const userId = actingUser();
+      const credentialId = Number(input.credentialId);
+      if (!Number.isInteger(credentialId) || credentialId <= 0) {
+        await audit("ssh_quick_connect_credential", "invalid credential id", {
+          success: false,
+          errorMessage: "Invalid credential id",
+        });
+        return null;
+      }
+
+      const { PermissionManager } =
+        await import("../utils/permission-manager.js");
+      if (
+        !(await PermissionManager.getInstance().hasPermission(
+          userId,
+          "credentials.view",
+        ))
+      ) {
+        await audit(
+          "ssh_quick_connect_credential",
+          `credential ${credentialId}`,
+          { success: false, errorMessage: "Credential access denied" },
+        );
+        return null;
+      }
+
+      const { findUsableCredential } =
+        await import("../hosts/usable-credential.js");
+      const credential = await findUsableCredential(credentialId, userId);
+      if (!credential) {
+        await audit(
+          "ssh_quick_connect_credential",
+          `credential ${credentialId}`,
+          { success: false, errorMessage: "Credential not found" },
+        );
+        return null;
+      }
+
+      const privateKey =
+        (credential.privateKey as string | null | undefined) ||
+        (credential.key as string | null | undefined) ||
+        null;
+      const full: SshConnectHost = {
+        id: 0,
+        ip: String(input.ip ?? "").trim(),
+        port: Number(input.port) || 22,
+        username:
+          (credential.username as string | null | undefined) ||
+          String(input.username ?? "").trim(),
+        userId,
+        authType: String(credential.authType || "credential"),
+        password: (credential.password as string | null | undefined) ?? null,
+        key: privateKey,
+        keyPassword:
+          (credential.keyPassword as string | null | undefined) ?? null,
+        keyType: (credential.keyType as string | null | undefined) ?? null,
+        certPublicKey:
+          (credential.certPublicKey as string | null | undefined) ?? null,
+        sshOptions: input.sshOptions ?? null,
+      };
+
+      if (!full.ip || !full.username) {
+        await audit(
+          "ssh_quick_connect_credential",
+          `credential ${credentialId}`,
+          { success: false, errorMessage: "Quick Connect target is incomplete" },
+        );
+        return null;
+      }
+
+      const redacted = handOut(full, userId);
+      await audit(
+        "ssh_quick_connect_credential",
+        `credential ${credentialId}`,
+        { success: true },
+      );
+      return redacted;
+    },
+
     // The config it returns carries the password and private key, so it
     // needs credentials:read on top of the connect pair.
     prepare: async (host, options) => {
