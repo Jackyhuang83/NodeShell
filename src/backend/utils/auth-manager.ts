@@ -224,6 +224,10 @@ class AuthManager {
     return Buffer.from(`${userId}:${sessionId || ""}`, "utf8");
   }
 
+  private hashSessionToken(token: string): string {
+    return crypto.createHash("sha256").update(token, "utf8").digest("hex");
+  }
+
   private async unwrapUserDataKey(
     userId: string,
     sessionId: string | undefined,
@@ -328,7 +332,7 @@ class AuthManager {
         await createCurrentSessionRepository().create({
           id: sessionId,
           userId,
-          jwtToken: token,
+          jwtToken: this.hashSessionToken(token),
           deviceType: options.deviceType,
           deviceInfo: options.deviceInfo,
           oidcSub: options.oidcSub ?? null,
@@ -394,6 +398,32 @@ class AuthManager {
             return null;
           }
 
+          const expectedHash = this.hashSessionToken(token);
+          const storedToken = sessionRecord.jwtToken;
+          const hashMatches =
+            storedToken.length === expectedHash.length &&
+            crypto.timingSafeEqual(
+              Buffer.from(storedToken, "utf8"),
+              Buffer.from(expectedHash, "utf8"),
+            );
+
+          if (!hashMatches) {
+            // One-time migration for sessions created before NodeShell Phase 1B.
+            if (storedToken === token) {
+              await createCurrentSessionRepository().updateToken(
+                payload.sessionId,
+                expectedHash,
+              );
+            } else {
+              databaseLogger.warn("Session token hash mismatch", {
+                operation: "jwt_verify_session_token_mismatch",
+                sessionId: payload.sessionId,
+                userId: payload.userId,
+              });
+              return null;
+            }
+          }
+
           await this.migrateDataKeyFromPayload(payload);
         } catch (dbError) {
           databaseLogger.error(
@@ -443,7 +473,10 @@ class AuthManager {
       expiresIn: Math.ceil(maxAge / 1000),
     } as jwt.SignOptions);
 
-    await createCurrentSessionRepository().updateToken(sessionId, token);
+    await createCurrentSessionRepository().updateToken(
+      sessionId,
+      this.hashSessionToken(token),
+    );
 
     return { token, maxAge };
   }
