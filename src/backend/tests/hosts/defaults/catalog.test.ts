@@ -10,7 +10,6 @@ import {
 import {
   defaultValuesEqual,
   normalizeAuthDefault,
-  normalizeSocks5Default,
   parseDefaultOverrides,
   splitDefaultKey,
   stableStringify,
@@ -89,17 +88,6 @@ describe("value shapes", () => {
     expect(normalizeAuthDefault(null)).toBeNull();
   });
 
-  it("drops a proxy's settings while it is off, and chain passwords always", () => {
-    expect(
-      normalizeSocks5Default({ useSocks5: false, socks5Host: "x" }).socks5Host,
-    ).toBeNull();
-    expect(
-      normalizeSocks5Default({
-        useSocks5: true,
-        socks5ProxyChain: [{ host: "a", password: "p" }],
-      }).socks5ProxyChain,
-    ).toEqual([{ host: "a" }]);
-  });
 
   it("compares objects regardless of key order", () => {
     expect(stableStringify({ b: 1, a: 2 })).toBe(

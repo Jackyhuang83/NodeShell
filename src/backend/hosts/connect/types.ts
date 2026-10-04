@@ -38,12 +38,6 @@ export interface SshConnectHost {
   forceKeyboardInteractive?: boolean | null;
   sshOptions?: HostSshOptions | null;
   jumpHosts?: Array<{ hostId: number }> | null;
-  useSocks5?: boolean | null;
-  socks5Host?: string | null;
-  socks5Port?: number | null;
-  socks5Username?: string | null;
-  socks5Password?: string | null;
-  socks5ProxyChain?: unknown;
   portKnockSequence?: Array<{
     port: number;
     protocol?: string;

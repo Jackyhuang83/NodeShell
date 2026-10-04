@@ -91,12 +91,6 @@ export function sshHostToHost(h: SSHHostWithStatus): Host {
     statusCheckEnabled: h.statusCheckEnabled !== false,
     statusCheckInterval: h.statusCheckInterval ?? null,
     forceKeyboardInteractive: h.forceKeyboardInteractive ?? false,
-    useSocks5: h.useSocks5,
-    socks5Host: h.socks5Host,
-    socks5Port: h.socks5Port,
-    socks5Username: h.socks5Username,
-    socks5Password: h.socks5Password,
-    socks5ProxyChain: parseJson(h.socks5ProxyChain) ?? [],
     overrideCredentialUsername: h.overrideCredentialUsername ?? false,
     isShared: h.isShared ?? false,
     authOverrides: h.authOverrides

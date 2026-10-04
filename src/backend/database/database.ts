@@ -738,12 +738,6 @@ app.post("/database/export", authenticateJWT, async (req, res) => {
           ssh_options TEXT,
           quick_actions TEXT,
           notes TEXT,
-          use_socks5 INTEGER,
-          socks5_host TEXT,
-          socks5_port INTEGER,
-          socks5_username TEXT,
-          socks5_password TEXT,
-          socks5_proxy_chain TEXT,
           port_knock_sequence TEXT,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -822,8 +816,8 @@ app.post("/database/export", authenticateJWT, async (req, res) => {
       const sshHosts =
         await createCurrentHostRepository().listDecryptedByUserId(userId);
       const insertHost = exportDb.prepare(`
-        INSERT INTO ssh_data (id, user_id, connection_type, name, ip, port, username, folder, tags, pin, auth_type, force_keyboard_interactive, password, key, key_password, key_type, sudo_password, credential_id, override_credential_username, jump_hosts, status_check_enabled, status_check_interval, terminal_config, ssh_options, quick_actions, notes, use_socks5, socks5_host, socks5_port, socks5_username, socks5_password, socks5_proxy_chain, port_knock_sequence, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO ssh_data (id, user_id, connection_type, name, ip, port, username, folder, tags, pin, auth_type, force_keyboard_interactive, password, key, key_password, key_type, sudo_password, credential_id, override_credential_username, jump_hosts, status_check_enabled, status_check_interval, terminal_config, ssh_options, quick_actions, notes, port_knock_sequence, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       for (const decrypted of sshHosts) {
@@ -854,12 +848,6 @@ app.post("/database/export", authenticateJWT, async (req, res) => {
           decrypted.sshOptions || null,
           decrypted.quickActions || null,
           decrypted.notes || null,
-          decrypted.useSocks5 ? 1 : 0,
-          decrypted.socks5Host || null,
-          decrypted.socks5Port || null,
-          decrypted.socks5Username || null,
-          decrypted.socks5Password || null,
-          decrypted.socks5ProxyChain || null,
           decrypted.portKnockSequence || null,
           decrypted.createdAt,
           decrypted.updatedAt,
@@ -1196,12 +1184,6 @@ app.post(
                     null,
                   quickActions: host.quick_actions,
                   notes: host.notes,
-                  useSocks5: Boolean(host.use_socks5),
-                  socks5Host: host.socks5_host,
-                  socks5Port: host.socks5_port,
-                  socks5Username: host.socks5_username,
-                  socks5Password: host.socks5_password,
-                  socks5ProxyChain: host.socks5_proxy_chain,
                   createdAt: host.created_at || new Date().toISOString(),
                   updatedAt: new Date().toISOString(),
                 };

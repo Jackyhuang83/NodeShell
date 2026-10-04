@@ -39,13 +39,6 @@ export interface HostAuthDefault {
   agentIdentity: string | null;
 }
 
-export interface HostSocks5Default {
-  useSocks5: boolean;
-  socks5Host: string | null;
-  socks5Port: number | null;
-  socks5Username: string | null;
-  socks5ProxyChain: unknown[] | null;
-}
 
 export interface CoreHostDefault {
   key: string;
@@ -123,41 +116,6 @@ export function normalizeAuthDefault(value: unknown): HostAuthDefault | null {
     agentSocketPath:
       authType === "agent" ? toText(source.agentSocketPath) : null,
     agentIdentity: authType === "agent" ? toText(source.agentIdentity) : null,
-  };
-}
-
-export function normalizeSocks5Default(value: unknown): HostSocks5Default {
-  const source = toObject(value) ?? {};
-  if (!toBoolean(source.useSocks5, false)) {
-    return {
-      useSocks5: false,
-      socks5Host: null,
-      socks5Port: null,
-      socks5Username: null,
-      socks5ProxyChain: null,
-    };
-  }
-  const chain = toArray(source.socks5ProxyChain);
-  if (chain.length > 0) {
-    return {
-      useSocks5: true,
-      socks5Host: null,
-      socks5Port: null,
-      socks5Username: null,
-      socks5ProxyChain: chain.map((node) => {
-        const own = toObject(node) ?? {};
-        // A proxy's password stays on the host.
-        const { password: _password, ...rest } = own;
-        return rest;
-      }),
-    };
-  }
-  return {
-    useSocks5: true,
-    socks5Host: toText(source.socks5Host),
-    socks5Port: toNumber(source.socks5Port, 1080),
-    socks5Username: toText(source.socks5Username),
-    socks5ProxyChain: null,
   };
 }
 
@@ -245,12 +203,6 @@ export const CORE_HOST_DEFAULTS: readonly CoreHostDefault[] = [
     levels: ALL_LEVELS,
     builtin: [],
     normalize: normalizeEnvironment,
-  },
-  {
-    key: "socks5",
-    levels: ALL_LEVELS,
-    builtin: normalizeSocks5Default(null),
-    normalize: normalizeSocks5Default,
   },
   {
     key: "jumpHosts",

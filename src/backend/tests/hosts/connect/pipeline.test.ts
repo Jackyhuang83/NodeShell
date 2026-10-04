@@ -23,7 +23,6 @@ const mocks = vi.hoisted(() => ({
   applyAgentAuth: vi.fn(),
   performPortKnocking: vi.fn(),
   createJumpHostChain: vi.fn(),
-  createSocks5Connection: vi.fn(),
   resolveHostById: vi.fn(),
 }));
 
@@ -46,9 +45,6 @@ vi.mock("../../../hosts/terminal-auth-helpers.js", () => ({
 }));
 vi.mock("../../../hosts/jump-host-chain.js", () => ({
   createJumpHostChain: mocks.createJumpHostChain,
-}));
-vi.mock("../../../utils/socks5-helper.js", () => ({
-  createSocks5Connection: mocks.createSocks5Connection,
 }));
 vi.mock("../../../hosts/ssh-dns.js", () => ({
   resolveSshConnectConfigHost: async (config: unknown) => config,
@@ -627,28 +623,11 @@ describe("connectHost", () => {
     expect(jumpClient.ended).toBe(true);
   });
 
-  it("uses a SOCKS5 proxy when the host has one", async () => {
-    mocks.createSocks5Connection.mockResolvedValueOnce({ proxied: true });
-    const connection = await connectHost(
-      host({ useSocks5: true, socks5Host: "proxy", socks5Port: 1080 }),
-      { userId: "user-1", purpose: "fleet" },
-    );
-    expect(mocks.createSocks5Connection).toHaveBeenCalledWith(
-      "10.0.0.7",
-      22,
-      expect.objectContaining({ socks5Host: "proxy", socks5Port: 1080 }),
-    );
-    expect(
-      (connection.client as unknown as FakeSshClient).connectConfig!.sock,
-    ).toEqual({ proxied: true });
-  });
 
   it("connects over a stream it is given and skips the transport", async () => {
     const connection = await connectHost(
       host({
         jumpHosts: [{ hostId: 2 }],
-        useSocks5: true,
-        socks5Host: "proxy",
         portKnockSequence: [{ port: 7000 }],
       }),
       {
@@ -662,7 +641,6 @@ describe("connectHost", () => {
     expect(config.sock).toEqual({ throughSource: true });
     expect(config.hostVerifier).toBe(mocks.verifier);
     expect(mocks.createJumpHostChain).not.toHaveBeenCalled();
-    expect(mocks.createSocks5Connection).not.toHaveBeenCalled();
     expect(mocks.performPortKnocking).not.toHaveBeenCalled();
     expect(connection.jumpClient).toBeNull();
   });
@@ -768,12 +746,6 @@ describe("connectHost", () => {
     expect(getConnectionPoolKey("fleet", host())).toBe(
       "fleet:owner-1:10.0.0.7:22:root",
     );
-    expect(
-      getConnectionPoolKey(
-        "stats",
-        host({ useSocks5: true, socks5Host: "p", socks5Port: 1 }),
-      ),
-    ).toBe("stats:owner-1:10.0.0.7:22:root:socks5:p:1");
 
     const result = await withHostConnection(
       "fleet:x",

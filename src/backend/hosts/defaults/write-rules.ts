@@ -52,7 +52,6 @@ const BODY_FIELDS: Record<string, string[]> = {
   allowLegacyAlgorithms: ["sshOptions", "terminalConfig"],
   agentForwarding: ["sshOptions", "terminalConfig"],
   environmentVariables: ["sshOptions", "terminalConfig"],
-  socks5: ["useSocks5"],
   jumpHosts: ["jumpHosts"],
   portKnockSequence: ["portKnockSequence"],
   statusCheckEnabled: ["statusCheckEnabled"],

@@ -1,8 +1,6 @@
 import { Client as SSHClient } from "ssh2";
 import { fileLogger } from "../utils/logger.js";
-import { createSocks5Connection } from "../utils/socks5-helper.js";
 import { getErrorMessage } from "../utils/error-message.js";
-import { getJumpHostSocks5Config } from "./jump-host-proxy.js";
 import { buildConnectConfig } from "./connect/build-connect-config.js";
 import {
   createAutoKeyboardInteractiveHandler,
@@ -22,12 +20,6 @@ type JumpHostConfig = {
   keyType?: string;
   authType?: string;
   credentialId?: number;
-  useSocks5?: boolean | null;
-  socks5Host?: string | null;
-  socks5Port?: number | null;
-  socks5Username?: string | null;
-  socks5Password?: string | null;
-  socks5ProxyChain?: string | import("../../types/index.js").ProxyNode[] | null;
   [key: string]: unknown;
 };
 
@@ -106,16 +98,6 @@ export async function createJumpHostChain(
       }
     }
 
-    const firstHopSocks5Config = getJumpHostSocks5Config(jumpHostConfigs[0]);
-    let proxySocket: import("net").Socket | null = null;
-    if (firstHopSocks5Config?.useSocks5) {
-      const firstHop = jumpHostConfigs[0]!;
-      proxySocket = await createSocks5Connection(
-        firstHop.ip,
-        firstHop.port || 22,
-        firstHopSocks5Config,
-      );
-    }
 
     for (let i = 0; i < jumpHostConfigs.length; i++) {
       if (closed) throw new Error("Jump host chain closed");
@@ -163,12 +145,7 @@ export async function createJumpHostChain(
               hopIndex: i,
               totalHops,
               previousHop:
-                i > 0
-                  ? jumpHostConfigs[i - 1]?.ip
-                  : proxySocket
-                    ? "proxy"
-                    : "direct",
-              usedProxySocket: i === 0 && !!proxySocket,
+                i > 0 ? jumpHostConfigs[i - 1]?.ip : "direct",
             },
           );
           resolve(false);
@@ -246,9 +223,6 @@ export async function createJumpHostChain(
               jumpClient.connect(connectConfig);
             },
           );
-        } else if (proxySocket) {
-          connectConfig.sock = proxySocket;
-          jumpClient.connect(connectConfig);
         } else {
           jumpClient.connect(connectConfig);
         }

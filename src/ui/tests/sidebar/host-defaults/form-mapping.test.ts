@@ -32,13 +32,7 @@ describe("host defaults on the editor form", () => {
   });
 
   it("puts a default's value back on the form", () => {
-    let next = applyDefaultToForm(form(), "core.socks5", {
-      useSocks5: true,
-      socks5ProxyChain: [{ host: "a", port: 1080, type: "socks5" }],
-    });
-    expect(next.useSocks5).toBe(true);
-    expect(next.socks5ProxyMode).toBe("chain");
-    next = applyDefaultToForm(next, "core.jumpHosts", [{ hostId: 4 }]);
+    const next = applyDefaultToForm(form(), "core.jumpHosts", [{ hostId: 4 }]);
     expect(next.jumpHosts).toEqual([{ hostId: "4" }]);
     next = applyDefaultToForm(next, "term.fontSize", 18);
     expect(next.pluginSettings.term.fontSize).toBe(18);

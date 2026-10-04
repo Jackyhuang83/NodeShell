@@ -1,17 +1,11 @@
 /**
- * How the bytes get to a host: port knocking, a jump host chain or a SOCKS5
- * proxy, in that order. Sets config.sock and
- * returns the jump client so the caller can close it with the connection.
+ * How the bytes get to a host: optional port knocking, then an optional
+ * SSH jump-host chain. Sets config.sock for jump forwarding and returns the
+ * jump client so the caller can close it with the connection.
  */
 
 import type { Client } from "ssh2";
-import { getErrorMessage } from "../../utils/error-message.js";
 import { logger } from "../../utils/logger.js";
-import {
-  createSocks5Connection,
-  type SOCKS5Config,
-} from "../../utils/socks5-helper.js";
-import type { ProxyNode } from "../../../types/index.js";
 import { createJumpHostChain } from "../jump-host-chain.js";
 import { resolveSshConnectConfigHost } from "../ssh-dns.js";
 import { performPortKnocking } from "../terminal-auth-helpers.js";
@@ -22,25 +16,11 @@ import type {
   SshPromptChannel,
 } from "./types.js";
 
-function getHostSocks5Config(host: SshConnectHost): SOCKS5Config | null {
-  const chain = Array.isArray(host.socks5ProxyChain)
-    ? (host.socks5ProxyChain as ProxyNode[])
-    : [];
-  if (!host.useSocks5 || (!host.socks5Host && chain.length === 0)) return null;
-  return {
-    useSocks5: host.useSocks5,
-    socks5Host: host.socks5Host ?? undefined,
-    socks5Port: host.socks5Port ?? undefined,
-    socks5Username: host.socks5Username ?? undefined,
-    socks5Password: host.socks5Password ?? undefined,
-    socks5ProxyChain: chain,
-  };
-}
 
 class SshTransportError extends Error {
   constructor(
     message: string,
-    readonly stage: "jump-host" | "jump-forward" | "proxy",
+    readonly stage: "jump-host" | "jump-forward",
     options?: { cause?: unknown },
   ) {
     super(message, options);
@@ -59,7 +39,7 @@ export interface OpenTransportOptions {
 
 export interface OpenedTransport {
   jumpClient: Client | null;
-  via: "direct" | "proxy" | "jump";
+  via: "direct" | "jump";
 }
 
 function forwardThrough(
@@ -109,8 +89,6 @@ export async function openSshTransport(
     }
   }
 
-  let via: OpenedTransport["via"] = "direct";
-
   const jumpUserId = host.userId || "";
   if (host.jumpHosts && host.jumpHosts.length > 0 && jumpUserId) {
     const jumpClient = await createJumpHostChain(
@@ -133,30 +111,9 @@ export async function openSshTransport(
     return { jumpClient, via: "jump" };
   }
 
-  const proxyConfig = getHostSocks5Config(host);
-  if (proxyConfig && via === "direct") {
-    try {
-      const proxySocket = await createSocks5Connection(
-        host.ip,
-        host.port || 22,
-        proxyConfig,
-      );
-      if (proxySocket) {
-        config.sock = proxySocket;
-        via = "proxy";
-      }
-    } catch (error) {
-      throw new SshTransportError(
-        "Proxy connection failed: " + getErrorMessage(error),
-        "proxy",
-        { cause: error },
-      );
-    }
-  }
-
-  if (via === "direct" && options.resolveDns !== false) {
+  if (options.resolveDns !== false) {
     await resolveSshConnectConfigHost(config);
   }
 
-  return { jumpClient: null, via };
+  return { jumpClient: null, via: "direct" };
 }

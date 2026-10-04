@@ -10,7 +10,6 @@
 import {
   findCoreHostDefault,
   normalizeAuthDefault,
-  normalizeSocks5Default,
 } from "../../../types/host-defaults.js";
 import { parseSshOptions } from "../ssh-options.js";
 
@@ -59,14 +58,6 @@ export function readCoreDefault(
       });
     case "forceKeyboardInteractive":
       return entry.normalize(row.forceKeyboardInteractive);
-    case "socks5":
-      return normalizeSocks5Default({
-        useSocks5: asBoolean(row.useSocks5),
-        socks5Host: row.socks5Host,
-        socks5Port: row.socks5Port,
-        socks5Username: row.socks5Username,
-        socks5ProxyChain: row.socks5ProxyChain,
-      });
     case "jumpHosts":
     case "portKnockSequence":
     case "statusCheckEnabled":
@@ -134,18 +125,6 @@ export function writeCoreDefault(
     }
     case "forceKeyboardInteractive":
       return { forceKeyboardInteractive: normalized ? "true" : "false" };
-    case "socks5": {
-      const socks = normalizeSocks5Default(value);
-      return {
-        useSocks5: socks.useSocks5,
-        socks5Host: socks.socks5Host,
-        socks5Port: socks.socks5Port,
-        socks5Username: socks.socks5Username,
-        socks5ProxyChain: socks.socks5ProxyChain
-          ? JSON.stringify(mergeChainPasswords(socks.socks5ProxyChain, row))
-          : null,
-      };
-    }
     case "jumpHosts":
     case "portKnockSequence":
       return {
@@ -163,22 +142,3 @@ export function writeCoreDefault(
   }
 }
 
-/** A chain that follows a default keeps the passwords the host saved for it. */
-function mergeChainPasswords(chain: unknown[], row: Columns): unknown[] {
-  let current: unknown = row.socks5ProxyChain;
-  if (typeof current === "string") {
-    try {
-      current = JSON.parse(current);
-    } catch {
-      current = [];
-    }
-  }
-  const saved = Array.isArray(current) ? current : [];
-  return chain.map((node, index) => {
-    const own = saved[index] as Record<string, unknown> | undefined;
-    const password = own?.password;
-    return typeof password === "string" && password
-      ? { ...(node as Record<string, unknown>), password }
-      : node;
-  });
-}

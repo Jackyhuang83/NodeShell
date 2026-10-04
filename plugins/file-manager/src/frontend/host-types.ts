@@ -23,12 +23,6 @@ export interface SSHHost {
   jumpHosts?: Array<{ hostId: number }>;
   sshOptions?: HostSshOptions | null;
   notes?: string;
-  useSocks5?: boolean;
-  socks5Host?: string;
-  socks5Port?: number;
-  socks5Username?: string;
-  socks5Password?: string;
-  socks5ProxyChain?: unknown[];
   connectionType?: string;
   enableSsh?: boolean;
   syncId?: string | null;

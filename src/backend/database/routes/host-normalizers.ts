@@ -177,12 +177,6 @@ export type NormalizedImportedHost = Record<string, unknown> & {
   sshOptions?: unknown;
   forceKeyboardInteractive?: unknown;
   notes?: unknown;
-  useSocks5?: unknown;
-  socks5Host?: unknown;
-  socks5Port?: unknown;
-  socks5Username?: unknown;
-  socks5Password?: unknown;
-  socks5ProxyChain?: unknown;
   portKnockSequence?: unknown;
   overrideCredentialUsername?: unknown;
   enableSsh: boolean;
@@ -256,7 +250,6 @@ const SENSITIVE_FIELDS = [
   "keyPassword",
   "password",
   "sudoPassword",
-  "socks5Password",
 ];
 
 export function stripSensitiveFields(
@@ -476,9 +469,6 @@ export function transformHostResponse(
         : null,
     ...hostTerminalExport(host),
     forceKeyboardInteractive: host.forceKeyboardInteractive === "true",
-    socks5ProxyChain: host.socks5ProxyChain
-      ? JSON.parse(host.socks5ProxyChain as string)
-      : [],
     portKnockSequence: host.portKnockSequence
       ? JSON.parse(host.portKnockSequence as string)
       : [],

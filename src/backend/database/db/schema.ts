@@ -198,12 +198,6 @@ export const hosts = sqliteTable(
 
     sshPort: integer("ssh_port").default(22),
 
-    useSocks5: integer("use_socks5", { mode: "boolean" }),
-    socks5Host: text("socks5_host"),
-    socks5Port: integer("socks5_port"),
-    socks5Username: text("socks5_username"),
-    socks5Password: text("socks5_password"),
-    socks5ProxyChain: text("socks5_proxy_chain"),
 
     // null = use the desktop app's global default; "local" | "remote" pins
     // this specific host's SSH/Docker-console/Serial connections to originate

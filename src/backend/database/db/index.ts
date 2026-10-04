@@ -306,11 +306,6 @@ async function initializeCompleteDatabase(): Promise<void> {
         status_check_interval INTEGER,
         terminal_config TEXT,
         notes TEXT,
-        use_socks5 INTEGER,
-        socks5_host TEXT,
-        socks5_port INTEGER,
-        socks5_username TEXT,
-        socks5_password TEXT,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
@@ -928,12 +923,6 @@ const migrateSchema = () => {
   addColumnIfNotExists("ssh_data", "domain", "TEXT");
   addColumnIfNotExists("ssh_data", "notes", "TEXT");
 
-  addColumnIfNotExists("ssh_data", "use_socks5", "INTEGER");
-  addColumnIfNotExists("ssh_data", "socks5_host", "TEXT");
-  addColumnIfNotExists("ssh_data", "socks5_port", "INTEGER");
-  addColumnIfNotExists("ssh_data", "socks5_username", "TEXT");
-  addColumnIfNotExists("ssh_data", "socks5_password", "TEXT");
-  addColumnIfNotExists("ssh_data", "socks5_proxy_chain", "TEXT");
 
   addColumnIfNotExists("ssh_data", "host_key_fingerprint", "TEXT");
   addColumnIfNotExists("ssh_data", "host_key_type", "TEXT");
@@ -1173,7 +1162,6 @@ const migrateSchema = () => {
     { column: "share_ssh_auth", sql: "ALTER TABLE ssh_data ADD COLUMN share_ssh_auth INTEGER NOT NULL DEFAULT 0" },
     { column: "jump_hosts", sql: "ALTER TABLE ssh_data ADD COLUMN jump_hosts TEXT" },
     { column: "quick_actions", sql: "ALTER TABLE ssh_data ADD COLUMN quick_actions TEXT" },
-    { column: "socks5_proxy_chain", sql: "ALTER TABLE ssh_data ADD COLUMN socks5_proxy_chain TEXT" },
     { column: "host_key_fingerprint", sql: "ALTER TABLE ssh_data ADD COLUMN host_key_fingerprint TEXT" },
     { column: "host_key_type", sql: "ALTER TABLE ssh_data ADD COLUMN host_key_type TEXT" },
     { column: "host_key_algorithm", sql: "ALTER TABLE ssh_data ADD COLUMN host_key_algorithm TEXT NOT NULL DEFAULT 'sha256'" },

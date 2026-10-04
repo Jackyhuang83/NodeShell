@@ -13,7 +13,6 @@ import {
   type HostProtocols,
 } from "./host-protocols";
 
-type HostSocks5ProxyNode = NonNullable<Host["socks5ProxyChain"]>[number];
 
 export type { HostProtocols };
 
@@ -134,15 +133,6 @@ export function createHostEditorForm(host: Host | null) {
     tagInput: "",
     notes: host?.notes ?? "",
     pin: host?.pin ?? false,
-    useSocks5: host?.useSocks5 ?? false,
-    socks5Host: host?.socks5Host ?? "",
-    socks5Port: host?.socks5Port ?? 1080,
-    socks5Username: host?.socks5Username ?? "",
-    socks5Password: host?.socks5Password ?? "",
-    socks5ProxyMode: ((host?.socks5ProxyChain ?? []).length > 0
-      ? "chain"
-      : "single") as "single" | "chain",
-    socks5ProxyChain: (host?.socks5ProxyChain ?? []) as HostSocks5ProxyNode[],
     connectionOrigin: (host?.connectionOrigin ?? null) as
       "local" | "remote" | null,
     localOnly: host?.localOnly ?? false,
@@ -263,17 +253,6 @@ export function buildHostEditorPayload(
       usesCredential && form.credentialId ? Number(form.credentialId) : null,
     overrideCredentialUsername: form.overrideCredentialUsername,
     notes: form.notes,
-    useSocks5: form.useSocks5,
-    socks5Host:
-      form.socks5ProxyMode === "single" ? form.socks5Host || null : null,
-    socks5Port:
-      form.socks5ProxyMode === "single" ? form.socks5Port || null : null,
-    socks5Username:
-      form.socks5ProxyMode === "single" ? form.socks5Username || null : null,
-    socks5Password:
-      form.socks5ProxyMode === "single" ? form.socks5Password || null : null,
-    socks5ProxyChain:
-      form.socks5ProxyMode === "chain" ? form.socks5ProxyChain : null,
     connectionOrigin: form.connectionOrigin,
     localOnly: form.localOnly,
     enableSsh: protocols.enableSsh,

@@ -55,23 +55,6 @@ describe("core defaults in column form", () => {
     ).toBeNull();
   });
 
-  it("round-trips a proxy and keeps the host's own chain passwords", () => {
-    const row = {
-      socks5ProxyChain: JSON.stringify([{ host: "a", password: "mine" }]),
-    };
-    const patch = writeCoreDefault(
-      "socks5",
-      { useSocks5: true, socks5ProxyChain: [{ host: "a" }] },
-      row,
-    );
-    expect(JSON.parse(patch.socks5ProxyChain as string)).toEqual([
-      { host: "a", password: "mine" },
-    ]);
-    expect(readCoreDefault("socks5", { ...row, ...patch })).toMatchObject({
-      useSocks5: true,
-      socks5ProxyChain: [{ host: "a" }],
-    });
-  });
 
   it("stores empty lists as null and booleans as the column expects", () => {
     expect(writeCoreDefault("jumpHosts", [], {})).toEqual({ jumpHosts: null });

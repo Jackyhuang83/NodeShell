@@ -66,12 +66,6 @@ export type Host = {
   sshOptions?: HostSshOptions;
   notes?: string;
 
-  useSocks5?: boolean;
-  socks5Host?: string;
-  socks5Port?: number;
-  socks5Username?: string;
-  socks5Password?: string;
-  socks5ProxyChain?: ProxyNode[];
 
   portKnockSequence?: Array<{
     port: number;
@@ -129,20 +123,6 @@ export interface JumpHostData {
   hostId: number;
 }
 
-export interface ProxyNode {
-  host: string;
-  port: number;
-  /**
-   * The host editor writes "socks4"/"socks5"/"http", while proxy-helper.ts
-   * tests for "http" and casts everything else to 4|5 before handing it to the
-   * socks client. The two spellings have never agreed; typed as the union of
-   * what is actually stored rather than pretending one side is right.
-   */
-  type: 4 | 5 | "http" | "socks4" | "socks5";
-  username?: string;
-  password?: string;
-}
-
 export interface HostData {
   /** Host default keys the host sets itself, per namespace. Every other key follows its defaults. */
   defaultOverrides?: DefaultOverrides | null;
@@ -174,12 +154,6 @@ export interface HostData {
   sshOptions?: HostSshOptions;
   notes?: string;
 
-  useSocks5?: boolean;
-  socks5Host?: string;
-  socks5Port?: number;
-  socks5Username?: string;
-  socks5Password?: string;
-  socks5ProxyChain?: ProxyNode[];
 
   portKnockSequence?: Array<{
     port: number;

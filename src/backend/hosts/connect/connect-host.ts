@@ -198,10 +198,7 @@ export function getConnectionPoolKey(
   prefix: string,
   host: SshConnectHost,
 ): string {
-  const socks5Key = host.useSocks5
-    ? `:socks5:${host.socks5Host}:${host.socks5Port}`
-    : "";
-  return `${prefix}:${host.userId}:${host.ip}:${host.port}:${host.username}${socks5Key}`;
+  return `${prefix}:${host.userId}:${host.ip}:${host.port}:${host.username}`;
 }
 
 /**

@@ -65,7 +65,7 @@ export async function resolveHostById(
   const repository = createCurrentHostResolutionRepository();
 
   // Decrypt under the owner's DEK: shared hosts carry owner-encrypted fields
-  // (socks5Password, inline auth, ...) that the requester's key cannot open.
+  // Owner-encrypted inline authentication fields cannot be opened by another user.
   const ownerId = (await repository.findHostOwnerId(hostId)) ?? userId;
   const resolvedHost = await repository.findHostById(hostId, ownerId);
   if (!resolvedHost) return null;
@@ -133,13 +133,6 @@ export async function resolveHostById(
   host.sshOptions = parseSshOptions(
     host.sshOptions != null ? host.sshOptions : host.terminalConfig,
   );
-  if (typeof host.socks5ProxyChain === "string" && host.socks5ProxyChain) {
-    try {
-      host.socks5ProxyChain = JSON.parse(host.socks5ProxyChain as string);
-    } catch {
-      host.socks5ProxyChain = [];
-    }
-  }
   if (typeof host.portKnockSequence === "string" && host.portKnockSequence) {
     try {
       host.portKnockSequence = JSON.parse(host.portKnockSequence as string);

@@ -2,8 +2,7 @@
  * Between the host editor's form and host default keys: what value a key has
  * on the form, and how to put a default's value back on it.
  *
- * Core keys use the API's shape ("core.auth" is an object, "core.socks5"
- * too); plugin keys are the plugin's own field values.
+ * Core keys use the API shape; plugin keys are the plugin's own field values.
  */
 
 import {
@@ -47,20 +46,6 @@ function coreValue(form: Form, key: string): unknown {
     case "statusCheckEnabled":
     case "statusCheckInterval":
       return form[key as keyof Form];
-    case "socks5":
-      return {
-        useSocks5: form.useSocks5,
-        socks5Host:
-          form.socks5ProxyMode === "single" ? form.socks5Host || null : null,
-        socks5Port:
-          form.socks5ProxyMode === "single" ? form.socks5Port || null : null,
-        socks5Username:
-          form.socks5ProxyMode === "single"
-            ? form.socks5Username || null
-            : null,
-        socks5ProxyChain:
-          form.socks5ProxyMode === "chain" ? form.socks5ProxyChain : null,
-      };
     case "jumpHosts":
       return form.jumpHosts.map((jump) => ({ hostId: Number(jump.hostId) }));
     default:
@@ -119,31 +104,6 @@ export function applyDefaultToForm(
         overrideCredentialUsername: auth.overrideCredentialUsername,
         agentSocketPath: auth.agentSocketPath ?? "",
         agentIdentity: auth.agentIdentity ?? "",
-      };
-    }
-    case "socks5": {
-      const socks = normalized as {
-        useSocks5: boolean;
-        socks5Host: string | null;
-        socks5Port: number | null;
-        socks5Username: string | null;
-        socks5ProxyChain: Form["socks5ProxyChain"] | null;
-      };
-      const chain = socks.socks5ProxyChain ?? [];
-      return {
-        ...form,
-        useSocks5: socks.useSocks5,
-        socks5Host: socks.socks5Host ?? "",
-        socks5Port: socks.socks5Port ?? 1080,
-        socks5Username: socks.socks5Username ?? "",
-        socks5ProxyMode: chain.length > 0 ? "chain" : "single",
-        socks5ProxyChain: chain.map((node, index) => ({
-          ...node,
-          // The host's own proxy passwords stay with it.
-          ...(form.socks5ProxyChain[index]?.password
-            ? { password: form.socks5ProxyChain[index].password }
-            : {}),
-        })),
       };
     }
     case "jumpHosts":

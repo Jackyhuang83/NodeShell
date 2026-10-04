@@ -48,7 +48,6 @@ import {
 } from "./host-plugin-settings.js";
 import { validateParentHostId } from "./host-parent-validation.js";
 import { registerHostFolderRoutes } from "./host-folder-routes.js";
-import { registerHostNetworkRoutes } from "./host-network-routes.js";
 import { registerHostBulkRoutes } from "./host-bulk-routes.js";
 import { registerHostDefaultsRoutes } from "./host-defaults-routes.js";
 import { registerHostStatusRoutes } from "./host-status-routes.js";
@@ -226,12 +225,6 @@ router.post(
       sshOptions,
       forceKeyboardInteractive,
       notes,
-      useSocks5,
-      socks5Host,
-      socks5Port,
-      socks5Username,
-      socks5Password,
-      socks5ProxyChain,
       connectionOrigin,
       localOnly,
       portKnockSequence,
@@ -319,14 +312,6 @@ router.post(
       forceKeyboardInteractive: forceKeyboardInteractive ? "true" : "false",
       notes: notes || null,
       sudoPassword: sudoPassword || null,
-      useSocks5: useSocks5 ? 1 : 0,
-      socks5Host: socks5Host || null,
-      socks5Port: socks5Port || null,
-      socks5Username: socks5Username || null,
-      socks5Password: socks5Password || null,
-      socks5ProxyChain: socks5ProxyChain
-        ? JSON.stringify(socks5ProxyChain)
-        : null,
       connectionOrigin:
         connectionOrigin === "local" || connectionOrigin === "remote"
           ? connectionOrigin
@@ -635,12 +620,6 @@ router.put(
       sshOptions,
       forceKeyboardInteractive,
       notes,
-      useSocks5,
-      socks5Host,
-      socks5Port,
-      socks5Username,
-      socks5Password,
-      socks5ProxyChain,
       connectionOrigin,
       localOnly,
       portKnockSequence,
@@ -727,14 +706,6 @@ router.put(
         : null,
       forceKeyboardInteractive: forceKeyboardInteractive ? "true" : "false",
       notes: notes || null,
-      useSocks5: useSocks5 ? 1 : 0,
-      socks5Host: socks5Host || null,
-      socks5Port: socks5Port || null,
-      socks5Username: socks5Username || null,
-      socks5Password: socks5Password || null,
-      socks5ProxyChain: socks5ProxyChain
-        ? JSON.stringify(socks5ProxyChain)
-        : null,
       connectionOrigin:
         connectionOrigin === "local" || connectionOrigin === "remote"
           ? connectionOrigin
@@ -1618,14 +1589,6 @@ router.get(
             sshOptions: hostTerminalExport(resolvedHost).sshOptions,
             forceKeyboardInteractive:
               resolvedHost.forceKeyboardInteractive === "true",
-            useSocks5: !!resolvedHost.useSocks5,
-            socks5Host: resolvedHost.socks5Host || null,
-            socks5Port: resolvedHost.socks5Port || null,
-            socks5Username: resolvedHost.socks5Username || null,
-            socks5Password: resolvedHost.socks5Password || null,
-            socks5ProxyChain: resolvedHost.socks5ProxyChain
-              ? JSON.parse(resolvedHost.socks5ProxyChain as string)
-              : null,
             portKnockSequence: resolvedHost.portKnockSequence
               ? JSON.parse(resolvedHost.portKnockSequence as string)
               : null,
@@ -1753,16 +1716,6 @@ router.get(
               sshOptions: hostTerminalExport(resolvedHost).sshOptions,
               forceKeyboardInteractive:
                 resolvedHost.forceKeyboardInteractive === "true",
-              useSocks5: !!resolvedHost.useSocks5,
-              socks5Host: resolvedHost.socks5Host || null,
-              socks5Port: resolvedHost.socks5Port || null,
-              socks5Username: resolvedHost.socks5Username || null,
-              socks5Password: shareMode
-                ? null
-                : resolvedHost.socks5Password || null,
-              socks5ProxyChain: resolvedHost.socks5ProxyChain
-                ? JSON.parse(resolvedHost.socks5ProxyChain as string)
-                : null,
             };
 
         if (
@@ -2191,11 +2144,6 @@ registerHostBulkRoutes(
   requireDataAccess,
 );
 
-registerHostNetworkRoutes(router, {
-  authenticateJWT,
-  requireViewPermission: permissionManager.requirePermission("hosts.view"),
-  requireDataAccess,
-});
 
 registerHostDefaultsRoutes(router, {
   authenticateJWT,

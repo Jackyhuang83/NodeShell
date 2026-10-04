@@ -56,19 +56,7 @@ export type Host = {
   terminalConfig?: HostTerminalConfig;
   sshOptions?: HostSshOptions;
 
-  useSocks5?: boolean;
-  socks5Host?: string;
-  socks5Port?: number;
   connectionOrigin?: "local" | "remote" | null;
-  socks5Username?: string;
-  socks5Password?: string;
-  socks5ProxyChain?: {
-    host: string;
-    port: number;
-    type: 4 | 5 | "http" | "socks4" | "socks5";
-    username?: string;
-    password?: string;
-  }[];
   /** hostid is a legacy lowercase spelling still present in stored rows. */
   jumpHosts?: { hostId: string; hostid?: string }[];
   portKnockSequence?: {
