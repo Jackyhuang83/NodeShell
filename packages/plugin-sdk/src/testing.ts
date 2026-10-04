@@ -1029,6 +1029,14 @@ export function createFakeContext(
             ? host.syncId === resolveOptions.syncId
             : host.id === hostId,
         ) ?? null,
+      resolveQuickConnect: async (input) =>
+        ({
+          id: input.id,
+          ip: input.ip,
+          port: input.port,
+          username: input.username,
+          authType: "password",
+        }) as never,
       prepare: async () => ({
         config: {},
         outcome: { status: "ready" },
