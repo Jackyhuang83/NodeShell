@@ -2,7 +2,6 @@ import type { Router } from "express";
 import type { PluginContext } from "@termix/plugin-sdk/backend";
 import { createTerminalLogger } from "./helpers.js";
 import { hostImportNormalizer, hostPayloadLegacy } from "./host-import.js";
-import { createHistoryRepository } from "./history-repository.js";
 import { registerTerminalRoutes } from "./routes.js";
 import {
   DEFAULT_TIMEOUT_MINUTES,
@@ -16,11 +15,9 @@ import {
   type RecordingsWriterV1,
   type SessionGuestsV1,
   type SessionSharingV1,
-  type TerminalHistoryV1,
   type TmuxSessionsV1,
 } from "./services.js";
 import { ADMIN_KEYS } from "./settings.js";
-import { commandHistory } from "./tables.js";
 import { createTerminalSocket } from "./terminal-socket.js";
 import {
   validateAdminSettings,
@@ -61,9 +58,6 @@ export async function activate(ctx: PluginContext) {
   const log = createTerminalLogger(ctx.log);
   ctx.settings.onValidate("admin", validateAdminSettings);
   ctx.settings.onValidate("user", validateUserSettings);
-
-  const table = await ctx.db.define(commandHistory);
-  const history = createHistoryRepository(ctx.db, table);
 
   // Read on every detach, so it is kept current rather than awaited there.
   let timeoutMinutes = DEFAULT_TIMEOUT_MINUTES;
@@ -117,7 +111,6 @@ export async function activate(ctx: PluginContext) {
     ctx,
     log,
     sessionManager,
-    history,
   });
 
   const liveSessions: LiveSessionsV1 = {
@@ -157,15 +150,6 @@ export async function activate(ctx: PluginContext) {
   };
   // sessions.live is keyed by session type; remote desktop provides the others.
   ctx.services.provide("sessions.live", liveSessions, { name: "ssh" });
-
-  const terminalHistory: TerminalHistoryV1 = {
-    list: async (hostId, limit = 200) => {
-      const userId = ctx.currentActor();
-      if (!userId) return [];
-      return history.listCommandsForHost(userId, hostId, limit);
-    },
-  };
-  ctx.services.provide("terminal.history", terminalHistory);
 
   ctx.registry.provide(
     "ssh-terminal.hostImportNormalizer",
