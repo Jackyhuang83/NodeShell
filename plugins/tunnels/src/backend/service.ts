@@ -14,7 +14,6 @@ import {
   connectionToRequest,
   findSavedTunnel,
   hostLabel,
-  resolveEndpoint,
 } from "./config.js";
 
 export interface TunnelForwardTarget {
@@ -227,13 +226,10 @@ export function createTunnelsService(
 
       const saved = await findSavedTunnel(ctx, name);
       if (!saved) throw new Error(`Tunnel "${name}" is not configured`);
-      const config = await resolveEndpoint(
-        ctx,
-        buildTunnelConfig(
-          saved.host,
-          connectionToRequest(saved.host, saved.index, saved.connection),
-          actor(),
-        ),
+      const config = buildTunnelConfig(
+        saved.host,
+        connectionToRequest(saved.host, saved.index, saved.connection),
+        actor(),
       );
       await manager.start(config);
     },
