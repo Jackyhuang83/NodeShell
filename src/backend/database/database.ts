@@ -39,6 +39,7 @@ import pluginRoutes from "./routes/plugins.js";
 import { createPluginAssetsRouter } from "../plugins/assets.js";
 import { getPluginRuntime } from "../plugins/index.js";
 import { createCorsMiddleware } from "../utils/cors-config.js";
+import { createCsrfProtection } from "../utils/csrf-protection.js";
 import { createCompressionMiddleware } from "../utils/compression-config.js";
 import fs from "fs";
 import path from "path";
@@ -185,6 +186,7 @@ app.use((req, res, next) => {
   coreUrlencodedParser(req, res, next);
 });
 app.use(cookieParser());
+app.use(createCsrfProtection());
 app.use((_req, res, next) => {
   res.setHeader("Cache-Control", "no-store");
   next();
