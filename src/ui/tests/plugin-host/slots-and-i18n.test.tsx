@@ -58,17 +58,15 @@ describe("component slots", () => {
     expect(container.innerHTML).toBe("");
   });
 
-  it("renders nothing when the user lacks the permission", async () => {
+  it("renders gated contributions for the authenticated single Owner", async () => {
     mounted.push(
       await renderWithApp(
         { activate: contribute("use") },
         { manifest, permissions: [] },
       ),
     );
-    const { container } = render(
-      <ComponentSlot slotId="owner.slot" props={{ who: "me" }} />,
-    );
-    expect(container.innerHTML).toBe("");
+    render(<ComponentSlot slotId="owner.slot" props={{ who: "me" }} />);
+    expect(await screen.findByText("contributed for me")).toBeTruthy();
   });
 
   it("renders the contribution with the owner's props when permitted", async () => {

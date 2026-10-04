@@ -355,9 +355,9 @@ describe("registries through the app object", () => {
     await waitFor(() => expect(screen.getByText("allowed")).toBeTruthy());
   });
 
-  it("resolves a short permission name against the plugin's namespace", async () => {
+  it("treats the authenticated single Owner as permitted in plugin UI", async () => {
     const app = await mount([]);
     const container = app.renderSettingsComponent("probe");
-    expect(container.textContent).toBe("denied");
+    expect(container.textContent).toBe("allowed");
   });
 });

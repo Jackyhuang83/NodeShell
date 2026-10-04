@@ -11,12 +11,7 @@ import {
   withSqliteForeignKeysDisabled,
 } from "../../../database/repositories/sqlite-foreign-keys.js";
 
-const previousDatabaseDialect = process.env.DATABASE_DIALECT;
-
 afterEach(() => {
-  if (previousDatabaseDialect === undefined)
-    delete process.env.DATABASE_DIALECT;
-  else process.env.DATABASE_DIALECT = previousDatabaseDialect;
   vi.clearAllMocks();
 });
 
@@ -27,6 +22,22 @@ describe("withSqliteForeignKeysDisabled", () => {
     await expect(
       withSqliteForeignKeysDisabled(sqlite, async () => "imported"),
     ).resolves.toBe("imported");
+
+    expect(sqlite.exec.mock.calls).toEqual([
+      ["PRAGMA foreign_keys = OFF"],
+      ["PRAGMA foreign_keys = ON"],
+    ]);
+  });
+
+  it("restores foreign keys even when the import fails", async () => {
+    const sqlite = { exec: vi.fn() };
+
+    await expect(
+      withSqliteForeignKeysDisabled(sqlite, async () => {
+        throw new Error("failed");
+      }),
+    ).rejects.toThrow("failed");
+
     expect(sqlite.exec.mock.calls).toEqual([
       ["PRAGMA foreign_keys = OFF"],
       ["PRAGMA foreign_keys = ON"],
@@ -35,17 +46,20 @@ describe("withSqliteForeignKeysDisabled", () => {
 });
 
 describe("withCurrentSqliteForeignKeysDisabled", () => {
-  it.each(["postgres", "mysql"])(
-    "runs portable imports with constraints enabled on %s",
-    async (dialect) => {
-      process.env.DATABASE_DIALECT = dialect;
-      const operation = vi.fn().mockResolvedValue("imported");
+  it("uses NodeShell's current SQLite connection", async () => {
+    const sqlite = { exec: vi.fn() };
+    factory.getCurrentRepositorySqlite.mockReturnValue(sqlite);
+    const operation = vi.fn().mockResolvedValue("imported");
 
-      await expect(
-        withCurrentSqliteForeignKeysDisabled(operation),
-      ).resolves.toBe("imported");
-      expect(operation).toHaveBeenCalledOnce();
-      expect(factory.getCurrentRepositorySqlite).not.toHaveBeenCalled();
-    },
-  );
+    await expect(
+      withCurrentSqliteForeignKeysDisabled(operation),
+    ).resolves.toBe("imported");
+
+    expect(factory.getCurrentRepositorySqlite).toHaveBeenCalledOnce();
+    expect(operation).toHaveBeenCalledOnce();
+    expect(sqlite.exec.mock.calls).toEqual([
+      ["PRAGMA foreign_keys = OFF"],
+      ["PRAGMA foreign_keys = ON"],
+    ]);
+  });
 });

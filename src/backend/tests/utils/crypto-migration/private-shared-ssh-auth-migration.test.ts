@@ -103,19 +103,4 @@ describe("runPrivateSharedSshAuthMigration", () => {
     expect(state.saves).toHaveLength(0);
   });
 
-  // These snapshots only exist in databases written before Postgres and MySQL
-  // were supported. Without the guard this reached for a SQLite handle that is
-  // not there and logged a failure on every boot.
-  it.each(["postgres", "mysql"])("does nothing on %s", async (dialect) => {
-    process.env.DATABASE_DIALECT = dialect;
-
-    expect(await runPrivateSharedSshAuthMigration()).toBeNull();
-    expect(
-      state.sqlite
-        .prepare("SELECT COUNT(*) AS count FROM shared_host_secrets")
-        .get(),
-    ).toEqual({ count: 4 });
-    expect(state.settings.has("private_shared_ssh_auth_v1")).toBe(false);
-    expect(state.saves).toHaveLength(0);
-  });
 });
