@@ -450,147 +450,6 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
       }
     }, [showSearch]);
 
-    useEffect(() => {
-      autosuggestionRef.current = autosuggestion;
-    }, [autosuggestion]);
-
-    const isAutocompleteEnabled = useCallback(
-      () => termUserRef.current.commandAutocomplete,
-      [],
-    );
-
-    const getCursorScreenPosition = useCallback(() => {
-      if (!terminal || !xtermRef.current) return null;
-
-      const screen =
-        xtermRef.current.querySelector<HTMLElement>(".xterm-screen") ??
-        xtermRef.current;
-      const rows =
-        xtermRef.current.querySelector<HTMLElement>(".xterm-rows") ?? screen;
-      const screenRect = screen.getBoundingClientRect();
-      const rowsRect = rows.getBoundingClientRect();
-      const computedStyle = window.getComputedStyle(rows);
-      const terminalWithCore = terminal as typeof terminal & {
-        _core?: {
-          _renderService?: {
-            dimensions?: {
-              css?: {
-                cell?: {
-                  width?: number;
-                  height?: number;
-                };
-              };
-            };
-          };
-        };
-      };
-      const measuredCell =
-        terminalWithCore._core?._renderService?.dimensions?.css?.cell;
-      const fallbackCellWidth =
-        terminal.cols > 0 ? rowsRect.width / terminal.cols : 10;
-      const fallbackCellHeight =
-        terminal.rows > 0 ? rowsRect.height / terminal.rows : 20;
-      const cellWidth = measuredCell?.width || fallbackCellWidth;
-      const cellHeight = measuredCell?.height || fallbackCellHeight;
-      const fontSize =
-        typeof terminal.options.fontSize === "number"
-          ? `${terminal.options.fontSize}px`
-          : computedStyle.fontSize;
-      const lineHeight =
-        typeof terminal.options.lineHeight === "number"
-          ? `${cellHeight}px`
-          : computedStyle.lineHeight;
-      const fontFamily =
-        typeof terminal.options.fontFamily === "string"
-          ? terminal.options.fontFamily
-          : computedStyle.fontFamily;
-
-      return {
-        top: Math.max(
-          0,
-          screenRect.top + terminal.buffer.active.cursorY * cellHeight,
-        ),
-        left: Math.max(
-          0,
-          screenRect.left + terminal.buffer.active.cursorX * cellWidth,
-        ),
-        style: {
-          fontFamily,
-          fontSize,
-          lineHeight,
-          letterSpacing: `${terminal.options.letterSpacing ?? 0}px`,
-        },
-      };
-    }, [terminal, xtermRef]);
-
-    const clearAutosuggestion = useCallback(() => {
-      autosuggestionRef.current = "";
-      currentAutosuggestionCommand.current = "";
-      setAutosuggestion("");
-    }, []);
-
-    const updateAutosuggestion = useCallback(() => {
-      if (!isAutocompleteEnabled() || autosuggestionSuppressedRef.current) {
-        clearAutosuggestion();
-        return;
-      }
-
-      const currentCommand = getCurrentCommandRef.current().trim();
-      if (!currentCommand || showAutocompleteRef.current) {
-        clearAutosuggestion();
-        return;
-      }
-
-      const suggestion = autocompleteHistory.current.find(
-        (command) =>
-          command.startsWith(currentCommand) &&
-          command !== currentCommand &&
-          command.length > currentCommand.length,
-      );
-
-      if (!suggestion) {
-        clearAutosuggestion();
-        return;
-      }
-
-      const position = getCursorScreenPosition();
-      if (!position) {
-        clearAutosuggestion();
-        return;
-      }
-
-      const suffix = suggestion.substring(currentCommand.length);
-      currentAutosuggestionCommand.current = currentCommand;
-      autosuggestionRef.current = suffix;
-      setAutosuggestion(suffix);
-      setAutosuggestionPosition({ top: position.top, left: position.left });
-      setAutosuggestionStyle(position.style);
-    }, [clearAutosuggestion, getCursorScreenPosition, isAutocompleteEnabled]);
-
-    const scheduleAutosuggestionUpdate = useCallback(() => {
-      window.requestAnimationFrame(() => {
-        updateAutosuggestion();
-      });
-    }, [updateAutosuggestion]);
-
-    const acceptAutosuggestion = useCallback(() => {
-      const suffix = autosuggestionRef.current;
-      if (!suffix || webSocketRef.current?.readyState !== 1) return false;
-
-      for (const char of suffix) {
-        webSocketRef.current.send(
-          JSON.stringify({ type: "input", data: char }),
-        );
-      }
-
-      updateCurrentCommandRef.current(
-        `${currentAutosuggestionCommand.current}${suffix}`,
-      );
-      autosuggestionSuppressedRef.current = false;
-      clearAutosuggestion();
-      return true;
-    }, [clearAutosuggestion]);
-
     const firstDockId = dockContributions[0]?.actionId;
     // Ctrl+Shift+A and the floating button toggle the first docked panel.
     const toggleDock = useCallback(() => {
@@ -613,15 +472,12 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
         ) {
           return;
         }
-
-        clearAutosuggestion();
-        trackInput(trimmedCommand);
         webSocketRef.current.send(
           JSON.stringify({ type: "input", data: `${trimmedCommand}\r` }),
         );
         setTimeout(() => terminal?.focus(), 50);
       },
-      [clearAutosuggestion, terminal, trackInput],
+      [terminal],
     );
 
     const slotApiRef = useRef<TerminalSlotApi | null>(null);
@@ -1551,60 +1407,10 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
         );
         terminalInputDisposableRef.current = terminal.onData((data) => {
           if (ws.readyState !== WebSocket.OPEN) return;
-          if (data === "\r" || data === "\n") {
-            const currentCmd = getCurrentCommand().trim();
-            const termixMatch = currentCmd.match(/^termix\s+(.+)$/);
-            if (termixMatch && onOpenFileInEditor) {
-              const filePath = termixMatch[1].trim();
-              trackInput(data);
-              clearAutosuggestion();
-              terminal.write("\r\n");
-              if (ws.readyState === WebSocket.OPEN) {
-                ws.send(
-                  JSON.stringify({
-                    type: "open_file_in_editor",
-                    path: filePath,
-                  }),
-                );
-              }
-              return;
-            }
-          }
-          trackInput(data);
           const predicted = alternateScreenModeRef.current
             ? ""
             : localEchoRef.current?.handleInput(data);
           if (predicted) terminal.write(predicted);
-
-          const resetsCurrentCommand =
-            data === "\r" ||
-            data === "\n" ||
-            data.includes("\x03") ||
-            data.includes("\x04") ||
-            data.includes("\x15");
-          const isCursorNavigation = data.includes("\x1b");
-          const isCommandEdit =
-            data.includes("\x08") ||
-            data.includes("\x7f") ||
-            Array.from(data).some((char) => {
-              const charCode = char.charCodeAt(0);
-              return charCode >= 32 && charCode <= 126;
-            });
-
-          if (resetsCurrentCommand) {
-            autosuggestionSuppressedRef.current = false;
-            clearAutosuggestion();
-          } else if (isCursorNavigation) {
-            autosuggestionSuppressedRef.current = true;
-            clearAutosuggestion();
-          } else if (isCommandEdit) {
-            // Don't recompute here - cursorX isn't updated until the
-            // server echoes the input back and it's written to the
-            // terminal (see the "data" message handler below). Recomputing
-            // now reads a stale cursor position and misplaces the ghost text.
-            clearAutosuggestion();
-          }
-
           ws.send(JSON.stringify({ type: "input", data }));
         });
 
@@ -1641,16 +1447,8 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
               outputListenersRef.current.forEach((listener) =>
                 listener(msg.data),
               );
-              if (showAutocompleteRef.current) {
-                showAutocompleteRef.current = false;
-                setShowAutocomplete(false);
-                setAutocompleteSuggestions([]);
-                currentAutocompleteCommand.current = "";
-              }
-
               const output = applyLocalEchoToOutput(msg.data);
               terminal.write(formatTerminalOutput(output));
-              scheduleAutosuggestionUpdate();
               // Strip ANSI escape codes before testing — newer sudo versions (Ubuntu 26.04+)
               // emit colored prompts with embedded escape sequences that break the regex.
               const strippedData = msg.data.replace(
@@ -1662,7 +1460,6 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
               const stringData = String(msg.data);
               const output = applyLocalEchoToOutput(stringData);
               terminal.write(formatTerminalOutput(output));
-              scheduleAutosuggestionUpdate();
             }
           } else if (msg.type === "error") {
             const errorMessage = msg.message || t("terminal.unknownError");
@@ -2577,18 +2374,7 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
         return false;
       };
 
-      // On macOS Electron, Tab key events can be swallowed by Chromium's focus
-      // traversal system before xterm.js sees them. Calling preventDefault() in
-      // the capture phase blocks that traversal while still allowing the event to
-      // reach xterm.js's internal handler (which fires our attachCustomKeyEventHandler).
-      const handleTabCapture = (e: KeyboardEvent) => {
-        if (isTabKeyEvent(e)) {
-          e.preventDefault();
-        }
-      };
-
       element?.addEventListener("keydown", handleBackspaceMode, true);
-      element?.addEventListener("keydown", handleTabCapture, true);
 
       const resizeObserver = new ResizeObserver(() => {
         // Background keep-alive tabs still observe layout; skip fit work.
@@ -2617,7 +2403,6 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
         element?.removeEventListener("mousemove", handleTmuxDragMove);
         element?.removeEventListener("mouseup", handleTmuxDragEnd);
         element?.removeEventListener("keydown", handleBackspaceMode, true);
-        element?.removeEventListener("keydown", handleTabCapture, true);
         disposeTouchWheel();
         if (notifyTimerRef.current) clearTimeout(notifyTimerRef.current);
         if (resizeTimeout.current) clearTimeout(resizeTimeout.current);
@@ -2699,9 +2484,8 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
           return true;
         }
 
-        // Custom user keybindings take priority over built-in defaults, but
-        // never override autocomplete popup navigation while it is open.
-        if (!showAutocompleteRef.current) {
+        // Custom user keybindings take priority over built-in defaults.
+        {
           const matched = findMatchingKeybinding(
             e,
             customKeybindingsRef.current,
