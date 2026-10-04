@@ -1050,10 +1050,7 @@ export {
 } from "@/api/dashboard-api";
 
 // ============================================================================
-export {
-  linkExternalToPasswordAccount,
-  unlinkExternalFromPasswordAccount,
-} from "@/api/external-account-api";
+
 
 export {
   getOpenTabs,
