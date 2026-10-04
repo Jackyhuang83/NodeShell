@@ -23,7 +23,7 @@ export type CoreRailView =
   | ToolsTab
   | "connections"
   | "user-profile"
-  | "admin-settings";
+;
 
 export type RailView = CoreRailView | (string & {});
 
@@ -104,7 +104,6 @@ export function AppRail({
   railView,
   sidebarOpen,
   username,
-  isAdmin,
   pluginsSettled = true,
   onRailClick,
   onOpenTab,
@@ -114,7 +113,6 @@ export function AppRail({
   railView: RailView;
   sidebarOpen: boolean;
   username: string;
-  isAdmin: boolean;
   /** False while plugins are still registering their rail items. */
   pluginsSettled?: boolean;
   onRailClick: (view: RailView) => void;
@@ -123,7 +121,6 @@ export function AppRail({
   onLogout: (options?: { manual?: boolean }) => void;
 }) {
   const { t } = useTranslation();
-  void isAdmin;
   const [hovered, setHovered] = useState(false);
   const [pinned, setPinned] = useState(() => readRailPreference("pinAppRail"));
   const [expandOnHover, setExpandOnHover] = useState(() =>
