@@ -102,7 +102,11 @@ function upgrade(
   protocols: string[] = [],
 ): Promise<"open" | number> {
   return new Promise((resolve) => {
-    const socket = new WebSocket(url, protocols);
+    const parsed = new URL(url);
+    const originProtocol = parsed.protocol === "wss:" ? "https:" : "http:";
+    const socket = new WebSocket(url, protocols, {
+      headers: { Origin: `${originProtocol}//${parsed.host}` },
+    });
     socket.once("open", () => {
       socket.close();
       resolve("open");
