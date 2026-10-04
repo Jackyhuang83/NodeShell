@@ -505,7 +505,6 @@ export function HostEditorGeneralTab({
               </div>
             </div>
           </DefaultsOnly>
-        </div>
       </SectionCard>
 
       <SectionCard

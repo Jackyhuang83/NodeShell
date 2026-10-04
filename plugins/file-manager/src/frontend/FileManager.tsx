@@ -641,12 +641,6 @@ function FileManagerContent({
         userId: currentHost.userId,
         forceKeyboardInteractive: currentHost.forceKeyboardInteractive,
         jumpHosts: currentHost.jumpHosts,
-        useSocks5: currentHost.useSocks5,
-        socks5Host: currentHost.socks5Host,
-        socks5Port: currentHost.socks5Port,
-        socks5Username: currentHost.socks5Username,
-        socks5Password: currentHost.socks5Password,
-        socks5ProxyChain: currentHost.socks5ProxyChain,
       });
 
       if (result?.requires_browser_sign_in) {
@@ -1719,12 +1713,6 @@ function FileManagerContent({
           keyPassword: currentHost.keyPassword,
           credentialId: currentHost.credentialId,
           jumpHosts: currentHost.jumpHosts,
-          useSocks5: currentHost.useSocks5,
-          socks5Host: currentHost.socks5Host,
-          socks5Port: currentHost.socks5Port,
-          socks5Username: currentHost.socks5Username,
-          socks5Password: currentHost.socks5Password,
-          socks5ProxyChain: currentHost.socks5ProxyChain,
         });
 
         if (!result.success) {
@@ -2517,12 +2505,6 @@ function FileManagerContent({
         credentialId: currentHost.credentialId,
         userId: currentHost.userId,
         jumpHosts: currentHost.jumpHosts,
-        useSocks5: currentHost.useSocks5,
-        socks5Host: currentHost.socks5Host,
-        socks5Port: currentHost.socks5Port,
-        socks5Username: currentHost.socks5Username,
-        socks5Password: currentHost.socks5Password,
-        socks5ProxyChain: currentHost.socks5ProxyChain,
       });
     }
   }
@@ -2814,12 +2796,6 @@ function FileManagerContent({
         credentialId: currentHost.credentialId,
         userId: currentHost.userId,
         jumpHosts: currentHost.jumpHosts,
-        useSocks5: currentHost.useSocks5,
-        socks5Host: currentHost.socks5Host,
-        socks5Port: currentHost.socks5Port,
-        socks5Username: currentHost.socks5Username,
-        socks5Password: currentHost.socks5Password,
-        socks5ProxyChain: currentHost.socks5ProxyChain,
       });
 
       if (result?.requires_browser_sign_in) {
@@ -2903,12 +2879,6 @@ function FileManagerContent({
         credentialId: currentHost.credentialId,
         userId: currentHost.userId,
         jumpHosts: currentHost.jumpHosts,
-        useSocks5: currentHost.useSocks5,
-        socks5Host: currentHost.socks5Host,
-        socks5Port: currentHost.socks5Port,
-        socks5Username: currentHost.socks5Username,
-        socks5Password: currentHost.socks5Password,
-        socks5ProxyChain: currentHost.socks5ProxyChain,
       });
 
       if (result?.status === "passphrase_required") {

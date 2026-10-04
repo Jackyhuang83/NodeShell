@@ -95,12 +95,6 @@ export async function connectSSH(
     credentialId?: number;
     userId?: string;
     forceKeyboardInteractive?: boolean;
-    useSocks5?: boolean;
-    socks5Host?: string;
-    socks5Port?: number;
-    socks5Username?: string;
-    socks5Password?: string;
-    socks5ProxyChain?: unknown;
     jumpHosts?: Array<{ hostId: number }>;
   },
 ): Promise<SSHConnectResult> {
@@ -945,12 +939,6 @@ export async function ensureSSHSessionForHost(
       userId: host.userId,
       forceKeyboardInteractive: host.forceKeyboardInteractive,
       jumpHosts: host.jumpHosts,
-      useSocks5: host.useSocks5,
-      socks5Host: host.socks5Host,
-      socks5Port: host.socks5Port,
-      socks5Username: host.socks5Username,
-      socks5Password: host.socks5Password,
-      socks5ProxyChain: host.socks5ProxyChain,
     });
 
     if (
