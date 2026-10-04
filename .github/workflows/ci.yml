@@ -33,5 +33,7 @@ jobs:
         run: npm run type-check
       - name: Build
         run: npm run build
+      - name: Verify admin CLI artifact
+        run: test -f dist/backend/backend/cli/nodeshell-admin.js
       - name: Test
         run: npm run test
