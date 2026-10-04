@@ -80,9 +80,19 @@ async function startServer(): Promise<string> {
 function connect(
   url: string,
   protocols: string[] = [],
+  origin: string | null | undefined = undefined,
 ): Promise<{ outcome: "open"; socket: WebSocket } | { outcome: number }> {
   return new Promise((resolve) => {
-    const socket = new WebSocket(url, protocols);
+    const parsed = new URL(url);
+    const defaultOrigin =
+      parsed.protocol === "wss:"
+        ? `https://${parsed.host}`
+        : `http://${parsed.host}`;
+    const socket = new WebSocket(
+      url,
+      protocols,
+      origin === null ? {} : { origin: origin ?? defaultOrigin },
+    );
     socket.once("open", () => resolve({ outcome: "open", socket }));
     socket.once("unexpected-response", (_req, res) =>
       resolve({ outcome: res.statusCode ?? 0 }),
@@ -155,6 +165,30 @@ describe("ctx.ws routing", () => {
     await connect(`${base}/ssh/websocket/`);
 
     expect(claimedByCore).toBe(true);
+  });
+});
+
+describe("ctx.ws origin validation", () => {
+  it("rejects an upgrade with no Origin", async () => {
+    ws.registerPluginWsRoute("sample-plugin", "/socket", () => {}, DECLARED);
+    const base = await startServer();
+    const result = await connect(
+      `${base}/plugin-ws/sample-plugin/socket`,
+      authProtocols(state.validToken),
+      null,
+    );
+    expect(result.outcome).toBe(403);
+  });
+
+  it("rejects a cross-site Origin even with a valid session", async () => {
+    ws.registerPluginWsRoute("sample-plugin", "/socket", () => {}, DECLARED);
+    const base = await startServer();
+    const result = await connect(
+      `${base}/plugin-ws/sample-plugin/socket`,
+      authProtocols(state.validToken),
+      "https://evil.example",
+    );
+    expect(result.outcome).toBe(403);
   });
 });
 
