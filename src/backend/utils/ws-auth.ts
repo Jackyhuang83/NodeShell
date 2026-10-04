@@ -30,7 +30,11 @@ export function isCookieOriginAllowed(req: IncomingMessage): boolean {
   ) {
     return true;
   }
-  return (process.env.TERMIX_ALLOWED_ORIGINS ?? "")
+  return (
+    process.env.NODESHELL_ALLOWED_ORIGINS ??
+    process.env.TERMIX_ALLOWED_ORIGINS ??
+    ""
+  )
     .split(",")
     .map((value) => value.trim().toLowerCase())
     .includes(parsed.origin.toLowerCase());
