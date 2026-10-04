@@ -5,23 +5,11 @@
       "source": "workspace"
     },
     {
-      "id": "host-metrics",
-      "source": "workspace"
-    },
-    {
       "id": "ssh-terminal",
       "source": "workspace"
     },
     {
-      "id": "totp",
-      "source": "workspace"
-    },
-    {
       "id": "tunnels",
-      "source": "workspace"
-    },
-    {
-      "id": "webauthn",
       "source": "workspace"
     }
   ]
