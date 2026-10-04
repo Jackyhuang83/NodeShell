@@ -1561,56 +1561,6 @@ export function createTerminalSocket(deps: TerminalSocketDeps) {
         }
       }
 
-      let quickConnectHost: PluginSshHost | null = null;
-      if (credentialId && id <= 0 && userId) {
-        try {
-          quickConnectHost = await ctx.ssh.resolveQuickConnect({
-            id,
-            ip,
-            port,
-            username,
-            credentialId,
-            overrideCredentialUsername:
-              hostConfig.overrideCredentialUsername ?? false,
-            sshOptions: hostConfig.sshOptions,
-          });
-
-          if (!quickConnectHost) {
-            ws.send(
-              JSON.stringify({
-                type: "error",
-                message: "Saved credential is unavailable for Quick Connect",
-              }),
-            );
-            cleanupAuthState(connectionTimeout);
-            return;
-          }
-
-          ip = quickConnectHost.ip;
-          port = quickConnectHost.port;
-          username = quickConnectHost.username;
-          sendLog(
-            "auth",
-            "info",
-            "Saved credential resolved securely on the server",
-          );
-        } catch (error) {
-          sshLogger.error("Quick Connect credential resolution failed", error, {
-            operation: "quick_connect_credential_resolve",
-            credentialId,
-            userId,
-          });
-          ws.send(
-            JSON.stringify({
-              type: "error",
-              message: "Failed to resolve saved credential",
-            }),
-          );
-          cleanupAuthState(connectionTimeout);
-          return;
-        }
-      }
-
       const serverHostId = resolveServerHostId(id, resolvedHostData);
 
       let autoTmuxEnabled = false;
@@ -2735,10 +2685,6 @@ export function createTerminalSocket(deps: TerminalSocketDeps) {
         ),
       );
 
-      if (quickConnectHost?.authType) {
-        resolvedCredentials.authType = String(quickConnectHost.authType);
-      }
-
       const effectiveAuthType =
         resolvedCredentials.authType ||
         (resolvedCredentials.key
@@ -2757,32 +2703,30 @@ export function createTerminalSocket(deps: TerminalSocketDeps) {
         return;
       }
 
-      connectTarget =
-        quickConnectHost ??
-        ({
-          ...(resolvedHostData ?? {}),
-          id: serverHostId ?? id,
-          ip,
-          port,
-          username,
-          userId: hostConfig.userId,
-          authType: effectiveAuthType,
-          password: resolvedCredentials.password,
-          key: resolvedCredentials.key,
-          keyPassword: resolvedCredentials.keyPassword,
-          keyType: resolvedCredentials.keyType,
-          certPublicKey: resolvedCredentials.certPublicKey,
-          forceKeyboardInteractive: hostConfig.forceKeyboardInteractive,
-          sshOptions: hostConfig.sshOptions,
-          jumpHosts: hostConfig.jumpHosts,
-          useSocks5: hostConfig.useSocks5,
-          socks5Host: hostConfig.socks5Host,
-          socks5Port: hostConfig.socks5Port,
-          socks5Username: hostConfig.socks5Username,
-          socks5Password: hostConfig.socks5Password,
-          socks5ProxyChain: hostConfig.socks5ProxyChain,
-          portKnockSequence: hostConfig.portKnockSequence,
-        } as PluginSshHost);
+      connectTarget = {
+        ...(resolvedHostData ?? {}),
+        id: serverHostId ?? id,
+        ip,
+        port,
+        username,
+        userId: hostConfig.userId,
+        authType: effectiveAuthType,
+        password: resolvedCredentials.password,
+        key: resolvedCredentials.key,
+        keyPassword: resolvedCredentials.keyPassword,
+        keyType: resolvedCredentials.keyType,
+        certPublicKey: resolvedCredentials.certPublicKey,
+        forceKeyboardInteractive: hostConfig.forceKeyboardInteractive,
+        sshOptions: hostConfig.sshOptions,
+        jumpHosts: hostConfig.jumpHosts,
+        useSocks5: hostConfig.useSocks5,
+        socks5Host: hostConfig.socks5Host,
+        socks5Port: hostConfig.socks5Port,
+        socks5Username: hostConfig.socks5Username,
+        socks5Password: hostConfig.socks5Password,
+        socks5ProxyChain: hostConfig.socks5ProxyChain,
+        portKnockSequence: hostConfig.portKnockSequence,
+      } as PluginSshHost;
 
       const built = await ctx.ssh.prepare(connectTarget, {
         purpose: "terminal",
@@ -2794,13 +2738,6 @@ export function createTerminalSocket(deps: TerminalSocketDeps) {
         log: (level, message) => sendLog("auth", level, message),
       });
       const connectConfig = built.config;
-      if (
-        quickConnectHost &&
-        typeof connectConfig.password === "string" &&
-        !resolvedCredentials.password
-      ) {
-        resolvedCredentials.password = connectConfig.password;
-      }
       // DNS was resolved above, and skipped when jump hosts do it instead.
       connectConfig.host = connectHost;
       prepared = built;
