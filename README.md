@@ -48,6 +48,57 @@ NodeShell v0.1 deliberately uses a smaller trust boundary than upstream:
 External secret files are expected to live outside the application data volume.
 No passwords, SSH private keys or service tokens belong in this repository.
 
+## First secure initialization
+
+NodeShell does not expose browser registration or browser password recovery.
+
+1. Create root-only host secrets:
+
+   ```bash
+   sudo install -d -m 700 /etc/nodeshell/secrets
+   for name in jwt_secret database_key encryption_key internal_auth_token; do
+     openssl rand -hex 32 | sudo tee "/etc/nodeshell/secrets/$name" >/dev/null
+     sudo chown root:root "/etc/nodeshell/secrets/$name"
+     sudo chmod 600 "/etc/nodeshell/secrets/$name"
+   done
+   ```
+
+2. Set the HTTPS URL users will actually open. WebAuthn/passkeys use this as
+   the fixed Origin and RP-ID security boundary:
+
+   ```bash
+   export NODESHELL_PUBLIC_URL="https://ssh.example.com"
+   ```
+
+3. Start NodeShell. The management port remains loopback-only:
+
+   ```bash
+   docker compose -f docker/docker-compose.yml up -d
+   ```
+
+4. Create the first Owner from inside the container. The password is prompted
+   on the TTY and is never accepted as a command-line argument:
+
+   ```bash
+   docker exec -it nodeshell nodeshell admin create-owner --username admin
+   ```
+
+   Check initialization state at any time:
+
+   ```bash
+   docker exec -it nodeshell nodeshell admin status
+   ```
+
+For local password recovery:
+
+```bash
+docker exec -it nodeshell nodeshell admin reset-password --username admin
+```
+
+For current v3 system-wrapped data keys, this preserves encrypted user data.
+A legacy password-wrapped key fails closed. NodeShell will not erase data unless
+the operator deliberately repeats the command with `--confirm-data-wipe`.
+
 ## Development branches
 
 - `security-baseline` — audited Phase 1A baseline
