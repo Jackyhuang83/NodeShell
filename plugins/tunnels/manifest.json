@@ -2,7 +2,7 @@
   "id": "tunnels",
   "name": "Tunnels",
   "version": "1.0.0",
-  "description": "SSH port forwarding between servers, plus local tunnels from the desktop app.",
+  "description": "Local SSH port forwarding for saved NodeShell hosts.",
   "author": {
     "name": "Termix"
   },
@@ -18,11 +18,8 @@
     "hosts:read",
     "credentials:use",
     "ssh:connect",
-    "db:own",
     "network:serve",
-    "ui:surface",
-    "users:impersonate",
-    "db:core-refs"
+    "ui:surface"
   ],
   "provides": [
     {
@@ -37,14 +34,9 @@
         "id": "tunnel",
         "titleKey": "nav.tunnels",
         "icon": "ArrowLeftRight",
-        "openFrom": ["host-context-menu"]
-      }
-    ],
-    "panels": [
-      {
-        "id": "port-forwarding",
-        "titleKey": "nav.portForwarding",
-        "icon": "Network"
+        "openFrom": [
+          "host-context-menu"
+        ]
       }
     ],
     "actions": [
@@ -66,7 +58,10 @@
         "name": "use",
         "titleKey": "permissions.use.title",
         "descriptionKey": "permissions.use.description",
-        "defaultRoles": ["admin", "user"]
+        "defaultRoles": [
+          "admin",
+          "user"
+        ]
       }
     ],
     "settings": {
@@ -89,9 +84,12 @@
       "key": "enableTunnel",
       "labelKey": "hosts.tabTunnels",
       "editorTab": "general"
-    },
-    "uses": ["homepage.widgets"]
+    }
   },
   "locales": "locales",
-  "platforms": ["linux", "win32", "darwin"]
+  "platforms": [
+    "linux",
+    "win32",
+    "darwin"
+  ]
 }
