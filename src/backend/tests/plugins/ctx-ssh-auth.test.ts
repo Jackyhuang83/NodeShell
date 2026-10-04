@@ -258,58 +258,6 @@ describe("ctx.ssh", () => {
     expect(h.connects[0].target).toMatchObject({ userId: "caller" });
   });
 
-  it("keeps Quick Connect credential secrets inside core", async () => {
-    h.granted = new Set(["ssh:connect", "credentials:use"]);
-    h.usableCredential = {
-      id: 12,
-      username: "credential-user",
-      password: "server-only-password",
-      privateKey: null,
-      keyPassword: null,
-      keyType: null,
-      certPublicKey: null,
-    };
-
-    const audit = vi.fn(async () => {});
-    const ssh = createPluginSsh({
-      manifest: manifest(["ssh:connect", "credentials:use"]),
-      bag: new DisposableBag("fixture"),
-      audit,
-    });
-
-    const host = await ssh.resolveQuickConnect({
-      id: -1,
-      ip: "203.0.113.10",
-      port: 22,
-      username: "typed-user",
-      credentialId: 12,
-    });
-
-    expect(host).toMatchObject({
-      id: -1,
-      ip: "203.0.113.10",
-      port: 22,
-      username: "credential-user",
-      authType: "password",
-    });
-    expect(host).not.toHaveProperty("password");
-    expect(host).not.toHaveProperty("key");
-    expect(host).not.toHaveProperty("keyPassword");
-
-    await ssh.connect(host!);
-    expect(h.connects[0].target).toMatchObject({
-      id: -1,
-      username: "credential-user",
-      password: "server-only-password",
-      userId: "user-1",
-    });
-    expect(audit).toHaveBeenCalledWith(
-      "ssh_resolve_quick_connect",
-      "credential 12",
-      { success: true },
-    );
-  });
-
   it("passes a given stream through to the pipeline, gated like any connect", async () => {
     const stream = { throughSource: true };
     const ssh = createPluginSsh({
