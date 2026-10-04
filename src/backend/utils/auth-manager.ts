@@ -328,7 +328,7 @@ class AuthManager {
         await createCurrentSessionRepository().create({
           id: sessionId,
           userId,
-          jwtToken: token,
+          jwtToken: await this.digestSessionToken(token),
           deviceType: options.deviceType,
           deviceInfo: options.deviceInfo,
           oidcSub: options.oidcSub ?? null,
@@ -373,6 +373,23 @@ class AuthManager {
     }
   }
 
+  private async digestSessionToken(token: string): Promise<string> {
+    const key = await this.systemCrypto.getJWTSecret();
+    return crypto.createHmac("sha256", key).update(token).digest("base64url");
+  }
+
+  private async sessionTokenMatches(
+    token: string,
+    storedDigest: string,
+  ): Promise<boolean> {
+    const actual = Buffer.from(await this.digestSessionToken(token));
+    const expected = Buffer.from(storedDigest);
+    return (
+      actual.length === expected.length &&
+      crypto.timingSafeEqual(actual, expected)
+    );
+  }
+
   async verifyJWTToken(token: string): Promise<JWTPayload | null> {
     try {
       const jwtSecret = await this.systemCrypto.getJWTSecret();
@@ -388,6 +405,15 @@ class AuthManager {
           if (!sessionRecord) {
             databaseLogger.warn("Session not found during JWT verification", {
               operation: "jwt_verify_session_not_found",
+              sessionId: payload.sessionId,
+              userId: payload.userId,
+            });
+            return null;
+          }
+
+          if (!(await this.sessionTokenMatches(token, sessionRecord.jwtToken))) {
+            databaseLogger.warn("Session token digest mismatch", {
+              operation: "jwt_verify_session_digest_mismatch",
               sessionId: payload.sessionId,
               userId: payload.userId,
             });
@@ -443,7 +469,10 @@ class AuthManager {
       expiresIn: Math.ceil(maxAge / 1000),
     } as jwt.SignOptions);
 
-    await createCurrentSessionRepository().updateToken(sessionId, token);
+    await createCurrentSessionRepository().updateToken(
+      sessionId,
+      await this.digestSessionToken(token),
+    );
 
     return { token, maxAge };
   }
