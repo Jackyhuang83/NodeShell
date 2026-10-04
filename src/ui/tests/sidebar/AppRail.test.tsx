@@ -28,7 +28,6 @@ function renderRail(onRailClick = vi.fn()) {
       railView="hosts"
       sidebarOpen={false}
       username="alice"
-      isAdmin={false}
       onRailClick={onRailClick}
       onLogout={vi.fn()}
     />,
