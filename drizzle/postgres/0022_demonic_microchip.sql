@@ -1,1 +1,0 @@
-ALTER TABLE "ssh_data" ADD COLUMN "enable_ai_assistant" boolean DEFAULT false NOT NULL;

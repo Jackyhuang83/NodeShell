@@ -1,1 +1,0 @@
-ALTER TABLE `user_preferences` ADD `show_pin_app_rail_button` integer;

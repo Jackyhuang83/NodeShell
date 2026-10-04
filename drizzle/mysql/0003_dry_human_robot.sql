@@ -1,1 +1,0 @@
-ALTER TABLE `snippets` ADD `is_note` boolean DEFAULT false NOT NULL;

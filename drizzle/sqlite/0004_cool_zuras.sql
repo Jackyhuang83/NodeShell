@@ -1,1 +1,0 @@
-ALTER TABLE `ssh_data` ADD `parent_host_id` integer REFERENCES ssh_data(id) ON DELETE SET NULL;

@@ -1,1 +1,0 @@
-ALTER TABLE "ssh_data" ADD COLUMN "ssh_options" text;

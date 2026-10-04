@@ -1,1 +1,0 @@
-ALTER TABLE "user_preferences" ADD COLUMN "show_pin_app_rail_button" boolean;

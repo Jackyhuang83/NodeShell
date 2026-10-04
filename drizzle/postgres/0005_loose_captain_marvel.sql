@@ -1,1 +1,0 @@
-ALTER TABLE "ssh_data" ADD COLUMN "enable_terminal_toolbar" boolean DEFAULT true NOT NULL;
