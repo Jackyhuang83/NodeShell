@@ -10,7 +10,6 @@ services:
       - /etc/nodeshell/secrets:/run/secrets/nodeshell:ro
     environment:
       PORT: "8080"
-      NODESHELL_PUBLIC_URL: "${NODESHELL_PUBLIC_URL:-}"
       TERMIX_REQUIRE_EXTERNAL_SECRETS: "true"
       JWT_SECRET_FILE: "/run/secrets/nodeshell/jwt_secret"
       DATABASE_KEY_FILE: "/run/secrets/nodeshell/database_key"
