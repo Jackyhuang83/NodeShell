@@ -129,10 +129,6 @@ export {
 } from "@/components/card-grid/types";
 export { ConnectionScreen } from "@/components/connection/ConnectionScreen";
 export { type ConnectionStatus } from "@/components/connection/connection-status";
-export {
-  FullScreenAppWrapper,
-  type FullScreenAppPhase,
-} from "@/components/FullScreenAppWrapper";
 
 // Connection surfaces
 export {
@@ -223,9 +219,7 @@ export {
   type KeybindingActionType,
 } from "@/types/keybindings";
 
-// Connection helpers: which backend a host's session dials, and the pieces
-// the desktop app needs to reach it.
-export { isElectron } from "@/lib/electron";
+// Connection helpers for the current NodeShell Web backend.
 export {
   resolveConnectionOrigin,
   type ConnectionOrigin,
@@ -237,11 +231,6 @@ export {
 } from "@/lib/connection-origin";
 export { getBasePath } from "@/lib/base-path";
 export type { ConnectionStage } from "@/types/connection-log";
-export {
-  hydrateLocalSharedHostAuth,
-  resolveRemoteHostId,
-} from "@/lib/remote-server-api";
-export { remoteServerUrl as linkedServerUrl } from "@/plugin-host/desktop";
 
 // Dashboard reads. The calls a plugin makes on the user's behalf (recent
 // activity, sudo autofill, open tabs, keybindings) are typed in
