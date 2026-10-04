@@ -127,6 +127,7 @@ async function main(): Promise<void> {
   process.stdout.write(
     `NodeShell owner "${username}" created. Browser registration is disabled.\n`,
   );
+  process.exit(0);
 }
 
 main().catch((error) => {
