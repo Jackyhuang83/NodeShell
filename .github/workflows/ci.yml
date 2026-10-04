@@ -2,9 +2,9 @@ name: NodeShell CI
 
 on:
   push:
-    branches: [security-baseline, main]
+    branches: [security-baseline, phase1b-final, main]
   pull_request:
-    branches: [main]
+    branches: [security-baseline, main]
 
 permissions:
   contents: read
