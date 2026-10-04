@@ -31,6 +31,7 @@ import { recordConflict } from "./conflicts.js";
 import { extractWebSocketToken } from "../utils/ws-auth.js";
 import { runAsActor } from "./actor.js";
 import { isPluginInstalled } from "./http.js";
+import { getRequestOrigin } from "../utils/request-origin.js";
 
 const PLUGIN_WS_PREFIX = "/plugin-ws/";
 
@@ -127,6 +128,52 @@ function reject(socket: Duplex, status: number, message: string): void {
   socket.destroy();
 }
 
+
+function normalizedOrigin(value: string | undefined): string {
+  if (!value) return "";
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
+    return parsed.origin;
+  } catch {
+    return "";
+  }
+}
+
+function configuredWebOrigins(): Set<string> {
+  const values = [
+    process.env.NODESHELL_PUBLIC_ORIGIN,
+    ...(process.env.NODESHELL_ALLOWED_ORIGINS ??
+      process.env.CORS_ALLOWED_ORIGINS ??
+      "")
+      .split(","),
+  ];
+  const origins = new Set<string>();
+  for (const value of values) {
+    const origin = normalizedOrigin(value?.trim());
+    if (origin) origins.add(origin);
+  }
+  if (process.env.NODE_ENV === "development") {
+    origins.add("http://localhost:5173");
+    origins.add("http://127.0.0.1:5173");
+  }
+  return origins;
+}
+
+export function isTrustedPluginWebSocketOrigin(
+  request: IncomingMessage,
+): boolean {
+  const originHeader = request.headers.origin;
+  const raw = Array.isArray(originHeader) ? originHeader[0] : originHeader;
+  const origin = normalizedOrigin(raw);
+  if (!origin) return false;
+
+  const configured = configuredWebOrigins();
+  if (configured.size > 0) return configured.has(origin);
+
+  return origin === normalizedOrigin(getRequestOrigin(request));
+}
+
 /**
  * Serves a plugin upgrade, or returns false so the caller can pass it on.
  *
@@ -151,6 +198,11 @@ async function handlePluginUpgrade(
     } else {
       reject(socket, 404, "Not Found");
     }
+    return true;
+  }
+
+  if (!isTrustedPluginWebSocketOrigin(request)) {
+    reject(socket, 403, "Forbidden");
     return true;
   }
 
