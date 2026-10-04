@@ -6,6 +6,8 @@ import express, {
   type Response,
 } from "express";
 import bcrypt from "bcryptjs";
+import crypto from "node:crypto";
+import { readFileSync } from "node:fs";
 import { nanoid } from "nanoid";
 import { authLogger } from "../../utils/logger.js";
 import { AuthManager } from "../../utils/auth-manager.js";
@@ -27,7 +29,6 @@ import { registerUserSettingsRoutes } from "./user-settings-routes.js";
 import { registerTlsRoutes } from "./tls-routes.js";
 import { registerUserSessionRoutes } from "./user-session-routes.js";
 import { registerUserExternalAccountRoutes } from "./user-external-account-routes.js";
-import { registerUserPasswordResetRoutes } from "./user-password-reset-routes.js";
 import { registerUserAdminRoutes } from "./user-admin-routes.js";
 import { registerUserDataAccessRoutes } from "./user-data-access-routes.js";
 import { listExternalLoginMethods, registerAuthRoutes } from "./auth-routes.js";
@@ -73,26 +74,30 @@ function isNonEmptyString(val: unknown): val is string {
   return typeof val === "string" && val.trim().length > 0;
 }
 
-function isRegistrationAllowed(): boolean {
-  const envVal = process.env.ALLOW_REGISTRATION;
-  if (envVal !== undefined) return envVal.trim().toLowerCase() === "true";
-  try {
-    const value = getCurrentSettingValue("allow_registration");
-    return value ? value === "true" : true;
-  } catch {
-    return true;
+function readSetupToken(): string {
+  const file = process.env.NODESHELL_SETUP_TOKEN_FILE?.trim();
+  if (file) {
+    try {
+      return readFileSync(file, "utf8").trim();
+    } catch {
+      return "";
+    }
   }
+  return process.env.NODESHELL_SETUP_TOKEN?.trim() ?? "";
+}
+
+function setupTokenMatches(value: unknown): boolean {
+  const expected = readSetupToken();
+  const candidate = typeof value === "string" ? value.trim() : "";
+  if (expected.length < 32 || candidate.length !== expected.length) return false;
+  return crypto.timingSafeEqual(
+    Buffer.from(candidate, "utf8"),
+    Buffer.from(expected, "utf8"),
+  );
 }
 
 function isPasswordResetAllowed(): boolean {
-  const envVal = process.env.ALLOW_PASSWORD_RESET;
-  if (envVal !== undefined) return envVal.trim().toLowerCase() === "true";
-  try {
-    const value = getCurrentSettingValue("allow_password_reset");
-    return value ? value === "true" : true;
-  } catch {
-    return true;
-  }
+  return false;
 }
 
 async function findCurrentUser(userId: string): Promise<UserRecord | null> {
@@ -139,13 +144,28 @@ const requireAdmin = authManager.createAdminMiddleware();
  *         description: Failed to create user.
  */
 router.post("/create", async (req, res) => {
-  if (!isRegistrationAllowed()) {
-    return res
-      .status(403)
-      .json({ error: "Registration is currently disabled" });
+  const existingCount = await createCurrentUserRepository().countAll();
+  if (existingCount !== 0) {
+    return res.status(403).json({
+      error:
+        "Public registration is disabled. Create additional users as an administrator.",
+    });
   }
 
-  const { username, password } = req.body;
+  const expectedSetupToken = readSetupToken();
+  if (expectedSetupToken.length < 32) {
+    return res.status(503).json({
+      error: "Initial setup token is not configured",
+    });
+  }
+
+  const { username, password, setupToken } = req.body;
+  if (!setupTokenMatches(setupToken)) {
+    authLogger.warn("Rejected initial owner setup with invalid token", {
+      operation: "owner_setup_token_rejected",
+    });
+    return res.status(403).json({ error: "Invalid setup token" });
+  }
   authLogger.info("User registration attempt", {
     operation: "user_register_attempt",
     username,
@@ -883,7 +903,8 @@ router.get("/db-health", requireAdmin, async (req, res) => {
  */
 router.get("/registration-allowed", async (req, res) => {
   try {
-    res.json({ allowed: isRegistrationAllowed() });
+    const count = await createCurrentUserRepository().countAll();
+    res.json({ allowed: count === 0 });
   } catch (err) {
     authLogger.error("Failed to get registration allowed", err);
     res.status(500).json({ error: "Failed to get registration allowed" });
@@ -1350,8 +1371,6 @@ router.delete("/delete-account", authenticateJWT, async (req, res) => {
     res.status(500).json({ error: "Failed to delete account" });
   }
 });
-
-registerUserPasswordResetRoutes(router, { authManager });
 
 /**
  * @openapi
