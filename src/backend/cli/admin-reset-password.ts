@@ -115,6 +115,7 @@ async function main(): Promise<void> {
       ? "NodeShell owner password reset; legacy encrypted user data was wiped as explicitly confirmed.\n"
       : "NodeShell owner password reset; encrypted user data was preserved.\n",
   );
+  process.exit(0);
 }
 
 main().catch((error) => {
