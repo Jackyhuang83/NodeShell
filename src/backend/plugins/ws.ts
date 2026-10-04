@@ -75,6 +75,50 @@ function key(pluginId: string, path: string): string {
   return `${pluginId}:${normalizePath(path)}`;
 }
 
+function firstHeader(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] || "" : value || "";
+}
+
+async function isWebSocketOriginAllowed(
+  request: IncomingMessage,
+): Promise<boolean> {
+  const origin = firstHeader(request.headers.origin).trim();
+
+  // Browsers always send Origin for WebSocket handshakes. NodeShell v0.1 is
+  // Web-first, so production rejects origin-less upgrades. Tests and local
+  // development keep compatibility with non-browser harnesses.
+  if (!origin) return process.env.NODE_ENV !== "production";
+
+  const allowed = new Set<string>();
+  const { getRequestOrigin } = await import("../utils/request-origin.js");
+  allowed.add(getRequestOrigin(request));
+
+  const publicUrl = process.env.NODESHELL_PUBLIC_URL?.trim();
+  if (publicUrl) {
+    try {
+      allowed.add(new URL(publicUrl).origin);
+    } catch {
+      // Invalid deployment config does not weaken the allowlist.
+    }
+  }
+
+  const configured =
+    process.env.NODESHELL_ALLOWED_ORIGINS ??
+    process.env.CORS_ALLOWED_ORIGINS ??
+    "";
+  for (const value of configured.split(",")) {
+    const item = value.trim();
+    if (!item) continue;
+    try {
+      allowed.add(new URL(item).origin);
+    } catch {
+      // Ignore malformed entries.
+    }
+  }
+
+  return allowed.has(origin);
+}
+
 /**
  * Parses /plugin-ws/<id>/<path> out of an upgrade URL.
  *
@@ -151,6 +195,11 @@ async function handlePluginUpgrade(
     } else {
       reject(socket, 404, "Not Found");
     }
+    return true;
+  }
+
+  if (!(await isWebSocketOriginAllowed(request))) {
+    reject(socket, 403, "Forbidden");
     return true;
   }
 
