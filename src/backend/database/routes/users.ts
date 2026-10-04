@@ -123,10 +123,10 @@ const requireAdmin = authManager.createAdminMiddleware();
  *         description: Failed to create user.
  */
 router.post("/create", async (req, res) => {
-  if (!isRegistrationAllowed()) {
+  if (!isLoopbackRequest(req)) {
     return res.status(403).json({
       error:
-        "Browser registration is disabled. Create the first NodeShell owner with the local admin CLI.",
+        "Public registration is disabled. The first NodeShell owner can only be created from localhost.",
     });
   }
 
@@ -152,6 +152,12 @@ router.post("/create", async (req, res) => {
 
   try {
     const userRepository = createCurrentUserRepository();
+    if ((await userRepository.countAll()) !== 0) {
+      return res.status(403).json({
+        error: "NodeShell already has an owner. Public registration is disabled.",
+      });
+    }
+
     const existing = await userRepository.findByUsername(username);
     if (existing) {
       authLogger.warn("Registration failed - username exists", {
