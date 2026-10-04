@@ -1,6 +1,5 @@
 import type { SSHHost, SSHFolder } from "@/types/index";
 import type { ServerStatus } from "@/main-axios";
-import { SYNC_CHANGED_EVENT } from "./sync-events";
 import { createTtlRequestCache } from "./ttl-request-cache";
 
 /** Host list changes less often than status; keep a short shared window. */
@@ -28,10 +27,6 @@ function bindInvalidationListeners(): void {
   window.addEventListener("ssh-hosts:changed", invalidateHosts);
   window.addEventListener("hosts:refresh", invalidateHosts);
 
-  // A finished sync pass may have changed hosts and their statuses.
-  window.addEventListener(SYNC_CHANGED_EVENT, () => {
-    invalidateHostsAndStatusCaches();
-  });
 }
 
 export function getCachedSSHHosts(
