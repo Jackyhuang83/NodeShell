@@ -15,6 +15,7 @@ const h = vi.hoisted(() => ({
   policyError: null as Error | null,
   logins: [] as Array<{ hostId: number; outcome: unknown }>,
   connectError: null as Error | null,
+  usableCredential: null as Record<string, unknown> | null,
 }));
 
 vi.mock("../../utils/logger.js", () => {
@@ -97,6 +98,9 @@ vi.mock("../../hosts/status/host-status-service.js", () => ({
       h.logins.push({ hostId, outcome }),
   },
 }));
+vi.mock("../../hosts/usable-credential.js", () => ({
+  findUsableCredential: async () => h.usableCredential,
+}));
 vi.mock("../../database/repositories/factory.js", () => ({
   createCurrentUserAuthRepository: () => ({
     recordSecondFactor: async (
@@ -152,6 +156,7 @@ beforeEach(() => {
   h.pooled = [];
   h.logins = [];
   h.connectError = null;
+  h.usableCredential = null;
 });
 
 describe("ctx.ssh", () => {
@@ -251,6 +256,58 @@ describe("ctx.ssh", () => {
     await ssh.connect(forged);
     expect(h.connects[0].options).toMatchObject({ userId: "caller" });
     expect(h.connects[0].target).toMatchObject({ userId: "caller" });
+  });
+
+  it("keeps Quick Connect credential secrets inside core", async () => {
+    h.granted = new Set(["ssh:connect", "credentials:use"]);
+    h.usableCredential = {
+      id: 12,
+      username: "credential-user",
+      password: "server-only-password",
+      privateKey: null,
+      keyPassword: null,
+      keyType: null,
+      certPublicKey: null,
+    };
+
+    const audit = vi.fn(async () => {});
+    const ssh = createPluginSsh({
+      manifest: manifest(["ssh:connect", "credentials:use"]),
+      bag: new DisposableBag("fixture"),
+      audit,
+    });
+
+    const host = await ssh.resolveQuickConnect({
+      id: -1,
+      ip: "203.0.113.10",
+      port: 22,
+      username: "typed-user",
+      credentialId: 12,
+    });
+
+    expect(host).toMatchObject({
+      id: -1,
+      ip: "203.0.113.10",
+      port: 22,
+      username: "credential-user",
+      authType: "password",
+    });
+    expect(host).not.toHaveProperty("password");
+    expect(host).not.toHaveProperty("key");
+    expect(host).not.toHaveProperty("keyPassword");
+
+    await ssh.connect(host!);
+    expect(h.connects[0].target).toMatchObject({
+      id: -1,
+      username: "credential-user",
+      password: "server-only-password",
+      userId: "user-1",
+    });
+    expect(audit).toHaveBeenCalledWith(
+      "ssh_resolve_quick_connect",
+      "credential 12",
+      { success: true },
+    );
   });
 
   it("passes a given stream through to the pipeline, gated like any connect", async () => {
