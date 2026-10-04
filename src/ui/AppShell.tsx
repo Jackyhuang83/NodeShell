@@ -91,11 +91,6 @@ const SyncPanel = lazy(() =>
     default: m.SyncPanel,
   })),
 );
-const AdminSettingsPanel = lazy(() =>
-  import("@/sidebar/AdminSettingsPanel").then((m) => ({
-    default: m.AdminSettingsPanel,
-  })),
-);
 const CredentialsPanel = lazy(() =>
   import("@/sidebar/CredentialsPanel").then((m) => ({
     default: m.CredentialsPanel,
@@ -406,8 +401,7 @@ export function AppShell({
   }, [tabs]);
 
   const isMobile = useIsMobile();
-  const isSettingsView =
-    railView === "user-profile" || railView === "admin-settings";
+  const isSettingsView = railView === "user-profile";
 
   useEffect(() => {
     if (!settingsFullscreen) return;
@@ -1666,7 +1660,7 @@ export function AppShell({
         }
         return;
       }
-      if (type === "user-profile" || type === "admin-settings") {
+      if (type === "user-profile") {
         setSidebarEditing(false);
         setRailView(type as RailView);
         setSidebarOpen(true);
@@ -2775,17 +2769,6 @@ export function AppShell({
           </div>
         )}
 
-        {railView === "admin-settings" && showAdminUI && (
-          <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
-            <AdminSettingsPanel
-              onEditingChange={setSidebarEditing}
-              onOpenHostTab={(host) => {
-                connectHost(host);
-                if (isMobile) setSidebarOpen(false);
-              }}
-            />
-          </div>
-        )}
       </div>
     </Suspense>
   );
@@ -3190,7 +3173,6 @@ export function AppShell({
                   "dashboard",
                   "host-manager",
                   "user-profile",
-                  "admin-settings",
                 ].includes(type)
               ) {
                 openSingletonTab(type, pendingEvent);
