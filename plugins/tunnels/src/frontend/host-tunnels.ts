@@ -29,9 +29,9 @@ export function parseConnections(value: unknown): TunnelConnection[] {
 }
 
 export function tunnelMode(
-  tunnel: Pick<TunnelConnection, "mode" | "tunnelType">,
-): "local" | "remote" | "dynamic" {
-  return tunnel.mode ?? tunnel.tunnelType ?? "local";
+  _tunnel: Pick<TunnelConnection, "mode" | "tunnelType">,
+): "local" {
+  return "local";
 }
 
 /** What POST /connect takes for a host's saved tunnel. */
@@ -45,15 +45,14 @@ export function connectRequestFor(
   index: number,
   tunnel: TunnelConnection,
 ): TunnelConnectRequest {
-  const mode = tunnelMode(tunnel);
   return {
     name: serverTunnelName(host, index, tunnel),
     sourceHostId: Number(host.id),
     tunnelIndex: index,
-    scope: tunnel.scope ?? "s2s",
-    mode,
-    tunnelType: mode === "remote" ? "remote" : "local",
-    bindHost: tunnel.bindHost,
+    scope: "s2s",
+    mode: "local",
+    tunnelType: "local",
+    bindHost: "127.0.0.1",
     targetHost: tunnel.targetHost,
     endpointHost: (tunnel.endpointHost ?? "").trim(),
     sourcePort: tunnel.sourcePort,
