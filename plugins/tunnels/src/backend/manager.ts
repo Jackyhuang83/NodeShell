@@ -1,5 +1,5 @@
 import { createServer, Socket, type Server } from "node:net";
-import type { Client, ClientChannel } from "ssh2";
+import type { Client } from "ssh2";
 import type {
   PluginContext,
   PluginSshConnection,
@@ -9,21 +9,12 @@ import {
   type TunnelConfig,
   type TunnelStatus,
 } from "./types.js";
-import {
-  bindForwardIn,
-  forwardOut,
-  pipeTunnelStreams,
-  unbindForwardIn,
-} from "./ssh-primitives.js";
-import { handleSocks5Connect } from "./socks5-relay.js";
+import { forwardOut, pipeTunnelStreams } from "./ssh-primitives.js";
 import {
   classifyTunnelError,
   getTunnelBindHost,
   getTunnelMode,
-  getTunnelScope,
   isReservedTunnelName,
-  resolveS2SLocalTargetHost,
-  shouldEstablishDirectTunnel,
 } from "./utils.js";
 
 export interface TunnelRuntime {
@@ -209,63 +200,19 @@ export function createTunnelManager(ctx: PluginContext) {
     return config.endpointHost || "127.0.0.1";
   }
 
-  async function establishDirect(
-    source: PluginSshConnection<Client>,
-    config: TunnelConfig,
-  ): Promise<TunnelRuntime> {
+  async function establish(config: TunnelConfig): Promise<TunnelRuntime> {
+    if (getTunnelMode(config) !== "local") {
+      throw new Error("NodeShell v0.1 supports Local Forward only");
+    }
+
+    const source = await openLeg(config.requestingUserId, config.sourceHostId);
     const sourceClient = source.client;
     const name = config.name;
-    const mode = getTunnelMode(config);
     const bindHost = getTunnelBindHost(config);
     const targetHost = directTargetHost(config);
     const targetPort = config.endpointPort;
-
-    if (mode === "remote") {
-      const remoteBindPort = await bindForwardIn(
-        sourceClient,
-        targetHost,
-        config.sourcePort,
-      );
-      const sockets = new Set<Socket>();
-      const onTcp = (
-        info: { destPort: number },
-        accept: () => ClientChannel,
-        reject: () => void,
-      ) => {
-        if (info.destPort !== remoteBindPort) {
-          reject();
-          return;
-        }
-        const inbound = accept();
-        const local = new Socket();
-        sockets.add(local);
-        local.connect(targetPort, bindHost, () => {
-          pipeTunnelStreams(inbound, Promise.resolve(local), name, log);
-        });
-        local.on("error", () => {
-          inbound.destroy();
-          sockets.delete(local);
-        });
-        local.on("close", () => sockets.delete(local));
-      };
-      sourceClient.on("tcp connection", onTcp);
-
-      return {
-        sourceClient,
-        bindHost: targetHost,
-        bindPort: remoteBindPort,
-        close: () => {
-          sourceClient.off("tcp connection", onTcp);
-          unbindForwardIn(sourceClient, targetHost, remoteBindPort, log);
-          for (const socket of sockets) socket.destroy();
-          sockets.clear();
-          source.dispose();
-        },
-      };
-    }
-
-    // Local and dynamic: listen here, forward through the source.
     const sockets = new Set<Socket>();
+
     const server: Server = createServer((socket) => {
       sockets.add(socket);
       socket.on("close", () => sockets.delete(socket));
@@ -274,16 +221,6 @@ export function createTunnelManager(ctx: PluginContext) {
         socket.destroy();
       });
 
-      if (mode === "dynamic") {
-        handleSocks5Connect(
-          socket,
-          (host, port) => forwardOut(sourceClient, host, port),
-          name,
-          log,
-        );
-        return;
-      }
-
       forwardOut(sourceClient, targetHost, targetPort)
         .then((outbound) =>
           pipeTunnelStreams(socket, Promise.resolve(outbound), name, log),
@@ -291,167 +228,55 @@ export function createTunnelManager(ctx: PluginContext) {
         .catch(() => socket.destroy());
     });
 
-    const boundPort = await new Promise<number>((resolve, reject) => {
-      server.once("error", reject);
-      server.listen({ host: bindHost, port: config.sourcePort }, () => {
-        server.removeListener("error", reject);
-        // With port 0 the kernel picks, so report what was actually bound.
-        resolve((server.address() as { port: number }).port);
+    try {
+      const boundPort = await new Promise<number>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen({ host: bindHost, port: config.sourcePort }, () => {
+          server.removeListener("error", reject);
+          resolve((server.address() as { port: number }).port);
+        });
       });
-    });
 
-    let idleTimer: NodeJS.Timeout | undefined;
-    const close = () => {
-      if (idleTimer) clearInterval(idleTimer);
-      for (const socket of sockets) socket.destroy();
-      sockets.clear();
-      server.close();
-      source.dispose();
-    };
+      let idleTimer: NodeJS.Timeout | undefined;
+      const close = () => {
+        if (idleTimer) clearInterval(idleTimer);
+        for (const socket of sockets) socket.destroy();
+        sockets.clear();
+        server.close();
+        source.dispose();
+      };
 
-    // On-demand tunnels close themselves once nothing has used them for a
-    // while. The socket set only exists in here, so the timer does too.
-    if (config.idleTimeoutMs && config.idleTimeoutMs > 0) {
-      const idleTimeoutMs = config.idleTimeoutMs;
-      let idleSince: number | null = Date.now();
-      idleTimer = setInterval(
-        () => {
-          if (sockets.size > 0) {
-            idleSince = null;
-            return;
-          }
-          if (idleSince === null) {
-            idleSince = Date.now();
-            return;
-          }
-          if (Date.now() - idleSince < idleTimeoutMs) return;
-          // Acts by name, so skip it if a reopen already replaced this one.
-          if (runtimes.get(name)?.sourceClient !== sourceClient) return;
-          log.info(`Closing idle tunnel ${name}`);
-          void cleanup(name, true);
-        },
-        Math.min(30_000, idleTimeoutMs),
-      );
-      idleTimer.unref();
-    }
-
-    log.info(
-      `Tunnel ${name} listening on ${bindHost}:${boundPort} (${mode}) to ${targetHost}:${targetPort}`,
-    );
-
-    return { sourceClient, bindHost, bindPort: boundPort, close };
-  }
-
-  async function establishManaged(
-    source: PluginSshConnection<Client>,
-    config: TunnelConfig,
-  ): Promise<TunnelRuntime> {
-    const sourceClient = source.client;
-    const name = config.name;
-    if (config.endpointHostId === undefined || !config.endpointIP) {
-      throw new Error("Endpoint host not found");
-    }
-
-    const channel = await forwardOut(
-      sourceClient,
-      config.endpointIP,
-      config.endpointSSHPort ?? 22,
-    );
-    let endpoint: PluginSshConnection<Client>;
-    try {
-      endpoint = await openLeg(
-        config.requestingUserId,
-        config.endpointHostId,
-        channel,
-      );
-    } catch (error) {
-      channel.destroy();
-      throw error;
-    }
-    const endpointClient = endpoint.client;
-
-    const mode = getTunnelMode(config);
-    const bindHost = getTunnelBindHost(config);
-    const bindClient = mode === "remote" ? endpointClient : sourceClient;
-    const outboundClient = mode === "remote" ? sourceClient : endpointClient;
-    const bindPort =
-      mode === "remote" ? config.endpointPort : config.sourcePort;
-    const targetHost =
-      mode === "remote"
-        ? config.targetHost || "127.0.0.1"
-        : resolveS2SLocalTargetHost(config);
-    const targetPort =
-      mode === "remote" ? config.sourcePort : config.endpointPort;
-
-    let actualPort: number;
-    try {
-      actualPort = await bindForwardIn(bindClient, bindHost, bindPort);
-    } catch (error) {
-      endpoint.dispose();
-      throw error;
-    }
-
-    const onTcp = (
-      info: { destPort: number },
-      accept: () => ClientChannel,
-      reject: () => void,
-    ) => {
-      if (info.destPort !== actualPort) {
-        reject();
-        return;
-      }
-      const inbound = accept();
-      if (mode === "dynamic") {
-        handleSocks5Connect(
-          inbound,
-          (host, port) => forwardOut(outboundClient, host, port),
-          name,
-          log,
+      if (config.idleTimeoutMs && config.idleTimeoutMs > 0) {
+        const idleTimeoutMs = config.idleTimeoutMs;
+        let idleSince: number | null = Date.now();
+        idleTimer = setInterval(
+          () => {
+            if (sockets.size > 0) {
+              idleSince = null;
+              return;
+            }
+            if (idleSince === null) {
+              idleSince = Date.now();
+              return;
+            }
+            if (Date.now() - idleSince < idleTimeoutMs) return;
+            if (runtimes.get(name)?.sourceClient !== sourceClient) return;
+            log.info(`Closing idle tunnel ${name}`);
+            void cleanup(name, true);
+          },
+          Math.min(30_000, idleTimeoutMs),
         );
-        return;
+        idleTimer.unref();
       }
-      pipeTunnelStreams(
-        inbound,
-        forwardOut(outboundClient, targetHost, targetPort),
-        name,
-        log,
+
+      log.info(
+        `Local tunnel ${name} listening on ${bindHost}:${boundPort} to ${targetHost}:${targetPort}`,
       );
-    };
-    bindClient.on("tcp connection", onTcp);
 
-    // Losing the endpoint leg makes the tunnel useless, so let the source
-    // close too and the usual disconnect handling take it from there.
-    endpointClient.once("close", () => {
-      if (runtimes.get(name)?.endpointClient === endpointClient) {
-        source.dispose();
-      }
-    });
-
-    log.info(
-      `Tunnel ${name} bound ${bindHost}:${actualPort} (${mode}) to ${targetHost}:${targetPort}`,
-    );
-
-    return {
-      sourceClient,
-      endpointClient,
-      bindHost,
-      bindPort: actualPort,
-      close: () => {
-        bindClient.off("tcp connection", onTcp);
-        unbindForwardIn(bindClient, bindHost, actualPort, log);
-        endpoint.dispose();
-        source.dispose();
-      },
-    };
-  }
-
-  async function establish(config: TunnelConfig): Promise<TunnelRuntime> {
-    const source = await openLeg(config.requestingUserId, config.sourceHostId);
-    try {
-      return shouldEstablishDirectTunnel(config)
-        ? await establishDirect(source, config)
-        : await establishManaged(source, config);
+      return { sourceClient, bindHost, bindPort: boundPort, close };
     } catch (error) {
+      for (const socket of sockets) socket.destroy();
+      server.close();
       source.dispose();
       throw error;
     }
