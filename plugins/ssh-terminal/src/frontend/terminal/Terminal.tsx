@@ -128,7 +128,6 @@ import {
   runKeybindingAction,
   getClientPreference,
   logActivity,
-  getHostPassword,
   patchOpenTab,
   useHost,
 } from "@termix/plugin-sdk/frontend";
@@ -1281,22 +1280,13 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
     }
 
     async function resolvePasswordForPrompt(isSudoPrompt: boolean) {
+      // NodeShell never reads a stored host password back into the browser.
+      // Only an ephemeral credential the user typed into this tab may be
+      // reused for a visible prompt.
       const sudoPassword = hostConfig.sudoPassword as string | undefined;
-      let passwordToFill = isSudoPrompt
+      return isSudoPrompt
         ? sudoPassword || hostConfig.password
         : hostConfig.password || sudoPassword;
-
-      if (!passwordToFill && hostConfig.id) {
-        passwordToFill = isSudoPrompt
-          ? (await getHostPassword(hostConfig.id, "sudoPassword")) ||
-            (await getHostPassword(hostConfig.id, "password")) ||
-            undefined
-          : (await getHostPassword(hostConfig.id, "password")) ||
-            (await getHostPassword(hostConfig.id, "sudoPassword")) ||
-            undefined;
-      }
-
-      return passwordToFill;
     }
 
     function maybeOfferPasswordFill(strippedData: string) {
