@@ -21,7 +21,6 @@ import { rem } from "@/lib/rem";
 export type CoreRailView =
   | "hosts"
   | "credentials"
-  | "quick-connect"
   | ToolsTab
   | "connections"
   | "user-profile"
