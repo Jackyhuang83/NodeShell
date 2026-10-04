@@ -85,6 +85,19 @@ export function connectionToRequest(
   };
 }
 
+/** A host's saved Local Forward list. */
+export function readTunnelConnections(value: unknown): TunnelConnection[] {
+  let parsed = value;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(parsed) ? (parsed as TunnelConnection[]) : [];
+}
+
 /**
  * The saved tunnel a name points at, for starting one by name alone
  * (automations). Must run as the user it is for.
