@@ -1560,7 +1560,59 @@ export function createTerminalSocket(deps: TerminalSocketDeps) {
         }
       }
 
-      const serverHostId = resolveServerHostId(id, resolvedHostData);
+      let quickCredentialHost: PluginSshHost | null = null;
+      if (
+        !resolvedHostData &&
+        credentialId &&
+        userId &&
+        authType === "credential"
+      ) {
+        try {
+          quickCredentialHost = await ctx.ssh.resolveQuickConnectCredential({
+            credentialId,
+            ip,
+            port,
+            username,
+            sshOptions: hostConfig.sshOptions,
+          });
+          if (!quickCredentialHost) {
+            ws.send(
+              JSON.stringify({
+                type: "error",
+                message: "Saved credential is unavailable or not permitted",
+              }),
+            );
+            cleanupAuthState(connectionTimeout);
+            return;
+          }
+          ip = quickCredentialHost.ip;
+          port = quickCredentialHost.port;
+          username = quickCredentialHost.username;
+          sendLog(
+            "auth",
+            "info",
+            "Saved credential resolved securely on the NodeShell backend",
+          );
+        } catch (error) {
+          sshLogger.warn("Failed to resolve Quick Connect credential", {
+            operation: "ssh_quick_connect_credential",
+            credentialId,
+            error: getErrorMessage(error),
+          });
+          ws.send(
+            JSON.stringify({
+              type: "error",
+              message: "Failed to resolve saved credential",
+            }),
+          );
+          cleanupAuthState(connectionTimeout);
+          return;
+        }
+      }
+
+      const serverHostId = quickCredentialHost
+        ? null
+        : resolveServerHostId(id, resolvedHostData);
 
       let autoTmuxEnabled = false;
       if (serverHostId != null) {
@@ -1574,15 +1626,25 @@ export function createTerminalSocket(deps: TerminalSocketDeps) {
       }
 
       // Resolve credentials server-side when frontend doesn't provide them
-      let resolvedCredentials = {
-        username,
-        password,
-        key,
-        keyPassword,
-        keyType,
-        authType,
-        certPublicKey: undefined as string | undefined,
-      };
+      let resolvedCredentials = quickCredentialHost
+        ? {
+            username: quickCredentialHost.username,
+            password: undefined as string | undefined,
+            key: undefined as string | undefined,
+            keyPassword: undefined as string | undefined,
+            keyType: undefined as string | undefined,
+            authType: quickCredentialHost.authType as string | undefined,
+            certPublicKey: undefined as string | undefined,
+          }
+        : {
+            username,
+            password,
+            key,
+            keyPassword,
+            keyType,
+            authType,
+            certPublicKey: undefined as string | undefined,
+          };
       const authMethodNotAvailable = false;
       if (id && userId && !password && !key) {
         try {
@@ -1610,32 +1672,6 @@ export function createTerminalSocket(deps: TerminalSocketDeps) {
           sshLogger.warn(`Failed to resolve host credentials for ${id}`, {
             operation: "ssh_credentials",
             hostId: id,
-            error: getErrorMessage(error),
-          });
-        }
-      } else if (credentialId && id && userId) {
-        try {
-          if (resolvedHostData) {
-            ip = resolvedHostData.ip || ip;
-            port = resolvedHostData.port || port;
-            username = resolvedHostData.username || username;
-            resolvedCredentials = {
-              username: resolvedHostData.username || username,
-              password: resolvedHostData.password,
-              key: resolvedHostData.key,
-              // Preserve user-supplied keyPassword (e.g. from passphrase dialog) over the empty DB value
-              keyPassword: keyPassword || resolvedHostData.keyPassword,
-              keyType: resolvedHostData.keyType,
-              authType: resolvedHostData.authType,
-              certPublicKey: resolvedHostData.certPublicKey as
-                string | undefined,
-            };
-          }
-        } catch (error) {
-          sshLogger.warn(`Failed to resolve credentials for host ${id}`, {
-            operation: "ssh_credentials",
-            hostId: id,
-            credentialId,
             error: getErrorMessage(error),
           });
         }
@@ -2702,30 +2738,32 @@ export function createTerminalSocket(deps: TerminalSocketDeps) {
         return;
       }
 
-      connectTarget = {
-        ...(resolvedHostData ?? {}),
-        id: serverHostId ?? id,
-        ip,
-        port,
-        username,
-        userId: hostConfig.userId,
-        authType: effectiveAuthType,
-        password: resolvedCredentials.password,
-        key: resolvedCredentials.key,
-        keyPassword: resolvedCredentials.keyPassword,
-        keyType: resolvedCredentials.keyType,
-        certPublicKey: resolvedCredentials.certPublicKey,
-        forceKeyboardInteractive: hostConfig.forceKeyboardInteractive,
-        sshOptions: hostConfig.sshOptions,
-        jumpHosts: hostConfig.jumpHosts,
-        useSocks5: hostConfig.useSocks5,
-        socks5Host: hostConfig.socks5Host,
-        socks5Port: hostConfig.socks5Port,
-        socks5Username: hostConfig.socks5Username,
-        socks5Password: hostConfig.socks5Password,
-        socks5ProxyChain: hostConfig.socks5ProxyChain,
-        portKnockSequence: hostConfig.portKnockSequence,
-      } as PluginSshHost;
+      connectTarget =
+        quickCredentialHost ??
+        ({
+          ...(resolvedHostData ?? {}),
+          id: serverHostId ?? id,
+          ip,
+          port,
+          username,
+          userId: hostConfig.userId,
+          authType: effectiveAuthType,
+          password: resolvedCredentials.password,
+          key: resolvedCredentials.key,
+          keyPassword: resolvedCredentials.keyPassword,
+          keyType: resolvedCredentials.keyType,
+          certPublicKey: resolvedCredentials.certPublicKey,
+          forceKeyboardInteractive: hostConfig.forceKeyboardInteractive,
+          sshOptions: hostConfig.sshOptions,
+          jumpHosts: hostConfig.jumpHosts,
+          useSocks5: hostConfig.useSocks5,
+          socks5Host: hostConfig.socks5Host,
+          socks5Port: hostConfig.socks5Port,
+          socks5Username: hostConfig.socks5Username,
+          socks5Password: hostConfig.socks5Password,
+          socks5ProxyChain: hostConfig.socks5ProxyChain,
+          portKnockSequence: hostConfig.portKnockSequence,
+        } as PluginSshHost);
 
       const built = await ctx.ssh.prepare(connectTarget, {
         purpose: "terminal",
