@@ -21,20 +21,45 @@ export function generateBackupCodes(): string[] {
   return Array.from({ length: BACKUP_CODE_COUNT }, () => generateBackupCode());
 }
 
+const BACKUP_CODE_SCRYPT = {
+  N: 1 << 14,
+  r: 8,
+  p: 1,
+  maxmem: 64 * 1024 * 1024,
+} as const;
+
 function hashBackupCode(code: string): string {
-  return `sha256:${crypto
-    .createHash("sha256")
-    .update(normalizeCode(code), "utf8")
-    .digest("hex")}`;
+  const salt = crypto.randomBytes(16);
+  const digest = crypto.scryptSync(
+    normalizeCode(code),
+    salt,
+    32,
+    BACKUP_CODE_SCRYPT,
+  );
+  return `scrypt:${salt.toString("base64url")}:${digest.toString("base64url")}`;
 }
 
 function backupCodeHashMatches(code: string, storedHash: string): boolean {
-  const actual = Buffer.from(hashBackupCode(code), "utf8");
-  const expected = Buffer.from(storedHash, "utf8");
-  return (
-    actual.length === expected.length &&
-    crypto.timingSafeEqual(actual, expected)
-  );
+  const [scheme, saltText, digestText] = storedHash.split(":");
+  if (scheme !== "scrypt" || !saltText || !digestText) return false;
+
+  try {
+    const salt = Buffer.from(saltText, "base64url");
+    const expected = Buffer.from(digestText, "base64url");
+    const actual = crypto.scryptSync(
+      normalizeCode(code),
+      salt,
+      expected.length,
+      BACKUP_CODE_SCRYPT,
+    );
+
+    return (
+      actual.length === expected.length &&
+      crypto.timingSafeEqual(actual, expected)
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function verifyTotpCode(secret: string, code: string): boolean {
