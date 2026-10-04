@@ -24,8 +24,6 @@ jobs:
       - name: Shell syntax
         run: sh -n docker/entrypoint.sh docker/nodeshell
       - name: Docker configuration
-        env:
-          NODESHELL_PUBLIC_URL: https://nodeshell.example.invalid
         run: |
           docker compose -f docker/docker-compose.yml config >/dev/null
           docker build --check -f docker/Dockerfile .
