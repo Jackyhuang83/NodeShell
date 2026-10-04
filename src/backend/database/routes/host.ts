@@ -644,36 +644,46 @@ router.post(
         .json({ error: "That auth type cannot be used for Quick Connect" });
     }
 
-    if (authType === "credential") {
-      return res.status(400).json({ error: "Saved credentials are disabled in Quick Connect until backend-only references are complete." });
-    }
-
     try {
+      if (authType === "credential") {
+        const numericCredentialId = Number(credentialId);
+        if (
+          !Number.isInteger(numericCredentialId) ||
+          numericCredentialId <= 0
+        ) {
+          return res.status(400).json({ error: "Invalid credential ID" });
+        }
+
+        const tempHost: Record<string, unknown> = {
+          id: -Date.now(),
+          userId,
+          name: `${username}@${ip}:${port}`,
+          ip,
+          port: Number(port),
+          username,
+          folder: "",
+          tags: [],
+          pin: false,
+          authType: "credential",
+          credentialId: numericCredentialId,
+          overrideCredentialUsername: !!overrideCredentialUsername,
+          jumpHosts: [],
+          statusCheckEnabled: true,
+          statusCheckInterval: null,
+          notes: "",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+
+        return res.status(200).json(tempHost);
+      }
+
       let resolvedPassword = password;
       let resolvedKey = key;
       let resolvedKeyPassword = keyPassword;
       let resolvedKeyType = keyType;
-      let resolvedAuthType = authType;
-      let resolvedUsername = username;
-
-      if (authType === "credential" && credentialId) {
-        const cred = await findUsableCredential(Number(credentialId), userId);
-
-        if (!cred) {
-          return res.status(404).json({ error: "Credential not found" });
-        }
-
-        resolvedPassword = pickResolvedPassword(password, cred.password) as
-          string | undefined;
-        resolvedKey = cred.privateKey as string | undefined;
-        resolvedKeyPassword = cred.keyPassword as string | undefined;
-        resolvedKeyType = cred.keyType as string | undefined;
-        resolvedAuthType = cred.authType as string | undefined;
-
-        if (!overrideCredentialUsername) {
-          resolvedUsername = cred.username as string;
-        }
-      }
+      const resolvedAuthType = authType;
+      const resolvedUsername = username;
 
       const tempHost: Record<string, unknown> = {
         id: -Date.now(),
