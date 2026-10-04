@@ -86,11 +86,6 @@ const UserProfilePanel = lazy(() =>
     default: m.UserProfilePanel,
   })),
 );
-const SyncPanel = lazy(() =>
-  import("@/settings/sync/SyncPanel").then((m) => ({
-    default: m.SyncPanel,
-  })),
-);
 const CredentialsPanel = lazy(() =>
   import("@/sidebar/CredentialsPanel").then((m) => ({
     default: m.CredentialsPanel,
@@ -144,7 +139,6 @@ import {
   snapshotData,
 } from "@/shell/shell-layout";
 import { DonationReminderModal } from "@/user/DonationReminderModal.tsx";
-import { useSyncStatus } from "@/hooks/use-sync-status";
 import { rem, remScale } from "@/lib/rem";
 import { dbHealthMonitor } from "@/lib/db-health-monitor";
 import { ServerStatusProvider } from "@/lib/ServerStatusContext";
@@ -1123,10 +1117,6 @@ export function AppShell({
       window.removeEventListener("hosts:refresh", onHostsChanged);
     };
   }, [loadHosts]);
-
-  // Keeps the desktop's sync status polled while the app is open; a pass
-  // that changed data tells the panels to reload.
-  useSyncStatus();
 
   // Sync tab host data when allHosts updates (e.g. after editing terminal theme in host settings)
   useEffect(() => {
@@ -2755,12 +2745,6 @@ export function AppShell({
                 setUserPrefs((current) => ({ ...current, ...updates }))
               }
             />
-          </div>
-        )}
-
-        {railView === "sync" && (
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            <SyncPanel />
           </div>
         )}
 
