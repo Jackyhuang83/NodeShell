@@ -8,12 +8,7 @@ import type {
   TunnelConnection,
 } from "./types.js";
 import { serverTunnelName } from "../shared/tunnel-naming.js";
-import {
-  findHostByTunnelEndpoint,
-  getTunnelMode,
-  isSingleHostTunnel,
-  parseTunnelName,
-} from "./utils.js";
+import { parseTunnelName } from "./utils.js";
 
 export function hostLabel(host: {
   name?: string | null;
@@ -45,13 +40,12 @@ export function buildTunnelConfig(
   request: Omit<TunnelConnectRequest, "sourceHostId">,
   userId: string,
 ): TunnelConfig {
-  const mode = getTunnelMode(request);
   return {
     name: request.name,
-    scope: request.scope || "s2s",
-    mode,
-    tunnelType: request.tunnelType || (mode === "remote" ? "remote" : "local"),
-    bindHost: request.bindHost,
+    scope: "s2s",
+    mode: "local",
+    tunnelType: "local",
+    bindHost: "127.0.0.1",
     targetHost: request.targetHost,
     sourceHostId: host.id,
     tunnelIndex: request.tunnelIndex,
@@ -65,7 +59,7 @@ export function buildTunnelConfig(
     endpointPort: Number(request.endpointPort),
     maxRetries: Number(request.maxRetries) || 3,
     retryInterval: (Number(request.retryInterval) || 5) * 1000,
-    autoStart: Boolean(request.autoStart),
+    autoStart: false,
   };
 }
 
@@ -77,67 +71,18 @@ export function connectionToRequest(
   return {
     name: savedTunnelName(host, index, connection),
     tunnelIndex: index,
-    scope: connection.scope || "s2s",
-    mode: connection.mode,
-    tunnelType: connection.tunnelType,
-    bindHost: connection.bindHost,
+    scope: "s2s",
+    mode: "local",
+    tunnelType: "local",
+    bindHost: "127.0.0.1",
     targetHost: connection.targetHost,
     endpointHost: connection.endpointHost,
     sourcePort: connection.sourcePort,
     endpointPort: connection.endpointPort,
     maxRetries: connection.maxRetries,
     retryInterval: connection.retryInterval,
-    autoStart: connection.autoStart,
+    autoStart: false,
   };
-}
-
-/**
- * Fills in the endpoint leg from the user's own host list. A local or
- * dynamic tunnel whose endpoint is not a saved host just forwards to that
- * address through the source; a remote tunnel needs a real SSH host there.
- * Must run as the tunnel's user.
- */
-export async function resolveEndpoint(
-  ctx: PluginContext,
-  config: TunnelConfig,
-): Promise<TunnelConfig> {
-  if (isSingleHostTunnel(config)) return config;
-
-  const hosts = await ctx.hosts.list();
-  const endpoint = findHostByTunnelEndpoint(hosts, config.endpointHost);
-
-  if (!endpoint) {
-    if (getTunnelMode(config) === "remote") {
-      throw new Error(
-        `Endpoint host '${config.endpointHost}' not found in database`,
-      );
-    }
-    return { ...config, endpointIP: config.endpointIP || config.endpointHost };
-  }
-
-  const access = await ctx.hosts.checkAccess(endpoint.id, "connect");
-  if (!access.hasAccess) throw new Error("Endpoint host not found");
-
-  return {
-    ...config,
-    endpointHostId: endpoint.id,
-    endpointIP: endpoint.ip,
-    endpointSSHPort: endpoint.port,
-    endpointUsername: endpoint.username,
-  };
-}
-
-/** A host's saved tunnel list, as its host setting holds it. */
-export function readTunnelConnections(value: unknown): TunnelConnection[] {
-  let parsed = value;
-  if (typeof parsed === "string") {
-    try {
-      parsed = JSON.parse(parsed);
-    } catch {
-      return [];
-    }
-  }
-  return Array.isArray(parsed) ? (parsed as TunnelConnection[]) : [];
 }
 
 /**
