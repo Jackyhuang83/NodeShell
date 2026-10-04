@@ -11,7 +11,6 @@ import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { DATA_DIR_TOKEN } from "../fixtures/upgrade/rows.js";
-import { remoteTestDialect, seedRemote28 } from "./remote-seed.js";
 
 export const REPO_ROOT = path.resolve(__dirname, "../../../..");
 export const BUILT_PLUGINS_DIR = path.join(REPO_ROOT, "dist", "plugins");
@@ -91,7 +90,7 @@ export function create28Database() {
 
 export interface BootedCore {
   dataDir: string;
-  /** The live database core and the plugins write to; null on Postgres and MySQL. */
+  /** The live SQLite database core and the plugins write to. */
   sqlite: Database.Database | null;
   /** The 2.8 database file exactly as it was written to DATA_DIR, if one was. */
   seed: Buffer | null;
@@ -164,15 +163,9 @@ export async function bootCore(source: BootSource): Promise<BootedCore> {
     seed = placeFixture(source.fixtureDir, dataDir);
   }
 
-  // TEST_DIALECT=postgres|mysql puts the same 2.8 data on a real server.
-  const remote = remoteTestDialect();
-  if (remote) {
-    const url = process.env.TEST_DATABASE_URL;
-    if (!url) throw new Error(`TEST_DIALECT=${remote} needs TEST_DATABASE_URL`);
-    process.env.DATABASE_DIALECT = remote;
-    process.env.DATABASE_URL = url;
-    if (seed) await seedRemote28(remote, url, seed);
-  } else if (seed) {
+  delete process.env.DATABASE_DIALECT;
+  delete process.env.DATABASE_URL;
+  if (seed) {
     fs.writeFileSync(path.join(dataDir, "db.sqlite"), seed);
   }
 

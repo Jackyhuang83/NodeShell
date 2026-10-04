@@ -976,8 +976,6 @@ export interface SshAuthTypeInfo {
   credentialType: boolean;
   /** Can connect unattended, for polling. */
   supportsBackground: boolean;
-  /** Offered in Quick Connect, for a host that is never saved. */
-  quickConnect: boolean;
 }
 
 /**
