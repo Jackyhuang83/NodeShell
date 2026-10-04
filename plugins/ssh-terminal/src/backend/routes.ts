@@ -8,7 +8,6 @@ import { randomUUID } from "crypto";
 import multer from "multer";
 import type { PluginContext } from "@termix/plugin-sdk/backend";
 import { getErrorMessage, type TerminalLogger } from "./helpers.js";
-import type { HistoryRepository } from "./history-repository.js";
 import type { TerminalSessionManager } from "./session-manager.js";
 import {
   ADMIN_KEYS,
@@ -35,20 +34,6 @@ function isNonEmptyString(val: unknown): val is string {
   return typeof val === "string" && val.trim().length > 0;
 }
 
-export const SENSITIVE_COMMAND_PATTERNS = [
-  /passw(or)?d/i,
-  /\bsecret\b/i,
-  /\btoken\b/i,
-  /\bapi.?key\b/i,
-  /PASS(WORD)?=/i,
-  /AWS_SECRET/i,
-  /mysql\b.*-p/i,
-  /sudo\s+-S\b/,
-  /htpasswd/i,
-  /sshpass/i,
-  /curl\b.*-u\s/i,
-  /export\b.*(?:PASSWORD|SECRET|TOKEN|KEY)=/i,
-];
 
 type SharpFactory = typeof import("sharp").default;
 
@@ -56,7 +41,6 @@ export interface TerminalRouteDeps {
   ctx: PluginContext;
   log: TerminalLogger;
   sessionManager: TerminalSessionManager;
-  history: HistoryRepository;
 }
 
 /**
@@ -66,7 +50,7 @@ export interface TerminalRouteDeps {
  */
 export function registerTerminalRoutes(
   router: Router,
-  { ctx, log, sessionManager, history }: TerminalRouteDeps,
+  { ctx, log, sessionManager }: TerminalRouteDeps,
 ): void {
   const json = express.json({ limit: "2mb" });
 
@@ -618,278 +602,5 @@ export function registerTerminalRoutes(
     }
   });
 
-  /**
-   * @openapi
-   * /plugin-api/ssh-terminal/command-history:
-   *   post:
-   *     summary: Save command to history
-   *     description: Saves a command to the caller's history for a host. Commands that look like they carry a secret, and anything while command history is off globally or for the host, are acknowledged but not stored.
-   *     tags:
-   *       - Terminal
-   *     requestBody:
-   *       required: true
-   *       content:
-   *         application/json:
-   *           schema:
-   *             type: object
-   *             properties:
-   *               hostId:
-   *                 type: integer
-   *               command:
-   *                 type: string
-   *     responses:
-   *       201:
-   *         description: Command saved, or skipped on purpose.
-   *       400:
-   *         description: Missing required parameters.
-   *       500:
-   *         description: Failed to save command.
-   */
-  router.post("/command-history", json, async (req, res) => {
-    const userId = ctx.currentActor();
-    const { hostId, command } = req.body ?? {};
 
-    if (!isNonEmptyString(userId) || !hostId || !isNonEmptyString(command)) {
-      log.warn("Invalid command history save request", {
-        operation: "command_history_save",
-        userId,
-        hasHostId: !!hostId,
-        hasCommand: !!command,
-      });
-      return res.status(400).json({ error: "Missing required parameters" });
-    }
-
-    const hostIdNum = parseInt(hostId, 10);
-    const trimmedCommand = command.trim();
-    const skipped = {
-      id: 0,
-      userId,
-      hostId: hostIdNum,
-      command: trimmedCommand,
-      executedAt: new Date().toISOString(),
-    };
-
-    if (SENSITIVE_COMMAND_PATTERNS.some((p) => p.test(trimmedCommand))) {
-      return res.status(201).json(skipped);
-    }
-    if ((await ctx.settings.get(ADMIN_KEYS.commandHistoryEnabled)) === false) {
-      return res.status(201).json(skipped);
-    }
-    if (
-      (await ctx.settings.getHost(
-        hostIdNum,
-        HOST_KEYS.enableCommandHistory,
-      )) === false
-    ) {
-      return res.status(201).json(skipped);
-    }
-
-    try {
-      const executedAt = new Date().toISOString();
-      await history.create(userId, hostIdNum, trimmedCommand, executedAt);
-      res.status(201).json({
-        userId,
-        hostId: hostIdNum,
-        command: trimmedCommand,
-        executedAt,
-      });
-    } catch (err) {
-      log.error("Failed to save command to history", err);
-      res.status(500).json({
-        error: getErrorMessage(err, "Failed to save command"),
-      });
-    }
-  });
-
-  /**
-   * @openapi
-   * /plugin-api/ssh-terminal/command-history/{hostId}:
-   *   get:
-   *     summary: Get command history
-   *     description: The caller's distinct commands on a host, most recently used first, for autocomplete.
-   *     tags:
-   *       - Terminal
-   *     parameters:
-   *       - in: path
-   *         name: hostId
-   *         required: true
-   *         schema:
-   *           type: integer
-   *     responses:
-   *       200:
-   *         description: A list of commands.
-   *       400:
-   *         description: Invalid request parameters.
-   *       500:
-   *         description: Failed to fetch history.
-   */
-  router.get("/command-history/:hostId", async (req, res) => {
-    const userId = ctx.currentActor();
-    const hostIdNum = parseInt(String(req.params.hostId), 10);
-
-    if (!isNonEmptyString(userId) || isNaN(hostIdNum)) {
-      log.warn("Invalid command history fetch request", {
-        userId,
-        hostId: hostIdNum,
-      });
-      return res.status(400).json({ error: "Invalid request parameters" });
-    }
-
-    try {
-      res.json(await history.listUniqueCommandsForHost(userId, hostIdNum));
-    } catch (err) {
-      log.error("Failed to fetch command history", err);
-      res.status(500).json({
-        error: getErrorMessage(err, "Failed to fetch history"),
-      });
-    }
-  });
-
-  /**
-   * @openapi
-   * /plugin-api/ssh-terminal/command-history/{hostId}/recent:
-   *   get:
-   *     summary: Get recent command history
-   *     description: The caller's commands on a host, newest first, duplicates included. Needs hosts.view.
-   *     tags:
-   *       - Terminal
-   *     parameters:
-   *       - in: path
-   *         name: hostId
-   *         required: true
-   *         schema:
-   *           type: integer
-   *     responses:
-   *       200:
-   *         description: A list of commands.
-   *       400:
-   *         description: Invalid host id.
-   *       403:
-   *         description: Missing the hosts.view permission.
-   *       500:
-   *         description: Failed to fetch command history.
-   */
-  router.get("/command-history/:hostId/recent", async (req, res) => {
-    if (!(await ctx.rbac.has("hosts.view"))) {
-      return res.status(403).json({ error: "Insufficient permissions" });
-    }
-    const userId = ctx.currentActor();
-    const hostIdNum = parseInt(String(req.params.hostId), 10);
-    if (!isNonEmptyString(userId) || !hostIdNum) {
-      return res.status(400).json({ error: "Invalid userId or hostId" });
-    }
-    try {
-      const rows = await history.listCommandsForHost(userId, hostIdNum);
-      res.json(rows.map((row) => row.command));
-    } catch (err) {
-      log.error("Failed to fetch command history from database", err, {
-        operation: "command_history_fetch",
-        hostId: hostIdNum,
-      });
-      res.status(500).json({ error: "Failed to fetch command history" });
-    }
-  });
-
-  /**
-   * @openapi
-   * /plugin-api/ssh-terminal/command-history/delete:
-   *   post:
-   *     summary: Delete a specific command from history
-   *     description: Deletes one command from the caller's history for a host.
-   *     tags:
-   *       - Terminal
-   *     requestBody:
-   *       required: true
-   *       content:
-   *         application/json:
-   *           schema:
-   *             type: object
-   *             properties:
-   *               hostId:
-   *                 type: integer
-   *               command:
-   *                 type: string
-   *     responses:
-   *       200:
-   *         description: Command deleted successfully.
-   *       400:
-   *         description: Missing required parameters.
-   *       500:
-   *         description: Failed to delete command.
-   */
-  router.post("/command-history/delete", json, async (req, res) => {
-    const userId = ctx.currentActor();
-    const { hostId, command } = req.body ?? {};
-
-    if (!isNonEmptyString(userId) || !hostId || !isNonEmptyString(command)) {
-      log.warn("Invalid command delete request", {
-        operation: "command_history_delete",
-        userId,
-        hasHostId: !!hostId,
-        hasCommand: !!command,
-      });
-      return res.status(400).json({ error: "Missing required parameters" });
-    }
-
-    try {
-      await history.deleteCommandForHost(
-        userId,
-        parseInt(hostId, 10),
-        command.trim(),
-      );
-      res.json({ success: true });
-    } catch (err) {
-      log.error("Failed to delete command from history", err);
-      res.status(500).json({
-        error: getErrorMessage(err, "Failed to delete command"),
-      });
-    }
-  });
-
-  /**
-   * @openapi
-   * /plugin-api/ssh-terminal/command-history/{hostId}:
-   *   delete:
-   *     summary: Clear command history
-   *     description: Clears the caller's whole command history for a host.
-   *     tags:
-   *       - Terminal
-   *     parameters:
-   *       - in: path
-   *         name: hostId
-   *         required: true
-   *         schema:
-   *           type: integer
-   *     responses:
-   *       200:
-   *         description: Command history cleared successfully.
-   *       400:
-   *         description: Invalid request.
-   *       500:
-   *         description: Failed to clear history.
-   */
-  router.delete("/command-history/:hostId", async (req, res) => {
-    const userId = ctx.currentActor();
-    const hostIdNum = parseInt(String(req.params.hostId), 10);
-
-    if (!isNonEmptyString(userId) || isNaN(hostIdNum)) {
-      log.warn("Invalid command history clear request");
-      return res.status(400).json({ error: "Invalid request" });
-    }
-
-    try {
-      await history.deleteByUserAndHost(userId, hostIdNum);
-      log.info("Terminal history cleared", {
-        operation: "terminal_history_clear",
-        userId,
-        hostId: hostIdNum,
-      });
-      res.json({ success: true });
-    } catch (err) {
-      log.error("Failed to clear command history", err);
-      res.status(500).json({
-        error: getErrorMessage(err, "Failed to clear history"),
-      });
-    }
-  });
 }
