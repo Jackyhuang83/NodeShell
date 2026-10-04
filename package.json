@@ -5,7 +5,7 @@
     "packages/*",
     "plugins/*"
   ],
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "Privacy-first self-hosted SSH and server manager.",
   "author": "Karmaa",
   "main": "electron/main.cjs",
@@ -52,7 +52,9 @@
     "build:sdk": "npm run build --workspace @termix/plugin-sdk && node scripts/build-sdk-host.mjs",
     "build:plugins": "node scripts/build-plugins.cjs",
     "test:plugins": "node scripts/run-plugin-tests.cjs",
-    "test:all": "npm run test && npm run test:plugins"
+    "test:all": "npm run test && npm run test:plugins",
+    "admin:create-owner": "node dist/backend/backend/cli/admin-create-owner.js",
+    "admin:reset-password": "node dist/backend/backend/cli/admin-reset-password.js"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.13",
