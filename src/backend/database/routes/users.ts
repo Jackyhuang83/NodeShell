@@ -9,7 +9,6 @@ import bcrypt from "bcryptjs";
 import { nanoid } from "nanoid";
 import { authLogger } from "../../utils/logger.js";
 import { AuthManager } from "../../utils/auth-manager.js";
-import { DatabaseSaveTrigger } from "../../utils/database-save-trigger.js";
 import { parseUserAgent } from "../../utils/user-agent-parser.js";
 import { deleteUserAndRelatedData } from "./delete-user-data.js";
 import {
@@ -69,10 +68,6 @@ router.use((req, res, next) => {
 
 function isNonEmptyString(val: unknown): val is string {
   return typeof val === "string" && val.trim().length > 0;
-}
-
-function isRegistrationAllowed(): boolean {
-  return false;
 }
 
 function isPasswordResetAllowed(): boolean {
