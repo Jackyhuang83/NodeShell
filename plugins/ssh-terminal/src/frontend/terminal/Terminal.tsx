@@ -2361,7 +2361,7 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
 
     async function readTextFromClipboard(): Promise<string> {
       const text = await readFromClipboard();
-      if (!text && window.location.protocol !== "https:" && !isElectron()) {
+      if (!text && window.location.protocol !== "https:") {
         toast.error(t("terminal.clipboardHttpWarning"));
       }
       return text;
