@@ -1148,8 +1148,6 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
         refresh: () => hardRefresh(),
         getApplicationCursorKeysMode: () =>
           terminal?.modes?.applicationCursorKeysMode ?? false,
-        // What the tab menu's share entry needs, read at call time.
-        getShareTarget: () => slotApiRef.current?.getShareTarget() ?? null,
         openFileManager: () => openFilesAtCwd(),
       }),
       [isConnected, terminal],

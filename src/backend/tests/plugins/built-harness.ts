@@ -199,17 +199,15 @@ export async function bootCore(source: BootSource): Promise<BootedCore> {
 
   return {
     dataDir,
-    sqlite: remote ? null : db.getSqlite(),
+    sqlite: db.getSqlite(),
     seed,
     shutdown: async ({ keepDataDir = false } = {}) => {
       await shutdownPlugins();
       if (keepDataDir) {
-        if (!remote) {
-          fs.writeFileSync(
-            path.join(dataDir, "db.sqlite"),
-            db.getSqlite().serialize(),
-          );
-        }
+        fs.writeFileSync(
+          path.join(dataDir, "db.sqlite"),
+          db.getSqlite().serialize(),
+        );
         return;
       }
       fs.rmSync(dataDir, { recursive: true, force: true });
