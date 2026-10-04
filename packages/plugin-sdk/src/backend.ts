@@ -1111,6 +1111,22 @@ export interface PluginSsh {
   ) => Promise<PluginSshHost | null>;
 
   /**
+   * Resolves an unsaved Quick Connect target with a saved credential entirely
+   * inside core. The returned host is redacted; handing the same object back
+   * to another ctx.ssh method lets core recover the real secrets from its
+   * private WeakMap. Needs ssh:connect + credentials:use.
+   */
+  resolveQuickConnect: (input: {
+    id: number;
+    ip: string;
+    port: number;
+    username: string;
+    credentialId: number;
+    overrideCredentialUsername?: boolean;
+    sshOptions?: HostSshOptions | null;
+  }) => Promise<PluginSshHost | null>;
+
+  /**
    * Lower level: fills an ssh2 config for a client the plugin drives itself,
    * for transports with their own prompt flow. Never connects.
    */
