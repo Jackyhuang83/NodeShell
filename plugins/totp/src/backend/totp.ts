@@ -21,6 +21,22 @@ export function generateBackupCodes(): string[] {
   return Array.from({ length: BACKUP_CODE_COUNT }, () => generateBackupCode());
 }
 
+function hashBackupCode(code: string): string {
+  return `sha256:${crypto
+    .createHash("sha256")
+    .update(normalizeCode(code), "utf8")
+    .digest("hex")}`;
+}
+
+function backupCodeHashMatches(code: string, storedHash: string): boolean {
+  const actual = Buffer.from(hashBackupCode(code), "utf8");
+  const expected = Buffer.from(storedHash, "utf8");
+  return (
+    actual.length === expected.length &&
+    crypto.timingSafeEqual(actual, expected)
+  );
+}
+
 export function verifyTotpCode(secret: string, code: string): boolean {
   return speakeasy.totp.verify({
     secret,
@@ -83,12 +99,14 @@ export function createTotpService(
       if (!code) return false;
       if (verifyTotpCode(secret, code)) return true;
 
-      const codes = await readBackupCodes(row.backupCodes);
-      const index = codes.indexOf(code);
+      const codeHashes = await readBackupCodes(row.backupCodes);
+      const index = codeHashes.findIndex((storedHash) =>
+        backupCodeHashMatches(code, storedHash),
+      );
       if (index === -1) return false;
-      codes.splice(index, 1);
+      codeHashes.splice(index, 1);
       await repository.save(userId, {
-        backupCodes: await sealBackupCodes(codes),
+        backupCodes: await sealBackupCodes(codeHashes),
       });
       return true;
     },
@@ -118,7 +136,7 @@ export function createTotpService(
       await repository.save(userId, {
         secret: await ctx.secrets.seal(secret),
         pendingSecret: null,
-        backupCodes: await sealBackupCodes(codes),
+        backupCodes: await sealBackupCodes(codes.map(hashBackupCode)),
       });
       return codes;
     },
@@ -126,7 +144,7 @@ export function createTotpService(
     async replaceBackupCodes(userId: string): Promise<string[]> {
       const codes = generateBackupCodes();
       await repository.save(userId, {
-        backupCodes: await sealBackupCodes(codes),
+        backupCodes: await sealBackupCodes(codes.map(hashBackupCode)),
       });
       return codes;
     },
