@@ -10,13 +10,11 @@ import {
   User,
   KeyRound,
   ArrowLeft,
-  Shield,
   CheckCircle2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   loginUser,
-  registerUser,
   getUserInfo,
   getRegistrationAllowed,
   getPasswordLoginAllowed,
@@ -282,8 +280,6 @@ export function Auth({ onLogin }: AuthProps) {
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [setupToken, setSetupToken] = useState("");
   const [rememberMe, setRememberMe] = useState(() => {
     try {
       return localStorage.getItem("rememberMe") === "true";
@@ -794,43 +790,6 @@ export function Auth({ onLogin }: AuthProps) {
       const res = await loginUser(username.trim(), password, rememberMe);
       await finishLogin(res, "auth_component", {
         fallbackUsername: username.trim(),
-      });
-    } catch (err: unknown) {
-      showLoginError(err, "errors.unknownError");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleRegister(e: React.FormEvent) {
-    e.preventDefault();
-    if (!username.trim()) {
-      toast.error(t("errors.requiredField"));
-      return;
-    }
-    if (password.length < 6) {
-      toast.error(t("errors.minLength", { min: 6 }));
-      return;
-    }
-    if (password !== confirmPassword) {
-      toast.error(t("errors.passwordMismatch"));
-      return;
-    }
-    if (firstUser && !setupToken.trim()) {
-      toast.error(t("auth.setupTokenRequired", "Setup token is required"));
-      return;
-    }
-    setLoading(true);
-    try {
-      await registerUser(
-        username.trim(),
-        password,
-        firstUser ? setupToken.trim() : undefined,
-      );
-      const res = await loginUser(username.trim(), password, rememberMe);
-      await finishLogin(res, "auth_component", {
-        fallbackUsername: username.trim(),
-        successKey: "messages.registrationSuccess",
       });
     } catch (err: unknown) {
       showLoginError(err, "errors.unknownError");
@@ -1671,73 +1630,23 @@ export function Auth({ onLogin }: AuthProps) {
                 )}
 
                 {view === "register" && (
-                  <form
-                    onSubmit={handleRegister}
-                    className="flex flex-col gap-4"
-                  >
-                    {firstUser && (
-                      <Field
-                        label={t("auth.setupToken", "Setup token")}
-                        htmlFor="reg-setup-token"
-                      >
-                        <PasswordInput
-                          id="reg-setup-token"
-                          value={setupToken}
-                          onChange={setSetupToken}
-                          placeholder="NODESHELL_SETUP_TOKEN"
-                          disabled={loading}
-                        />
-                      </Field>
-                    )}
-                    <Field label={t("common.username")} htmlFor="reg-user">
-                      <div className="relative">
-                        <User className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
-                        <Input
-                          id="reg-user"
-                          value={username}
-                          onChange={(e) => setUsername(e.target.value)}
-                          placeholder="choose_a_username"
-                          className="pl-8"
-                          disabled={loading}
-                          autoFocus
-                        />
-                      </div>
-                    </Field>
-                    <Field label={t("common.password")} htmlFor="reg-pass">
-                      <PasswordInput
-                        id="reg-pass"
-                        value={password}
-                        onChange={setPassword}
-                        placeholder={t("auth.minChars", { min: 6 })}
-                        disabled={loading}
-                      />
-                    </Field>
-                    <Field
-                      label={t("common.confirmPassword")}
-                      htmlFor="reg-confirm"
-                    >
-                      <PasswordInput
-                        id="reg-confirm"
-                        value={confirmPassword}
-                        onChange={setConfirmPassword}
-                        disabled={loading}
-                      />
-                    </Field>
-                    <Button
-                      type="submit"
-                      className="w-full bg-accent-brand hover:bg-accent-brand/90 text-background font-bold h-10"
-                      disabled={loading}
-                    >
-                      {loading ? (
-                        t("common.loading")
-                      ) : (
-                        <span className="flex items-center gap-2">
-                          <Shield className="size-4" />
-                          {t("auth.signUp")}
-                        </span>
-                      )}
-                    </Button>
-                  </form>
+                  <div className="flex flex-col gap-4">
+                    <div className="flex flex-col gap-1">
+                      <h1 className="text-xl font-bold">Owner setup required</h1>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Browser registration is disabled. Create the first
+                        NodeShell Owner from the server console with the local
+                        admin CLI, then return here and sign in.
+                      </p>
+                    </div>
+                    <div className="rounded-md border border-border bg-muted/30 p-3 font-mono text-xs break-all">
+                      npm run admin:create-owner -- --username owner --password-file /path/to/owner-password
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      The password file must be a regular file with mode 0600
+                      and is never accepted as a command-line password argument.
+                    </p>
+                  </div>
                 )}
 
                 <Separator />
