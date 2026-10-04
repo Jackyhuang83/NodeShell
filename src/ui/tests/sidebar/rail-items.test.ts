@@ -61,7 +61,6 @@ describe("RAIL_ITEMS", () => {
       "hosts",
       "credentials",
       "connections",
-      "quick-connect",
       "sync",
     ]);
   });
@@ -75,7 +74,7 @@ describe("RAIL_ITEMS", () => {
   it("marks core's mobile primary slots", () => {
     expect(
       RAIL_ITEMS.filter((item) => item.mobilePrimary).map((item) => item.id),
-    ).toEqual(["hosts", "quick-connect"]);
+    ).toEqual(["hosts"]);
   });
 
   it("marks the panels that can open as a tab", () => {
