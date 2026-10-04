@@ -15,6 +15,8 @@ const h = vi.hoisted(() => ({
   policyError: null as Error | null,
   logins: [] as Array<{ hostId: number; outcome: unknown }>,
   connectError: null as Error | null,
+  usableCredential: null as Record<string, unknown> | null,
+  credentialPermission: true,
 }));
 
 vi.mock("../../utils/logger.js", () => {
@@ -97,6 +99,16 @@ vi.mock("../../hosts/status/host-status-service.js", () => ({
       h.logins.push({ hostId, outcome }),
   },
 }));
+vi.mock("../../utils/permission-manager.js", () => ({
+  PermissionManager: {
+    getInstance: () => ({
+      hasPermission: async () => h.credentialPermission,
+    }),
+  },
+}));
+vi.mock("../../hosts/usable-credential.js", () => ({
+  findUsableCredential: async () => h.usableCredential,
+}));
 vi.mock("../../database/repositories/factory.js", () => ({
   createCurrentUserAuthRepository: () => ({
     recordSecondFactor: async (
@@ -152,6 +164,8 @@ beforeEach(() => {
   h.pooled = [];
   h.logins = [];
   h.connectError = null;
+  h.usableCredential = null;
+  h.credentialPermission = true;
 });
 
 describe("ctx.ssh", () => {
@@ -251,6 +265,78 @@ describe("ctx.ssh", () => {
     await ssh.connect(forged);
     expect(h.connects[0].options).toMatchObject({ userId: "caller" });
     expect(h.connects[0].target).toMatchObject({ userId: "caller" });
+  });
+
+  it("keeps Quick Connect credential secrets inside core", async () => {
+    h.granted = new Set(["ssh:connect", "credentials:use"]);
+    h.usableCredential = {
+      id: 3,
+      userId: "user-1",
+      authType: "password",
+      username: "root",
+      password: "server-only-secret",
+      key: null,
+      privateKey: null,
+      keyPassword: null,
+      keyType: null,
+      certPublicKey: null,
+    };
+
+    const ssh = createPluginSsh({
+      manifest: manifest(["ssh:connect", "credentials:use"]),
+      bag: new DisposableBag("fixture"),
+      audit: vi.fn(async () => {}),
+    });
+
+    const redacted = await ssh.resolveQuickConnectCredential({
+      credentialId: 3,
+      ip: "203.0.113.9",
+      port: 22,
+      username: "ignored",
+    });
+
+    expect(redacted).toMatchObject({
+      id: 0,
+      ip: "203.0.113.9",
+      port: 22,
+      username: "root",
+      authType: "password",
+    });
+    expect(redacted).not.toHaveProperty("password");
+    expect(redacted).not.toHaveProperty("key");
+
+    await ssh.connect(redacted!);
+    expect(h.connects[0].target).toMatchObject({
+      ip: "203.0.113.9",
+      username: "root",
+      password: "server-only-secret",
+    });
+  });
+
+  it("refuses a Quick Connect credential the actor cannot use", async () => {
+    h.granted = new Set(["ssh:connect", "credentials:use"]);
+    h.credentialPermission = false;
+    h.usableCredential = {
+      id: 3,
+      userId: "user-1",
+      authType: "password",
+      username: "root",
+      password: "secret",
+    };
+    const ssh = createPluginSsh({
+      manifest: manifest(["ssh:connect", "credentials:use"]),
+      bag: new DisposableBag("fixture"),
+      audit: vi.fn(async () => {}),
+    });
+
+    await expect(
+      ssh.resolveQuickConnectCredential({
+        credentialId: 3,
+        ip: "203.0.113.9",
+        port: 22,
+      }),
+    ).resolves.toBeNull();
+    expect(h.connects).toEqual([]);
   });
 
   it("passes a given stream through to the pipeline, gated like any connect", async () => {
