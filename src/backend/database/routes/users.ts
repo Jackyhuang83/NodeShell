@@ -27,7 +27,6 @@ import { registerUserSettingsRoutes } from "./user-settings-routes.js";
 import { registerTlsRoutes } from "./tls-routes.js";
 import { registerUserSessionRoutes } from "./user-session-routes.js";
 import { registerUserExternalAccountRoutes } from "./user-external-account-routes.js";
-import { registerUserAdminRoutes } from "./user-admin-routes.js";
 import { registerUserDataAccessRoutes } from "./user-data-access-routes.js";
 import { listExternalLoginMethods, registerAuthRoutes } from "./auth-routes.js";
 import { registerAuthCompatRoutes } from "./auth-compat-routes.js";
@@ -1406,7 +1405,6 @@ router.post("/change-password", authenticateJWT, async (req, res) => {
   res.json({ message: "Password changed successfully. Please log in again." });
 });
 
-registerUserAdminRoutes(router, authenticateJWT);
 
 /**
  * @openapi
