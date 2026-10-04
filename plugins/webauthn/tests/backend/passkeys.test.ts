@@ -357,15 +357,40 @@ describe("capabilities", () => {
 });
 
 describe("requestOrigin", () => {
-  it("prefers Origin, then forwarded host and proto", () => {
-    expect(requestOrigin({ origin: "https://a.test" })).toBe("https://a.test");
-    expect(
-      requestOrigin({
-        "x-forwarded-proto": "https, http",
-        "x-forwarded-host": "b.test",
-        host: "internal",
-      }),
-    ).toBe("https://b.test");
-    expect(requestOrigin({ host: "c.test:8080" })).toBe("http://c.test:8080");
+  it("prefers the operator-pinned public URL over request headers", () => {
+    const previous = process.env.NODESHELL_PUBLIC_URL;
+    process.env.NODESHELL_PUBLIC_URL = "https://nodeshell.example.test/path";
+    try {
+      expect(
+        requestOrigin({
+          origin: "https://attacker.example",
+          "x-forwarded-host": "attacker.example",
+        }),
+      ).toBe("https://nodeshell.example.test");
+    } finally {
+      if (previous === undefined) delete process.env.NODESHELL_PUBLIC_URL;
+      else process.env.NODESHELL_PUBLIC_URL = previous;
+    }
+  });
+
+  it("uses request metadata only outside production when no public URL is pinned", () => {
+    const previous = process.env.NODESHELL_PUBLIC_URL;
+    delete process.env.NODESHELL_PUBLIC_URL;
+    try {
+      expect(requestOrigin({ origin: "https://a.test" })).toBe("https://a.test");
+      expect(
+        requestOrigin({
+          "x-forwarded-proto": "https, http",
+          "x-forwarded-host": "b.test",
+          host: "internal",
+        }),
+      ).toBe("https://b.test");
+      expect(requestOrigin({ host: "c.test:8080" })).toBe(
+        "http://c.test:8080",
+      );
+    } finally {
+      if (previous === undefined) delete process.env.NODESHELL_PUBLIC_URL;
+      else process.env.NODESHELL_PUBLIC_URL = previous;
+    }
   });
 });
