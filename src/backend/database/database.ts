@@ -101,6 +101,22 @@ app.use(createCompressionMiddleware());
 app.use(createCorsMiddleware());
 app.use(createCsrfProtectionMiddleware());
 
+// NodeShell v0.1 does not expose database import/export/restore through the
+// browser. The upstream export contains decrypted SSH credential material.
+// A separate encrypted operator backup format will replace these routes.
+app.use((req, res, next) => {
+  const blocked = new Set([
+    "/database/export",
+    "/database/export/preview",
+    "/database/import",
+    "/database/restore",
+  ]);
+  if (blocked.has(req.path)) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  next();
+});
+
 type SettingData = {
   key: string;
   value: string;
