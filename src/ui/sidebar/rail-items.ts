@@ -7,8 +7,6 @@ import {
 } from "lucide-react";
 import { useMemo, useSyncExternalStore } from "react";
 import { usePermissions } from "@/hooks/use-permissions";
-import { useSyncAttentionCount } from "@/hooks/use-sync-status";
-import { isElectron } from "@/lib/electron";
 import { createRegistry } from "@/lib/registry";
 import { getPanel } from "@/shell/panel-registry";
 import { getTabType } from "@/shell/tab-registry";
@@ -84,14 +82,6 @@ export const RAIL_ITEMS: RailItemDef[] = [
     separatorAfter: true,
     rightDockable: true,
   },
-  {
-    id: "sync",
-    icon: Cloud,
-    labelKey: "nav.sync",
-    electronOnly: true,
-    placement: "footer",
-    useBadge: useSyncAttentionCount,
-  },
 ];
 
 /**
@@ -146,8 +136,7 @@ function mergedRailItems(): RailItemDef[] {
  * or the visibility toggles.
  */
 export function visibleRailItems(): RailItemDef[] {
-  const electron = isElectron();
-  return mergedRailItems().filter((item) => !item.electronOnly || electron);
+  return mergedRailItems().filter((item) => !item.electronOnly);
 }
 
 let railSnapshot: RailItemDef[] | null = null;
