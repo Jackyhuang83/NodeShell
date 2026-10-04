@@ -2,7 +2,7 @@ name: NodeShell CI
 
 on:
   push:
-    branches: [security-baseline, phase1b-hardening, main]
+    branches: [security-baseline, phase1b-hardening, v0.1-slim, main]
   pull_request:
     branches: [security-baseline, main]
 
