@@ -1,36 +1,8 @@
 import axios, { type AxiosRequestConfig } from "axios";
-import {
-  handleApiError,
-  getRemoteCoreApi,
-  isElectron,
-  sshHostApi,
-} from "@/main-axios";
+import { handleApiError, sshHostApi } from "@/main-axios";
 import type { ServerStatus } from "@/main-axios";
 import { getCachedServerStatuses } from "@/lib/hosts-request-cache";
-import { resolveConnectionOrigin } from "@/lib/connection-origin";
-import { getLinkedSession } from "@/lib/linked-server";
-import type { SSHHost } from "@/types/index";
 
-// Core's host status checks (/host/status). On a linked desktop, hosts that
-// connect through the server take their status from it, matched by sync id.
-
-// HOST STATUS
-// ============================================================================
-
-/**
- * Progressive retry schedule for the background /status poll.
- *
- * Each entry describes one attempt's per-request timeout and the pause to
- * observe before the next attempt. The pause on the last entry is `null`:
- * after that final failure we surface the network error, which flows
- * through the response interceptor + dbHealthMonitor (which decides
- * between the degraded toast and the full-outage overlay based on whether
- * any WebSocket is still alive).
- *
- * Sequence: try(2s) -> wait 3s -> try(5s) -> wait 5s -> try(8s) -> fail.
- * Worst-case wall-clock = 23s, which fits inside the 30s ServerStatusContext
- * poll cadence, so the next tick acts as the next retry without overlap.
- */
 const STATUS_RETRY_SCHEDULE: ReadonlyArray<{
   timeoutMs: number;
   pauseAfterMs: number | null;
@@ -42,16 +14,11 @@ const STATUS_RETRY_SCHEDULE: ReadonlyArray<{
 
 function isTransientStatusError(error: unknown): boolean {
   if (!axios.isAxiosError(error)) return false;
-  if (error.response) {
-    // Definitive server response (even 5xx) is not something more retries
-    // will fix in a useful timeframe; bail out and report it normally.
-    return false;
-  }
+  if (error.response) return false;
+
   const code = error.code;
-  if (!code) {
-    // No code + no response means classic network error (offline / DNS / TCP)
-    return true;
-  }
+  if (!code) return true;
+
   return (
     code === "ECONNABORTED" ||
     code === "ETIMEDOUT" ||
@@ -66,37 +33,6 @@ export async function getAllServerStatuses(): Promise<
 > {
   return getCachedServerStatuses(async () => {
     let lastError: unknown = null;
-    let localStatuses: Record<number, ServerStatus> = {};
-    let localHostIds: number[] | null = null;
-    let remoteHostsBySyncId: Map<string, number> | null = null;
-
-    if (isElectron()) {
-      try {
-        const response = await sshHostApi.get<SSHHost[]>("/db/host");
-        const defaultOrigin = await resolveConnectionOrigin({
-          connectionOrigin: null,
-        });
-        const hosts = response.data || [];
-        localHostIds = hosts
-          .filter(
-            (host) => (host.connectionOrigin ?? defaultOrigin) === "local",
-          )
-          .map((host) => host.id);
-        remoteHostsBySyncId = new Map(
-          hosts
-            .filter(
-              (host) =>
-                (host.connectionOrigin ?? defaultOrigin) === "remote" &&
-                !!host.syncId,
-            )
-            .map((host) => [host.syncId as string, host.id]),
-        );
-      } catch {
-        // A host-list failure must not start local probes for hosts whose
-        // configured origin may be remote.
-        localHostIds = [];
-      }
-    }
 
     for (let i = 0; i < STATUS_RETRY_SCHEDULE.length; i++) {
       const { timeoutMs, pauseAfterMs } = STATUS_RETRY_SCHEDULE[i];
@@ -105,57 +41,20 @@ export async function getAllServerStatuses(): Promise<
       try {
         const response = await sshHostApi.get("/status", {
           timeout: timeoutMs,
-          ...(localHostIds === null
-            ? {}
-            : { params: { hostIds: localHostIds.join(",") } }),
-          // Silence per-attempt interceptor logging & health-monitor side
-          // effects on all attempts except the final one, so background
-          // blips don't look like real outages.
           __silentRetry: !isFinalAttempt,
         } as AxiosRequestConfig & { __silentRetry?: boolean });
-        localStatuses = response.data || {};
-        lastError = null;
-        break;
+        return response.data || {};
       } catch (error) {
         lastError = error;
-        if (!isTransientStatusError(error)) {
-          break;
-        }
-        if (pauseAfterMs === null) {
-          break;
-        }
+        if (!isTransientStatusError(error) || pauseAfterMs === null) break;
         await new Promise((resolve) => setTimeout(resolve, pauseAfterMs));
       }
     }
 
     if (lastError) {
       handleApiError(lastError, "fetch server statuses");
-      return {};
     }
-
-    if (remoteHostsBySyncId?.size && (await getLinkedSession())) {
-      try {
-        const remoteResult = await getRemoteCoreApi().get(
-          "/sync/v2/host-status",
-          {
-            timeout: 8000,
-            __silentRetry: true,
-          } as AxiosRequestConfig & { __silentRetry?: boolean },
-        );
-        const merged = { ...localStatuses };
-        for (const [syncId, status] of Object.entries(
-          (remoteResult.data || {}) as Record<string, ServerStatus>,
-        )) {
-          const localId = remoteHostsBySyncId.get(syncId);
-          if (localId !== undefined) merged[localId] = status;
-        }
-        return merged;
-      } catch {
-        // The server is unreachable this tick; local statuses still stand.
-      }
-    }
-
-    return localStatuses;
+    return {};
   });
 }
 
@@ -185,6 +84,7 @@ export async function getStatusCheckSettings(): Promise<{
     return response.data;
   } catch (error) {
     handleApiError(error, "fetch status check settings");
+    throw error;
   }
 }
 
@@ -197,5 +97,3 @@ export async function updateStatusCheckSettings(settings: {
     handleApiError(error, "update status check settings");
   }
 }
-
-// ============================================================================
