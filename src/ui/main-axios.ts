@@ -11,45 +11,6 @@ import { getBasePath } from "@/lib/base-path";
 import { clearTermixSessionStorage } from "@/shell/TabContext";
 import type { SSHHost } from "@/types/index";
 
-// ============================================================================
-// RBAC TYPE DEFINITIONS
-// ============================================================================
-
-export interface Role {
-  id: number;
-  name: string;
-  displayName: string;
-  description: string | null;
-  isSystem: boolean;
-  permissions: string[] | string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface UserRole {
-  userId: string;
-  roleId: number;
-  roleName: string;
-  roleDisplayName: string;
-  grantedBy: string;
-  grantedByUsername: string;
-  grantedAt: string;
-}
-
-export interface AccessRecord {
-  id: number;
-  targetType: "user" | "role";
-  userId: string | null;
-  roleId: number | null;
-  username: string | null;
-  roleName: string | null;
-  roleDisplayName: string | null;
-  grantedBy: string;
-  grantedByUsername: string;
-  permissionLevel: "connect" | "view" | "edit" | "manage";
-  expiresAt: string | null;
-  createdAt: string;
-}
 import {
   apiLogger,
   authLogger,
@@ -102,18 +63,6 @@ export interface UserInfo {
   password_hash?: string;
   data_unlocked?: boolean;
   show_donation_modal?: boolean;
-  /** On a desktop linked to a server, the account it is signed in to there. */
-  linked?: LinkedAccountInfo | null;
-}
-
-export interface LinkedAccountInfo {
-  serverUrl: string;
-  serverName: string | null;
-  username: string | null;
-  isAdmin: boolean;
-  roles: string[];
-  permissions: string[];
-  status: string;
 }
 
 interface UserCount {
@@ -1014,47 +963,42 @@ export async function changePassword(oldPassword: string, newPassword: string) {
 }
 
 // ============================================================================
-export {
-  getUserList,
-  getSessions,
-  revokeSession,
-  revokeAllUserSessions,
-  createApiKey,
-  getApiKeys,
-  deleteApiKey,
-  makeUserAdmin,
-  removeAdminStatus,
-  deleteUser,
-  deleteAccount,
-  updateRegistrationAllowed,
-  getExternalAutoProvision,
-  updateExternalAutoProvision,
-  getSecondFactorAfterExternalLogin,
-  updateSecondFactorAfterExternalLogin,
-  updatePasswordLoginAllowed,
-  getPasswordResetAllowed,
-  updatePasswordResetAllowed,
-  adminResetUserPassword,
-  adminExportUserData,
-  type ApiKey,
-  type CreatedApiKey,
-} from "@/api/user-management-api";
+export async function getSessions(): Promise<{
+  sessions: {
+    id: string;
+    userId: string;
+    username?: string;
+    deviceType: string;
+    deviceInfo: string;
+    createdAt: string;
+    expiresAt: string;
+    lastActiveAt: string;
+    isRevoked?: boolean;
+    isCurrentSession?: boolean;
+  }[];
+}> {
+  try {
+    const response = await authApi.get("/users/sessions");
+    return response.data;
+  } catch (error) {
+    handleApiError(error, "fetch sessions");
+  }
+}
 
+export async function revokeSession(
+  sessionId: string,
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const response = await authApi.delete(`/users/sessions/${sessionId}`);
+    return response.data;
+  } catch (error) {
+    handleApiError(error, "revoke session");
+  }
+}
+
+// ============================================================================
 // ADMIN USER DATA MANAGEMENT
 // ============================================================================
-
-export {
-  adminGetUserHosts,
-  adminCreateUserHost,
-  adminUpdateUserHost,
-  adminDeleteUserHost,
-  adminGetHostPassword,
-  adminGetUserCredentials,
-  adminGetUserCredentialDetails,
-  adminCreateUserCredential,
-  adminUpdateUserCredential,
-  adminDeleteUserCredential,
-} from "@/api/admin-user-data-api";
 
 export {
   getReleasesRSS,
@@ -1110,35 +1054,6 @@ export {
   linkExternalToPasswordAccount,
   unlinkExternalFromPasswordAccount,
 } from "@/api/external-account-api";
-
-// ============================================================================
-// RBAC MANAGEMENT
-// ============================================================================
-
-export {
-  getRoles,
-  createRole,
-  updateRole,
-  deleteRole,
-  getUserRoles,
-  assignRoleToUser,
-  removeRoleFromUser,
-  shareHost,
-  shareFolder,
-  updateHostAccess,
-  getHostAccess,
-  revokeHostAccess,
-  getHostAuthOverride,
-  setHostAuthOverride,
-  getPermissionsCatalog,
-  getSharedHosts,
-} from "@/api/rbac-api";
-export type {
-  SharePermissionLevel,
-  ShareTarget,
-  PermissionCatalogEntry,
-  PermissionCatalogItem,
-} from "@/api/rbac-api";
 
 export {
   getOpenTabs,
