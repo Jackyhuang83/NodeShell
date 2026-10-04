@@ -103,20 +103,14 @@ export async function activate(ctx: PluginContext) {
       ctx.registry.consume<SessionGuestsV1>(SESSION_GUESTS_KEY) ?? null,
   });
 
-  // Public with optional auth: a share-link guest arrives with a share token
-  // instead of a session, so that check happens where the token is understood.
-  ctx.ws.route(
-    "/terminal",
-    (connection) => {
-      // Also picks up a value the boot migration wrote after activation.
-      void refreshTimeout().catch(() => {});
-      return socket.handleConnection(connection);
-    },
-    {
-      public: true,
-      optionalAuth: true,
-    },
-  );
+  // NodeShell v0.1 has no anonymous terminal/session-sharing surface.
+  // Core authenticates the upgrade and enforces a trusted browser Origin
+  // before the terminal handler is invoked.
+  ctx.ws.route("/terminal", (connection) => {
+    // Also picks up a value the boot migration wrote after activation.
+    void refreshTimeout().catch(() => {});
+    return socket.handleConnection(connection);
+  });
   ctx.disposables.add(() => socket.closeAll());
 
   registerTerminalRoutes(ctx.http.router<Router>({ rawBody: true }), {
