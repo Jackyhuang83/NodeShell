@@ -631,7 +631,6 @@ export {
   getSSHHostById,
   exportSSHHostWithCredentials,
   exportAllSSHHosts,
-  testProxyConnection,
 } from "@/api/ssh-host-management-api";
 
 export {
