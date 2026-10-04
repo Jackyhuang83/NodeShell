@@ -423,7 +423,7 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
     const commandHistoryTrackingEnabled = hostSetting(
       hostConfig,
       "enableCommandHistory",
-      true,
+      false,
     );
 
     const { trackInput, getCurrentCommand, updateCurrentCommand } =
