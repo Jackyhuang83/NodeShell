@@ -152,6 +152,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD wget -q -O /dev/null http://localhost:30001/health || exit 1
 
 COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY docker/nodeshell /usr/local/bin/nodeshell
+RUN chmod +x /entrypoint.sh /usr/local/bin/nodeshell
 
 CMD ["/entrypoint.sh"]
