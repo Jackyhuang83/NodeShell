@@ -677,7 +677,6 @@ export function Auth({ onLogin }: AuthProps) {
   function resetAll() {
     setUsername("");
     setPassword("");
-    setConfirmPassword("");
     setResetStep("email");
     setResetCode("");
     setNewPassword("");
