@@ -81,12 +81,6 @@ const CommandPalette = lazy(() =>
 const HostsPanel = lazy(() =>
   import("@/sidebar/HostsPanel").then((m) => ({ default: m.HostsPanel })),
 );
-const QuickConnectPanel = lazy(() =>
-  import("@/sidebar/QuickConnectPanel").then((m) => ({
-    default: m.QuickConnectPanel,
-  })),
-);
-
 const UserProfilePanel = lazy(() =>
   import("@/sidebar/UserProfilePanel").then((m) => ({
     default: m.UserProfilePanel,
@@ -141,7 +135,6 @@ import {
   addOpenTab,
   deleteOpenTab,
   patchOpenTab,
-  createSSHHost,
   getActiveSessions,
   getUserPreferences,
   saveUserPreferences,
@@ -163,7 +156,6 @@ import { ServerStatusProvider } from "@/lib/ServerStatusContext";
 import { sshHostToHost } from "@/sidebar/HostManagerData";
 import { resolveHostTabType } from "@/lib/host-connection-tabs";
 import { changeAppLanguage, consumeLoginLanguage } from "@/i18n/i18n";
-import { quickConnectHostToPayload } from "@/sidebar/quick-connect-host";
 import { buildHostTree } from "@/sidebar/build-host-tree";
 import {
   addSplitTab,
@@ -1606,21 +1598,6 @@ export function AppShell({
     openTab(host, type, undefined, options);
   }
 
-  const saveQuickConnectHost = useCallback(
-    async (tab: Tab, host: Host) => {
-      try {
-        const savedHost = await createSSHHost(quickConnectHostToPayload(host));
-        await patchOpenTab(tab.instanceId, { hostId: savedHost.id });
-        await loadHosts();
-        toast.success(t("hosts.hostCreated"));
-      } catch (error) {
-        toast.error(t("hosts.failedToSave"));
-        throw error;
-      }
-    },
-    [loadHosts, t],
-  );
-
   /** A tab type that opens a fresh tab every time (a local shell). */
   function openMultiInstanceTab(
     type: TabType,
@@ -2622,7 +2599,6 @@ export function AppShell({
         0,
       );
     },
-    saveQuickConnect: saveQuickConnectHost,
   };
 
   // Tabs get one stable bag that forwards to the latest callbacks, so a shell
@@ -2643,8 +2619,6 @@ export function AppShell({
       closeRailView: (...args) => shellImplRef.current.closeRailView(...args),
       openHostEditor: (...args) =>
         shellImplRef.current.openHostEditor?.(...args),
-      saveQuickConnect: (...args) =>
-        shellImplRef.current.saveQuickConnect!(...args),
     }),
     [],
   );
@@ -2705,15 +2679,6 @@ export function AppShell({
               />
             </div>
           </>
-        )}
-
-        {railView === "quick-connect" && (
-          <QuickConnectPanel
-            onConnect={(host, type) => {
-              openTab(host, type);
-              if (isMobile) setSidebarOpen(false);
-            }}
-          />
         )}
 
         {registeredPanels.map((panel) => {
