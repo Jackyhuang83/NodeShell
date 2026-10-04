@@ -72,9 +72,8 @@ function isNonEmptyString(val: unknown): val is string {
   return typeof val === "string" && val.trim().length > 0;
 }
 
-async function isFirstOwnerSetupAllowed(req: Request): Promise<boolean> {
-  if (!isLoopbackRequest(req)) return false;
-  return (await createCurrentUserRepository().countAll()) === 0;
+function isRegistrationAllowed(): boolean {
+  return false;
 }
 
 function isPasswordResetAllowed(): boolean {
@@ -125,10 +124,10 @@ const requireAdmin = authManager.createAdminMiddleware();
  *         description: Failed to create user.
  */
 router.post("/create", async (req, res) => {
-  if (!(await isFirstOwnerSetupAllowed(req))) {
+  if (!isRegistrationAllowed()) {
     return res.status(403).json({
       error:
-        "Public registration is disabled. The first NodeShell owner can only be created from a local loopback connection.",
+        "Browser registration is disabled. Create the first NodeShell owner with the local admin CLI.",
     });
   }
 
@@ -870,7 +869,7 @@ router.get("/db-health", requireAdmin, async (req, res) => {
  */
 router.get("/registration-allowed", async (req, res) => {
   try {
-    res.json({ allowed: await isFirstOwnerSetupAllowed(req) });
+    res.json({ allowed: false });
   } catch (err) {
     authLogger.error("Failed to get registration allowed", err);
     res.status(500).json({ error: "Failed to get registration allowed" });
