@@ -236,10 +236,6 @@ export type { ConnectionStage } from "@/types/connection-log";
 // activity, sudo autofill, open tabs, keybindings) are typed in
 // @termix/plugin-sdk/frontend instead.
 export {
-  getRecentActivity,
-  getUptime,
-  type RecentActivityItem,
-  type UptimeInfo,
 } from "@/api/dashboard-api";
 export {
   getVersionInfo,
