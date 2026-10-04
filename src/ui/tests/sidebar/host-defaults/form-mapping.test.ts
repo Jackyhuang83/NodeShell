@@ -32,7 +32,7 @@ describe("host defaults on the editor form", () => {
   });
 
   it("puts a default's value back on the form", () => {
-    const next = applyDefaultToForm(form(), "core.jumpHosts", [{ hostId: 4 }]);
+    let next = applyDefaultToForm(form(), "core.jumpHosts", [{ hostId: 4 }]);
     expect(next.jumpHosts).toEqual([{ hostId: "4" }]);
     next = applyDefaultToForm(next, "term.fontSize", 18);
     expect(next.pluginSettings.term.fontSize).toBe(18);

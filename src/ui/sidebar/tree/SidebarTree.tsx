@@ -628,12 +628,6 @@ export function SidebarTree({
           ]),
         ),
         forceKeyboardInteractive: host.forceKeyboardInteractive ?? false,
-        useSocks5: host.useSocks5,
-        socks5Host: host.socks5Host ?? null,
-        socks5Port: host.socks5Port ?? null,
-        socks5Username: host.socks5Username ?? null,
-        socks5Password: host.socks5Password ?? null,
-        socks5ProxyChain: host.socks5ProxyChain ?? null,
         jumpHosts: (host.jumpHosts ?? []).map((j) => ({
           hostId: Number(j.hostId),
         })),
