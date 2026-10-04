@@ -238,7 +238,12 @@ export function resolveServerHostId(
   clientHostId: number | null,
   resolvedHost: { id?: unknown } | null,
 ): number | null {
-  return typeof resolvedHost?.id === "number" ? resolvedHost.id : clientHostId;
+  if (typeof resolvedHost?.id === "number" && resolvedHost.id > 0) {
+    return resolvedHost.id;
+  }
+  return typeof clientHostId === "number" && clientHostId > 0
+    ? clientHostId
+    : null;
 }
 
 /** An in-memory SSH agent holding one key, for agent forwarding. */
