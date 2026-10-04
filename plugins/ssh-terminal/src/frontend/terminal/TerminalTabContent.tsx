@@ -17,21 +17,12 @@ interface TerminalTabRecord {
   id: string;
   instanceId?: string;
   restoredSessionId?: string | null;
-  joinSharedSessionId?: string | null;
-  joinShareId?: string | null;
   initialFilePath?: string;
   data?: {
     initialPath?: string;
-    joinSharedSessionId?: string | null;
-    joinShareId?: string | null;
   };
 }
 
-const CommandHistoryProvider = lazy(() =>
-  import("./command-history/CommandHistoryContext").then((m) => ({
-    default: m.CommandHistoryProvider,
-  })),
-);
 export const loadTerminal = () =>
   import("./Terminal").then((m) => ({ default: m.Terminal }));
 const TerminalFeature = lazy(loadTerminal);
@@ -83,8 +74,7 @@ export function TerminalTabContent({
 
   return (
     <Suspense fallback={<TabChunkFallback />}>
-      <CommandHistoryProvider>
-        <div className="flex flex-col h-full w-full">
+      <div className="flex flex-col h-full w-full">
           <div className="flex-1 min-h-0">
             <TerminalFeature
               ref={handleRef as React.Ref<TerminalHandle>}
@@ -94,11 +84,6 @@ export function TerminalTabContent({
                   sshPort: host.sshPort ?? host.port,
                   instanceId: tab.instanceId ?? tab.id,
                   restoredSessionId: tab.restoredSessionId ?? null,
-                  joinSharedSessionId:
-                    tab.data?.joinSharedSessionId ??
-                    tab.joinSharedSessionId ??
-                    null,
-                  joinShareId: tab.data?.joinShareId ?? tab.joinShareId ?? null,
                 } as unknown as TerminalHostConfig
               }
               isVisible={isVisible}
@@ -119,12 +104,6 @@ export function TerminalTabContent({
               onOpenFileManager={(path) =>
                 void invokeAction("files.openHost", host, path)
               }
-              isQuickConnect={String(host.id).startsWith("quick-connect-")}
-              onSaveQuickConnect={
-                shell.saveQuickConnect && hostRecord?.quickConnectSavable
-                  ? () => shell.saveQuickConnect!(tabRecord, hostRecord!)
-                  : undefined
-              }
               host={host}
               onOpenTab={(type) => shell.openTab(hostRecord!, type)}
               isFocusedPane={isFocusedPane}
@@ -135,8 +114,7 @@ export function TerminalTabContent({
               terminalRef={handleRef as React.RefObject<TerminalHandle | null>}
             />
           )}
-        </div>
-      </CommandHistoryProvider>
+      </div>
     </Suspense>
   );
 }
