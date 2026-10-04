@@ -75,7 +75,6 @@ const UNGATED: Record<string, string> = {
   "audit.record": "writes under the runtime's actor, never a plugin value",
   asUser: "always audited as plugin_as_user",
   currentActor: "reads the actor, cannot set it",
-  "desktop.available": "a yes/no about the environment",
   "http.baseUrl": "reads the request's public origin",
   "ssh.poolKey": "a string built from a host the plugin already holds",
   "ssh.dropPooled": "closes only this plugin's own pooled connections",
