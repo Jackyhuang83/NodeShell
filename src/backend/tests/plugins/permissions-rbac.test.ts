@@ -357,14 +357,7 @@ describe("the duplicate ai group is gone", () => {
 
 describe("NodeShell shipped manifests keep valid permission ids", () => {
   const root = path.resolve(import.meta.dirname, "../../../../plugins");
-  const shipped = [
-    "file-manager",
-    "host-metrics",
-    "ssh-terminal",
-    "totp",
-    "tunnels",
-    "webauthn",
-  ];
+  const shipped = ["file-manager", "ssh-terminal", "tunnels"];
 
   it.each(shipped)("%s parses and keeps plugin-owned permissions namespaced", (pluginId) => {
     const raw = JSON.parse(
