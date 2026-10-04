@@ -4,9 +4,6 @@ export interface TerminalHostConfig {
   id?: number;
   instanceId?: string;
   restoredSessionId?: string | null;
-  /** Set when this tab joins someone else's live shared SSH session instead of connecting/attaching. */
-  joinSharedSessionId?: string | null;
-  joinShareId?: string | null;
   name?: string;
   ip: string;
   port: number;
