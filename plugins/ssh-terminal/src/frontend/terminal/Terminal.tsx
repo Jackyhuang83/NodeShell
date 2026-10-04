@@ -71,7 +71,6 @@ import {
   type TerminalSlotApi,
 } from "./terminal-slots";
 import { toast } from "sonner";
-import { Save } from "lucide-react";
 import { TerminalToolbar } from "./TerminalToolbar.tsx";
 import type { TerminalHandle, TerminalHostConfig } from "./terminal-types.ts";
 import type { Host, TabType } from "../types";
@@ -97,7 +96,6 @@ import {
   RobustClipboardProvider,
   copyToClipboard,
   readFromClipboard,
-  resolveConnectionOrigin,
   pluginWsUrl,
   TOTPDialog,
   SSHAuthDialog,
@@ -113,10 +111,8 @@ import {
   useConnectionLog,
   ConnectionScreen,
   Button,
-  hydrateLocalSharedHostAuth,
   findMatchingKeybinding,
   type CustomKeybinding,
-  isElectron,
 } from "@termix/plugin-sdk/ui";
 import {
   notifyHostsChanged,
@@ -155,8 +151,6 @@ interface SSHTerminalProps {
   previewTheme?: string | null;
   /** When true, suppress automatic focus on connect/visibility change. */
   disableAutoFocus?: boolean;
-  isQuickConnect?: boolean;
-  onSaveQuickConnect?: () => Promise<void>;
   /** Full host record, used to drive the context-aware terminal toolbar. */
   host?: Host;
   onOpenTab?: (type: TabType) => void;
@@ -198,8 +192,6 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
       onOpenFileInEditor,
       previewTheme,
       disableAutoFocus = false,
-      isQuickConnect = false,
-      onSaveQuickConnect,
       host,
       isFocusedPane = true,
     },
@@ -281,7 +273,6 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
     const webSocketRef = useRef<WebSocket | null>(null);
     const terminalInputDisposableRef = useRef<{ dispose(): void } | null>(null);
     const localEchoRef = useRef<TerminalLocalEcho | null>(null);
-    const sessionOriginRef = useRef<"local" | "remote">("local");
     // Set while an auto reconnect runs, so the old output stays on screen.
     const keepScrollbackRef = useRef(false);
     const customKeybindingsRef = useRef<CustomKeybinding[]>([]);
@@ -292,8 +283,6 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
     const pongTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const [isConnected, setIsConnected] = useState(false);
 
-    const [isSavingQuickConnect, setIsSavingQuickConnect] = useState(false);
-    const [isQuickConnectSaved, setIsQuickConnectSaved] = useState(false);
     const [isImageUploading, setIsImageUploading] = useState(false);
     const [isConnecting, setIsConnecting] = useState(false);
     const [isFitted, setIsFitted] = useState(false);
@@ -777,28 +766,12 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
         openSidePanel: (panelId, props) =>
           setDock({ id: panelId, props: props ?? {} }),
         runCommand: handleRunCommandInTerminal,
-        getShareTarget: () =>
-          isConnected &&
-          !isQuickConnect &&
-          !hostConfig.joinShareId &&
-          typeof hostConfig.id === "number" &&
-          sessionIdRef.current
-            ? {
-                hostId: hostConfig.id,
-                sessionId: sessionIdRef.current,
-                protocol: "ssh" as const,
-                tabInstanceId: hostConfig.instanceId,
-                origin: sessionOriginRef.current,
-              }
-            : null,
       }),
       [
         host,
         terminal,
         handleRunCommandInTerminal,
         isConnected,
-        isQuickConnect,
-        hostConfig.joinShareId,
         hostConfig.id,
         hostConfig.instanceId,
       ],
@@ -914,65 +887,8 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
       }
     }
 
-    const sharedSizeRef = useRef<{ cols: number; rows: number } | null>(null);
-
-    function applySharedSize(msg: { cols?: unknown; rows?: unknown }) {
-      if (!hostConfig.joinShareId || !terminal) return;
-      const { cols, rows } = msg;
-      if (
-        typeof cols !== "number" ||
-        typeof rows !== "number" ||
-        !Number.isInteger(cols) ||
-        !Number.isInteger(rows) ||
-        cols < 1 ||
-        rows < 1
-      )
-        return;
-      sharedSizeRef.current = { cols, rows };
-      terminal.resize(cols, rows);
-    }
-
     function fitTerminal() {
-      const size = sharedSizeRef.current;
-      if (hostConfig.joinShareId && size) {
-        terminal?.resize(size.cols, size.rows);
-      } else {
-        fitAddonRef.current?.fit();
-      }
-    }
-
-    function performFit() {
-      if (
-        !fitAddonRef.current ||
-        !terminal ||
-        !isVisible ||
-        isFittingRef.current
-      ) {
-        return;
-      }
-
-      isFittingRef.current = true;
-
-      try {
-        fitTerminal();
-        if (terminal && terminal.cols > 0 && terminal.rows > 0) {
-          const lastSize = lastFittedSizeRef.current;
-          if (
-            !lastSize ||
-            lastSize.cols !== terminal.cols ||
-            lastSize.rows !== terminal.rows
-          ) {
-            scheduleNotify(terminal.cols, terminal.rows);
-            lastFittedSizeRef.current = {
-              cols: terminal.cols,
-              rows: terminal.rows,
-            };
-          }
-        }
-        setIsFitted(true);
-      } finally {
-        isFittingRef.current = false;
-      }
+      fitAddonRef.current?.fit();
     }
 
     function changeTerminalFontSize(direction: -1 | 1) {
@@ -1211,7 +1127,6 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
     }
 
     function scheduleNotify(cols: number, rows: number) {
-      if (hostConfig.joinShareId) return;
       if (!(cols > 0 && rows > 0)) return;
       pendingSizeRef.current = { cols, rows };
       if (notifyTimerRef.current) clearTimeout(notifyTimerRef.current);
@@ -1603,7 +1518,7 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
       const canEnable =
         typeof hostConfig.id === "number" &&
         !termSettingsRef.current.autoTmux &&
-        !hostConfig.joinShareId;
+        !false;
       toast.warning(notice, {
         duration: 15000,
         ...(canEnable
@@ -1642,47 +1557,17 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
         shouldNotReconnectRef.current = false;
       }
 
-      let baseWsUrl: string;
-      let wsProtocols: string[] = [];
-      let outboundHostConfig = hostConfig;
-
-      {
-        const origin = isElectron()
-          ? await resolveConnectionOrigin({
-              connectionOrigin: hostConfig.connectionOrigin as
-                "local" | "remote" | null | undefined,
-            })
-          : "local";
-        sessionOriginRef.current = origin === "remote" ? "remote" : "local";
-        const resolvedUrl = await pluginWsUrl("ssh-terminal", "/terminal", {
-          origin,
-        });
-        if (!resolvedUrl) {
-          setIsConnected(false);
-          setIsConnecting(false);
-          updateConnectionError(t("errors.remoteServerRequired"));
-          isConnectingRef.current = false;
-          return;
-        }
-        if (isElectron() && origin === "local") {
-          try {
-            outboundHostConfig = await hydrateLocalSharedHostAuth(hostConfig);
-          } catch (error) {
-            const message = getErrorMessage(
-              error,
-              "Failed to load shared SSH authentication",
-            );
-            setIsConnected(false);
-            setIsConnecting(false);
-            updateConnectionError(message);
-            addLog({ type: "error", stage: "auth", message });
-            isConnectingRef.current = false;
-            return;
-          }
-        }
-        baseWsUrl = resolvedUrl.url;
-        wsProtocols = resolvedUrl.protocols;
+      const resolvedUrl = await pluginWsUrl("ssh-terminal", "/terminal");
+      if (!resolvedUrl) {
+        setIsConnected(false);
+        setIsConnecting(false);
+        updateConnectionError(t("errors.connectionFailed"));
+        isConnectingRef.current = false;
+        return;
       }
+      const baseWsUrl = resolvedUrl.url;
+      const wsProtocols = resolvedUrl.protocols;
+      const outboundHostConfig = hostConfig;
 
       if (
         webSocketRef.current &&
@@ -1759,19 +1644,7 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
         const restoredSessionId = pendingRestoredSessionIdRef.current;
         pendingRestoredSessionIdRef.current = null;
 
-        if (hostConfig.joinShareId) {
-          isAttachingSessionRef.current = true;
-
-          ws.send(
-            JSON.stringify({
-              type: "joinSharedSession",
-              data: {
-                shareId: hostConfig.joinShareId,
-                tabInstanceId: hostConfig.instanceId,
-              },
-            }),
-          );
-        } else if (restoredSessionId) {
+        if (restoredSessionId) {
           sessionIdRef.current = restoredSessionId;
           isAttachingSessionRef.current = true;
 
@@ -3737,32 +3610,6 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
               />
             );
           })()}
-
-        {isQuickConnect &&
-          isConnected &&
-          !isQuickConnectSaved &&
-          onSaveQuickConnect && (
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={isSavingQuickConnect}
-              onClick={async () => {
-                setIsSavingQuickConnect(true);
-                try {
-                  await onSaveQuickConnect();
-                  setIsQuickConnectSaved(true);
-                } catch {
-                  // The shell reports the failure with a toast.
-                } finally {
-                  setIsSavingQuickConnect(false);
-                }
-              }}
-              className="absolute top-2 left-2 z-[110] h-7 gap-1.5 bg-black/60 text-white/80 hover:bg-black/80 hover:text-white"
-            >
-              <Save className="size-3.5" />
-              {t("hosts.addHost")}
-            </Button>
-          )}
 
         <ConnectionScreen
           status={
