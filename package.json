@@ -53,7 +53,8 @@
     "build:plugins": "node scripts/build-plugins.cjs",
     "test:plugins": "node scripts/run-plugin-tests.cjs",
     "test:all": "npm run test && npm run test:plugins",
-    "admin:reset-password": "node dist/backend/backend/cli/admin-reset-password.js"
+    "admin:reset-password": "node dist/backend/backend/cli/admin-reset-password.js",
+    "admin:create-owner": "node dist/backend/backend/cli/admin-create-owner.js"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.13",
