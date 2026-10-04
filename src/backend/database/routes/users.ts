@@ -122,14 +122,17 @@ const requireAdmin = authManager.createAdminMiddleware();
  *       500:
  *         description: Failed to create user.
  */
-router.post("/create", async (req, res) => {
-  if (!isLoopbackRequest(req)) {
-    return res.status(403).json({
-      error:
-        "Public registration is disabled. The first NodeShell owner can only be created from localhost.",
-    });
-  }
+router.post("/create", async (_req, res) => {
+  return res.status(403).json({
+    error:
+      "Browser registration is disabled. Create the first NodeShell owner with the local admin CLI.",
+  });
+});
 
+/* Disabled v0.1 browser registration implementation retained temporarily
+ * below for compatibility review and will be physically removed in Phase 1C.
+ */
+router.post("/create-disabled-v0", async (req, res) => {
   const { username, password } = req.body;
   authLogger.info("User registration attempt", {
     operation: "user_register_attempt",
@@ -152,12 +155,6 @@ router.post("/create", async (req, res) => {
 
   try {
     const userRepository = createCurrentUserRepository();
-    if ((await userRepository.countAll()) !== 0) {
-      return res.status(403).json({
-        error: "NodeShell already has an owner. Public registration is disabled.",
-      });
-    }
-
     const existing = await userRepository.findByUsername(username);
     if (existing) {
       authLogger.warn("Registration failed - username exists", {
