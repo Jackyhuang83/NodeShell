@@ -274,5 +274,3 @@ export {
 // The id this browser sends as X-Termix-Device-ID.
 export { getDeviceId } from "@/lib/device-id";
 
-// A host that is never saved, for connecting to an address straight away.
-export { createQuickConnectHost } from "@/sidebar/quick-connect-host";
