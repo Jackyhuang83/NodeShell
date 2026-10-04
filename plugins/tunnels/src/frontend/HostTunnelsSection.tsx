@@ -43,12 +43,6 @@ function newTunnel(): TunnelConnection {
   };
 }
 
-const MODE_DESCRIPTION_KEYS = {
-  local: "hosts.tunnelModeLocalDesc",
-  remote: "hosts.tunnelModeRemoteDesc",
-  dynamic: "hosts.tunnelModeDynamicDesc",
-} as const;
-
 const numberInputClass =
   "h-7 text-xs [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
 
@@ -240,19 +234,11 @@ export function HostTunnelsSection({
                   <label className="text-[10px] font-bold text-muted-foreground">
                     {t("hosts.tunnelType")}
                   </label>
-                  <div className="flex gap-2">
-                    {(["remote", "local", "dynamic"] as const).map((m) => (
-                      <button
-                        key={m}
-                        onClick={() => updateTunnel(i, { mode: m })}
-                        className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest border transition-colors ${mode === m ? "border-accent-brand/40 bg-accent-brand/10 text-accent-brand" : "border-border text-muted-foreground hover:text-foreground"}`}
-                      >
-                        {m}
-                      </button>
-                    ))}
+                  <div className="text-[10px] font-bold uppercase tracking-widest border border-accent-brand/40 bg-accent-brand/10 text-accent-brand px-3 py-1.5 w-fit">
+                    Local Forward
                   </div>
                   <p className="text-[10px] text-muted-foreground/70 mt-0.5">
-                    {t(MODE_DESCRIPTION_KEYS[mode])}
+                    {t("hosts.tunnelModeLocalDesc")}
                   </p>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -300,19 +286,6 @@ export function HostTunnelsSection({
                   )}
                   <div className="flex flex-col gap-1">
                     <label className="text-[10px] font-bold text-muted-foreground">
-                      {t("hosts.bindHost")}
-                    </label>
-                    <Input
-                      className="h-7 text-xs"
-                      placeholder="127.0.0.1"
-                      value={tunnel.bindHost ?? ""}
-                      onChange={(e) =>
-                        updateTunnel(i, { bindHost: e.target.value })
-                      }
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-bold text-muted-foreground">
                       {t("hosts.sourcePort")}
                     </label>
                     <Input
@@ -353,15 +326,6 @@ export function HostTunnelsSection({
                     />
                   </div>
                 </div>
-                <SettingRow
-                  label={t("hosts.autoStartLabel")}
-                  description={t("hosts.autoStartDesc")}
-                >
-                  <FakeSwitch
-                    checked={tunnel.autoStart}
-                    onChange={(value) => updateTunnel(i, { autoStart: value })}
-                  />
-                </SettingRow>
               </div>
             );
           })}
