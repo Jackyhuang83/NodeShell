@@ -65,10 +65,8 @@ import type {
   PluginSshKeyCredential,
   PluginSshKeyCredentialInput,
 } from "./backend.js";
-import type { SyncEntityRegistration } from "./backend.js";
 import type { PluginDatabase } from "./backend.js";
 import type {
-  PluginExternalClientRequest,
   PluginProtocolTarget,
   PluginHostStatusEntry,
   PluginNotification,
@@ -132,8 +130,6 @@ export interface FakeContextOptions {
   protocolTargets?: Record<string, PluginProtocolTarget>;
   /** What ctx.credentials.listSshKeys answers. */
   sshKeyCredentials?: PluginSshKeyCredential[];
-  /** What ctx.desktop.available() answers. Defaults to false. */
-  desktopAvailable?: boolean;
   /** What ctx.hosts.status.get and check answer, by host id. */
   hostStatuses?: Record<number, PluginHostStatusEntry>;
   /** The acting user's channels, what ctx.notify.channels answers. */
@@ -265,8 +261,6 @@ export interface FakePluginContext {
   kv: Map<string, unknown>;
   /** Table definitions registered through ctx.db.define, in order. */
   tables: PluginTableDefinition[];
-  /** Sync entities registered through ctx.sync.registerEntity, in order. */
-  syncEntities: SyncEntityRegistration[];
   /**
    * WebSocket routes registered through ctx.ws, in order, with the handler
    * and options, so a test can hand a route a fake socket.
@@ -293,15 +287,6 @@ export interface FakePluginContext {
   }>;
   /** Everything registered through ctx.auth. */
   auth: FakeAuthRegistrations;
-  /** Every ctx.desktop.openIsolatedWindow call, in order. */
-  desktopWindows: Array<{
-    url: string;
-    partition?: string;
-    title?: string;
-    ignoreCert?: boolean;
-  }>;
-  /** Every ctx.desktop.launchExternalClient call, in order. */
-  externalClientLaunches: PluginExternalClientRequest[];
   /** Every ctx.credentials.resolveHostProtocol call, in order. */
   credentialReads: Array<{ hostId: number; protocol: string }>;
   /** Every ctx.credentials.createSshKey call, with the id it answered. */
@@ -489,7 +474,6 @@ export function createFakeContext(
   const emitted: Array<{ topic: string; payload: unknown }> = [];
   const kv = new Map<string, unknown>();
   const tables: PluginTableDefinition[] = [];
-  const syncEntities: SyncEntityRegistration[] = [];
   const wsRoutes: FakeWsRoute[] = [];
   const httpRouters: Array<PluginRouterOptions | undefined> = [];
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
@@ -504,9 +488,6 @@ export function createFakeContext(
   }>();
   const sshConnections: FakePluginContext["sshConnections"] = [];
   const hostShares: FakePluginContext["hostShares"] = [];
-  const desktopWindows: FakePluginContext["desktopWindows"] = [];
-  const externalClientLaunches: FakePluginContext["externalClientLaunches"] =
-    [];
   const credentialReads: FakePluginContext["credentialReads"] = [];
   const createdSshKeys: FakePluginContext["createdSshKeys"] = [];
   const notifications: FakePluginContext["notifications"] = [];
@@ -696,11 +677,6 @@ export function createFakeContext(
           dialect: "sqlite",
         },
 
-    sync: {
-      registerEntity: (entity) => {
-        syncEntities.push(entity);
-      },
-    },
 
     registry: {
       provide: (key, value) => {
@@ -1142,17 +1118,6 @@ export function createFakeContext(
         options.linkedUsers?.[provider] ?? 0,
     },
 
-    desktop: {
-      openIsolatedWindow: async (request) => {
-        desktopWindows.push(request);
-        return { success: true };
-      },
-      launchExternalClient: async (request) => {
-        externalClientLaunches.push(request);
-        return { success: true };
-      },
-      available: () => options.desktopAvailable ?? false,
-    },
 
     credentials: {
       listSshKeys: async () => [
@@ -1331,7 +1296,6 @@ export function createFakeContext(
     emitted,
     kv,
     tables,
-    syncEntities,
     wsRoutes,
     httpRouters,
     settings,
@@ -1339,8 +1303,6 @@ export function createFakeContext(
     sshConnections,
     hostShares,
     auth,
-    desktopWindows,
-    externalClientLaunches,
     credentialReads,
     createdSshKeys,
     notifications,
@@ -1415,8 +1377,6 @@ export interface MockContextOptions {
   protocolTargets?: Record<string, PluginProtocolTarget>;
   /** What ctx.credentials.listSshKeys serves. */
   sshKeyCredentials?: PluginSshKeyCredential[];
-  /** What ctx.desktop.available() answers. */
-  desktopAvailable?: boolean;
   /** What ctx.hosts.status answers. See FakeContextOptions. */
   hostStatuses?: Record<number, PluginHostStatusEntry>;
   /** The acting user's channels, what ctx.notify.channels answers. */
@@ -1483,7 +1443,6 @@ export function createMockCtx(
     services: options.services,
     protocolTargets: options.protocolTargets,
     sshKeyCredentials: options.sshKeyCredentials,
-    desktopAvailable: options.desktopAvailable,
     hostStatuses: options.hostStatuses,
     notificationChannels: options.notificationChannels,
     fetch: options.fetch,
@@ -1788,17 +1747,6 @@ export function createMockCtx(
       },
     },
 
-    desktop: {
-      openIsolatedWindow: async (request) => {
-        require("desktop:window");
-        return ctx.desktop.openIsolatedWindow(request);
-      },
-      launchExternalClient: async (request) => {
-        require("desktop:window");
-        return ctx.desktop.launchExternalClient(request);
-      },
-      available: () => ctx.desktop.available(),
-    },
 
     credentials: {
       listSshKeys: async () => {
