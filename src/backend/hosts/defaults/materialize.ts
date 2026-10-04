@@ -288,12 +288,6 @@ async function afterHostsChanged(
   changed: Array<{ row: HostRow; plan: HostPlan }>,
 ): Promise<void> {
   if (changed.length === 0) return;
-  try {
-    const { markChanged } = await import("../../sync/server/feed.js");
-    markChanged();
-  } catch {
-    // Sync is not loaded in every context.
-  }
 
   const { pluginEvents, TOPICS } = await import("../../plugins/events.js");
   const notified = new Map<string, unknown>();

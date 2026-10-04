@@ -387,30 +387,6 @@ router.post("/logout", authenticateJWT, async (req, res) => {
 });
 
 /**
- * On a desktop linked to a server, the account it is signed in to there.
- * That account is who the user is; the local profile only mirrors it.
- */
-async function describeDesktopLink(userId: string) {
-  if (process.env.ELECTRON_EMBEDDED !== "true") return null;
-  try {
-    const { getLink } = await import("../../sync/client/link-store.js");
-    const link = await getLink();
-    if (!link || link.userId !== userId) return null;
-    return {
-      serverUrl: link.serverUrl,
-      serverName: link.serverName,
-      username: link.account?.username ?? link.remoteUsername,
-      isAdmin: !!link.account?.isAdmin,
-      roles: link.account?.roles ?? [],
-      permissions: link.account?.permissions ?? [],
-      status: link.status,
-    };
-  } catch {
-    return null;
-  }
-}
-
-/**
  * @openapi
  * /users/me:
  *   get:
@@ -462,7 +438,6 @@ router.get("/me", authenticateJWT, async (req: Request, res: Response) => {
         user.id,
       ),
       show_donation_modal: showDonationModal,
-      linked: await describeDesktopLink(user.id),
     });
   } catch (err) {
     authLogger.error("Failed to get username", err);

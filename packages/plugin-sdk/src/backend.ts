@@ -132,112 +132,6 @@ export interface PluginDatabase {
   readonly dialect: "sqlite" | "postgres" | "mysql";
 }
 
-/** A row's shape on the wire, before it is written to a table. */
-export type SyncRow = Record<string, unknown>;
-
-export interface SyncEntityReference {
-  /**
-   * Where a local numeric id lives. A plain column ("credentialId"), or a
-   * path into a JSON column: "jumpHosts[].hostId" walks every item of the
-   * jumpHosts array, "layout.panes[].hostId" walks nested objects. A JSON
-   * column may be stored as a string or as parsed JSON.
-   */
-  field: string;
-  /**
-   * Wire field holding the portable id, e.g. "credentialSyncId". Only for a
-   * plain column; a JSON path is rewritten in place.
-   */
-  syncField?: string;
-  /** The entity the id points at. */
-  entityType: string;
-  /** How a JSON path stores the local id. Defaults to "number". */
-  idType?: "number" | "string";
-}
-
-export interface SyncEntityPermissions {
-  /** Checked before a pushed row that does not exist yet is written. */
-  create?: string;
-  /** Checked before a pushed change to an existing row is written. */
-  update?: string;
-  /** Checked before a pushed delete runs. */
-  delete?: string;
-}
-
-export interface SyncWriteEvent {
-  /** The local id of the row that was written. */
-  id: number | null;
-  userId: string;
-  /** The row as it arrived, before references were resolved. */
-  wire: SyncRow;
-  created: boolean;
-  /** Another entity's syncId to its local id here, for ids serialize put on the wire. */
-  resolveId?: (entityType: string, syncId: string) => Promise<number | null>;
-}
-
-export interface SyncEntityRegistration {
-  /** Stable wire name. Never change it: records on both sides match on it. */
-  type: string;
-  /** The table, as returned by ctx.db.define. */
-  table: unknown;
-  /** Column holding the owning user id. Defaults to "userId". */
-  userColumn?: string;
-  /** Fields stored encrypted with the owner's data key. Plaintext on the wire. */
-  encryptedFields?: readonly string[];
-  /** Local-id to sync-id translations applied on the way out and back. */
-  references?: readonly SyncEntityReference[];
-  /** Lower sorts first. Reference targets must sort before their referrers. */
-  order?: number;
-  /**
-   * Fields that stay on this side: never sent, never overwritten by an
-   * inbound row, and ignored when deciding whether a row changed.
-   */
-  readOnlyFields?: readonly string[];
-  /** One row per user rather than many, keyed on the owner. */
-  singleton?: boolean;
-  /**
-   * Names core uses when its own rows point at this entity without knowing
-   * which plugin provides it. Nothing in core uses one today.
-   */
-  answersTo?: readonly string[];
-  /**
-   * Rows this returns false for are left out of sync in both directions, for
-   * state that belongs to one install (a per-device "last session").
-   */
-  shouldSync?: (row: SyncRow) => boolean;
-  /** RBAC permissions a pushed change needs on the server. */
-  permissions?: SyncEntityPermissions;
-  /**
-   * Runs after `references` on the way out, for anything they cannot
-   * express. Gets the row with references already translated.
-   */
-  serialize?: (
-    row: SyncRow,
-    resolveSyncId: (entityType: string, id: number) => Promise<string | null>,
-  ) => Promise<SyncRow>;
-  /** Runs after `references` on the way in. */
-  deserialize?: (
-    row: SyncRow,
-    resolveId: (entityType: string, syncId: string) => Promise<number | null>,
-  ) => Promise<SyncRow>;
-  /** Runs after a synced row was written on this side. */
-  afterWrite?: (event: SyncWriteEvent) => Promise<void>;
-  /**
-   * Replaces the plain delete of a synced row, for rows with cleanup of their
-   * own. Gets the stored row.
-   */
-  remove?: (row: SyncRow, userId: string) => Promise<void>;
-}
-
-/**
- * Adds an entity to sync between a linked desktop and its server.
- *
- * Deletes need nothing extra: core notices a registered row is gone and
- * sends the delete itself.
- */
-export interface PluginSync {
-  registerEntity: (entity: SyncEntityRegistration) => void;
-}
-
 /**
  * A plain key/value hand-off between plugins. `provide` and `revoke` only take
  * keys under the plugin's own id (`<pluginId>.something`); anyone may
@@ -1510,50 +1404,6 @@ export interface PluginAuth {
   countLinkedUsers: (provider: string) => Promise<number>;
 }
 
-export interface PluginOpenIsolatedWindowRequest {
-  /** http(s) only. Refused when it points anywhere else. */
-  url: string;
-  /** Isolated Electron session partition; a fresh one when omitted. */
-  partition?: string;
-  title?: string;
-  /** Present an invalid TLS certificate on this window's own origin only. */
-  ignoreCert?: boolean;
-}
-
-/**
- * Opens a desktop window outside the main renderer, for a target a plugin
- * does not want sharing Termix's own session (a tunnelled or direct web UI).
- * Electron only: rejects when the server is not running embedded in the
- * desktop app. Needs desktop:window.
- */
-/**
- * A host to open in the operating system's own client for a protocol. The
- * desktop app supports "rdp" (mstsc on Windows) today; any other protocol is
- * refused.
- */
-export interface PluginExternalClientRequest {
-  protocol: string;
-  host: string;
-  port?: number;
-  username?: string;
-  domain?: string;
-}
-
-export interface PluginDesktop {
-  openIsolatedWindow: (
-    request: PluginOpenIsolatedWindowRequest,
-  ) => Promise<{ success: true }>;
-  /**
-   * Opens the operating system's own client for a protocol. The password is
-   * never passed; the client asks for it. Desktop app only.
-   */
-  launchExternalClient: (
-    request: PluginExternalClientRequest,
-  ) => Promise<{ success: boolean; error?: string }>;
-  /** Whether the server runs embedded in the desktop app, so the calls above can work. */
-  available: () => boolean;
-}
-
 /**
  * A host protocol whose login core keeps next to the host: any id a plugin
  * declares in contributes.protocols.
@@ -1980,7 +1830,6 @@ export interface PluginContext {
   readonly kv: PluginKeyValue;
   readonly files: PluginFiles;
   readonly db: PluginDatabase;
-  readonly sync: PluginSync;
   readonly registry: PluginRegistry;
   readonly services: PluginServices;
   readonly secrets: PluginSecrets;
@@ -1997,8 +1846,6 @@ export interface PluginContext {
   readonly ssh: PluginSsh;
   /** Login methods, second factors and SSH auth types. Needs auth:provide. */
   readonly auth: PluginAuth;
-  /** Opens Electron windows outside the main renderer. Needs desktop:window. */
-  readonly desktop: PluginDesktop;
   /** Host protocol credentials and the user's saved SSH keys. See PluginCredentials. */
   readonly credentials: PluginCredentials;
   /** Audit lines under the plugin's own action names. */

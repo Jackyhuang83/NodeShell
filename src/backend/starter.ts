@@ -29,71 +29,6 @@ function describeDatabaseHost(): string {
   }
 }
 
-async function provisionLocalDesktopUserIfNeeded(): Promise<void> {
-  const { createCurrentUserRepository, createCurrentRoleRepository } =
-    await import("./database/repositories/factory.js");
-  const { AuthManager } = await import("./utils/auth-manager.js");
-  const crypto = await import("crypto");
-
-  const userRepository = createCurrentUserRepository();
-  const existingCount = await userRepository.countAll();
-  if (existingCount > 0) {
-    const allUsers = await userRepository.listAll();
-    for (const user of allUsers) {
-      try {
-        await AuthManager.getInstance().registerUser(user.id);
-      } catch (dekError) {
-        systemLogger.error(
-          "Failed to verify/provision data-encryption key for existing user",
-          dekError,
-          { operation: "desktop_dek_healing", userId: user.id },
-        );
-      }
-    }
-    return;
-  }
-
-  const id = crypto.randomUUID();
-  const { isFirstUser } = await userRepository.createFirstLocalUser({
-    id,
-    username: "local",
-    passwordHash: "",
-    isOidc: false,
-    clientId: "",
-    clientSecret: "",
-    issuerUrl: "",
-    authorizationUrl: "",
-    tokenUrl: "",
-    identifierPath: "",
-    namePath: "",
-    scopes: "openid email profile",
-  });
-
-  try {
-    await createCurrentRoleRepository().assignRoleNameToUser({
-      userId: id,
-      roleName: isFirstUser ? "admin" : "user",
-      grantedBy: id,
-    });
-  } catch (roleError) {
-    systemLogger.error(
-      "Failed to assign default role to auto-provisioned local user",
-      roleError,
-      { operation: "desktop_auto_provision_role" },
-    );
-  }
-
-  await AuthManager.getInstance().registerUser(
-    id,
-    crypto.randomBytes(32).toString("hex"),
-  );
-
-  systemLogger.success("Auto-provisioned local desktop user", {
-    operation: "desktop_auto_provision",
-    userId: id,
-  });
-}
-
 (async () => {
   const initStartTime = Date.now();
   try {
@@ -111,7 +46,7 @@ async function provisionLocalDesktopUserIfNeeded(): Promise<void> {
       // expected - env file may not exist
     }
 
-    systemLogger.info("Termix backend initialization started", {
+    systemLogger.info("NodeShell backend initialization started", {
       operation: "backend_init_start",
       nodeEnv: process.env.NODE_ENV || "production",
       port: process.env.PORT || 4090,
@@ -142,7 +77,7 @@ async function provisionLocalDesktopUserIfNeeded(): Promise<void> {
     }
     process.env.VERSION = version;
 
-    versionLogger.info(`Termix Backend starting - Version: ${version}`, {
+    versionLogger.info(`NodeShell Backend starting - Version: ${version}`, {
       operation: "startup",
       version: version,
     });
@@ -213,9 +148,6 @@ async function provisionLocalDesktopUserIfNeeded(): Promise<void> {
       await import("./hosts/status/host-status-service.js");
     hostStatusService.start();
 
-    if (process.env.ELECTRON_EMBEDDED === "true") {
-      await provisionLocalDesktopUserIfNeeded();
-    }
 
     const { serverReady } = await import("./database/database.js");
     await serverReady;
@@ -274,33 +206,13 @@ async function provisionLocalDesktopUserIfNeeded(): Promise<void> {
       });
     }
 
-    // After plugins, so their sync entities are registered before a pass.
-    if (process.env.ELECTRON_EMBEDDED === "true") {
-      try {
-        const { startDesktopSync } = await import("./sync/client/engine.js");
-        startDesktopSync();
-        const { startDesktopUpdateCheck } =
-          await import("./updates/desktop-update-check.js");
-        startDesktopUpdateCheck();
-      } catch (error) {
-        systemLogger.warn("Desktop sync failed to start", {
-          operation: "sync_start",
-          error: getErrorMessage(error),
-        });
-      }
-    }
-
-    systemLogger.success("Termix backend started successfully", {
+    systemLogger.success("NodeShell backend started successfully", {
       operation: "backend_init_complete",
       port: process.env.PORT || 4090,
       ssl: process.env.ENABLE_SSL === "true",
       duration: Date.now() - initStartTime,
     });
 
-    // Log output can be filtered by the configured level or split across chunks.
-    if (process.env.ELECTRON_EMBEDDED === "true") {
-      process.send?.({ type: "backend-ready" });
-    }
 
     const gracefulShutdown = async (signal: string) => {
       systemLogger.info(`Received ${signal}, initiating graceful shutdown...`, {

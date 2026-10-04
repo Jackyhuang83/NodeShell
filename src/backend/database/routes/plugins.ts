@@ -305,13 +305,6 @@ router.get("/", authenticateJWT, async (req: Request, res: Response) => {
   }
 });
 
-async function isManagedByLinkedServer(pluginId: string): Promise<boolean> {
-  if (process.env.ELECTRON_EMBEDDED !== "true") return false;
-  const { getLink } = await import("../../sync/client/link-store.js");
-  if (!(await getLink())) return false;
-  const { isServerManaged } = await import("../../sync/client/plugins.js");
-  return isServerManaged(pluginId);
-}
 
 /**
  * @openapi
@@ -369,14 +362,6 @@ router.patch(
         return;
       }
 
-      // A linked desktop runs what its server runs.
-      if (await isManagedByLinkedServer(pluginId)) {
-        res.status(409).json({
-          error: "Managed by the linked server",
-          code: "MANAGED_BY_SERVER",
-        });
-        return;
-      }
 
       // Persist first: if the start or stop below throws, the recorded
       // intent still matches what the user asked for, and the next boot

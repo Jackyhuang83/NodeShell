@@ -46,11 +46,8 @@ import type { PluginManifest } from "@termix/plugin-sdk/manifest";
 import {
   type PluginContext,
   type PluginModule,
-  type PluginOpenIsolatedWindowRequest,
-  type PluginExternalClientRequest,
 } from "@termix/plugin-sdk/backend";
 import type { PluginTableDefinition } from "@termix/plugin-sdk/db";
-import * as syncRegistry from "./sync-registry.js";
 import {
   needsExplicitPersist,
   resolveDatabaseDialect,
@@ -63,7 +60,6 @@ import { createPluginProcess } from "./ctx-process.js";
 import { createPluginSystem } from "./ctx-system.js";
 import { createPluginPlugins } from "./ctx-plugins.js";
 import { createPluginCredentials } from "./ctx-credentials.js";
-import { isElectronIpcAvailable } from "../utils/electron-ipc-bridge.js";
 
 export type { PluginModule };
 
@@ -362,50 +358,6 @@ export function createPluginContext(
     { action: "db_refs" },
   );
 
-  const desktopOpenIsolatedWindow = guarded(
-    manifest,
-    "desktop:window",
-    async (request: PluginOpenIsolatedWindowRequest) => {
-      const { isElectronIpcAvailable, requestFromElectronMain } =
-        await import("../utils/electron-ipc-bridge.js");
-      if (!isElectronIpcAvailable()) {
-        throw new Error(
-          `Plugin ${pluginId} tried to open an isolated window outside the desktop app`,
-        );
-      }
-      return requestFromElectronMain<{ success: true }>(
-        "open-isolated-window",
-        request,
-      );
-    },
-    {
-      action: "desktop_open_isolated_window",
-      details: () => "opened an isolated Electron window",
-    },
-  );
-
-  const desktopLaunchExternalClient = guarded(
-    manifest,
-    "desktop:window",
-    async (request: PluginExternalClientRequest) => {
-      const { isElectronIpcAvailable, requestFromElectronMain } =
-        await import("../utils/electron-ipc-bridge.js");
-      if (!isElectronIpcAvailable()) {
-        throw new Error(
-          `Plugin ${pluginId} tried to open an external client outside the desktop app`,
-        );
-      }
-      return requestFromElectronMain<{ success: boolean; error?: string }>(
-        "launch-external-client",
-        request,
-      );
-    },
-    {
-      action: "desktop_launch_external_client",
-      details: () => "opened an external client",
-    },
-  );
-
   const capabilitiesRequire = async (capability: string) => {
     await assertCapability(
       pluginId,
@@ -503,13 +455,6 @@ export function createPluginContext(
       },
       get dialect() {
         return resolveDatabaseDialect();
-      },
-    },
-
-    sync: {
-      registerEntity: (entity) => {
-        const dispose = syncRegistry.registerEntity(pluginId, entity);
-        handle.bag.add(dispose, `sync entity ${entity.type}`);
       },
     },
 
@@ -948,11 +893,6 @@ export function createPluginContext(
     system: createPluginSystem({ manifest, bag: handle.bag, audit: auditCall }),
     plugins: createPluginPlugins(manifest),
 
-    desktop: {
-      openIsolatedWindow: (request) => desktopOpenIsolatedWindow(request),
-      launchExternalClient: (request) => desktopLaunchExternalClient(request),
-      available: () => isElectronIpcAvailable(),
-    },
 
     credentials: createPluginCredentials({
       manifest,
