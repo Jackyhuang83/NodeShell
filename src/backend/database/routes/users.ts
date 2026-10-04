@@ -6,12 +6,9 @@ import express, {
   type Response,
 } from "express";
 import bcrypt from "bcryptjs";
-import crypto from "node:crypto";
-import { readFileSync } from "node:fs";
 import { nanoid } from "nanoid";
 import { authLogger } from "../../utils/logger.js";
 import { AuthManager } from "../../utils/auth-manager.js";
-import { DatabaseSaveTrigger } from "../../utils/database-save-trigger.js";
 import { parseUserAgent } from "../../utils/user-agent-parser.js";
 import { deleteUserAndRelatedData } from "./delete-user-data.js";
 import {
@@ -29,7 +26,6 @@ import { registerUserSettingsRoutes } from "./user-settings-routes.js";
 import { registerTlsRoutes } from "./tls-routes.js";
 import { registerUserSessionRoutes } from "./user-session-routes.js";
 import { registerUserExternalAccountRoutes } from "./user-external-account-routes.js";
-import { registerUserAdminRoutes } from "./user-admin-routes.js";
 import { registerUserDataAccessRoutes } from "./user-data-access-routes.js";
 import { listExternalLoginMethods, registerAuthRoutes } from "./auth-routes.js";
 import { registerAuthCompatRoutes } from "./auth-compat-routes.js";
@@ -72,28 +68,6 @@ router.use((req, res, next) => {
 
 function isNonEmptyString(val: unknown): val is string {
   return typeof val === "string" && val.trim().length > 0;
-}
-
-function readSetupToken(): string {
-  const file = process.env.NODESHELL_SETUP_TOKEN_FILE?.trim();
-  if (file) {
-    try {
-      return readFileSync(file, "utf8").trim();
-    } catch {
-      return "";
-    }
-  }
-  return process.env.NODESHELL_SETUP_TOKEN?.trim() ?? "";
-}
-
-function setupTokenMatches(value: unknown): boolean {
-  const expected = readSetupToken();
-  const candidate = typeof value === "string" ? value.trim() : "";
-  if (expected.length < 32 || candidate.length !== expected.length) return false;
-  return crypto.timingSafeEqual(
-    Buffer.from(candidate, "utf8"),
-    Buffer.from(expected, "utf8"),
-  );
 }
 
 function isPasswordResetAllowed(): boolean {
@@ -143,157 +117,11 @@ const requireAdmin = authManager.createAdminMiddleware();
  *       500:
  *         description: Failed to create user.
  */
-router.post("/create", async (req, res) => {
-  const existingCount = await createCurrentUserRepository().countAll();
-  if (existingCount !== 0) {
-    return res.status(403).json({
-      error:
-        "Public registration is disabled. Create additional users as an administrator.",
-    });
-  }
-
-  const expectedSetupToken = readSetupToken();
-  if (expectedSetupToken.length < 32) {
-    return res.status(503).json({
-      error: "Initial setup token is not configured",
-    });
-  }
-
-  const { username, password, setupToken } = req.body;
-  if (!setupTokenMatches(setupToken)) {
-    authLogger.warn("Rejected initial owner setup with invalid token", {
-      operation: "owner_setup_token_rejected",
-    });
-    return res.status(403).json({ error: "Invalid setup token" });
-  }
-  authLogger.info("User registration attempt", {
-    operation: "user_register_attempt",
-    username,
+router.post("/create", async (_req, res) => {
+  return res.status(403).json({
+    error:
+      "Browser registration is disabled. Create the first NodeShell owner with the local admin CLI.",
   });
-
-  if (!isNonEmptyString(username) || !isNonEmptyString(password)) {
-    authLogger.warn(
-      "Invalid user creation attempt - missing username or password",
-      {
-        operation: "user_create",
-        hasUsername: !!username,
-        hasPassword: !!password,
-      },
-    );
-    return res
-      .status(400)
-      .json({ error: "Username and password are required" });
-  }
-
-  try {
-    const userRepository = createCurrentUserRepository();
-    const existing = await userRepository.findByUsername(username);
-    if (existing) {
-      authLogger.warn("Registration failed - username exists", {
-        operation: "user_register_failed",
-        username,
-        reason: "username_exists",
-      });
-      return res.status(409).json({ error: "Username already exists" });
-    }
-
-    const password_hash = await bcrypt.hash(password, 10);
-    const id = nanoid();
-
-    const { isFirstUser } = await userRepository.createFirstLocalUser({
-      id,
-      username,
-      passwordHash: password_hash,
-      isOidc: false,
-      clientId: "",
-      clientSecret: "",
-      issuerUrl: "",
-      authorizationUrl: "",
-      tokenUrl: "",
-      identifierPath: "",
-      namePath: "",
-      scopes: "openid email profile",
-    });
-
-    try {
-      const defaultRoleName = isFirstUser ? "admin" : "user";
-      const assigned = await createCurrentRoleRepository().assignRoleNameToUser(
-        {
-          userId: id,
-          roleName: defaultRoleName,
-          grantedBy: id,
-        },
-      );
-
-      if (!assigned) {
-        authLogger.warn("Default role not found during user registration", {
-          operation: "assign_default_role",
-          userId: id,
-          roleName: defaultRoleName,
-        });
-      }
-    } catch (roleError) {
-      authLogger.error("Failed to assign default role", roleError, {
-        operation: "assign_default_role",
-        userId: id,
-      });
-    }
-
-    try {
-      await authManager.registerUser(id, password);
-    } catch (encryptionError) {
-      await userRepository.delete(id);
-      authLogger.error(
-        "Failed to setup user encryption, user creation rolled back",
-        encryptionError,
-        {
-          operation: "user_create_encryption_failed",
-          userId: id,
-        },
-      );
-      return res.status(500).json({
-        error: "Failed to setup user security - user creation cancelled",
-      });
-    }
-
-    try {
-      await DatabaseSaveTrigger.forceSave("user_create_explicit_save");
-    } catch (saveError) {
-      authLogger.error("Failed to persist user to disk", saveError, {
-        operation: "user_create_save_failed",
-        userId: id,
-      });
-    }
-
-    authLogger.success("User registration successful", {
-      operation: "user_register_success",
-      userId: id,
-      username,
-      isAdmin: isFirstUser,
-    });
-
-    const { ipAddress, userAgent } = getRequestMeta(req);
-    await logAudit({
-      userId: id,
-      username,
-      action: "create_user",
-      resourceType: "user",
-      resourceId: id,
-      resourceName: username,
-      ipAddress,
-      userAgent,
-      success: true,
-    });
-
-    res.json({
-      message: "User created",
-      is_admin: isFirstUser,
-      toast: { type: "success", message: `User created: ${username}` },
-    });
-  } catch (err) {
-    authLogger.error("Failed to create user", err);
-    res.status(500).json({ error: "Failed to create user" });
-  }
 });
 
 /**
@@ -903,8 +731,7 @@ router.get("/db-health", requireAdmin, async (req, res) => {
  */
 router.get("/registration-allowed", async (req, res) => {
   try {
-    const count = await createCurrentUserRepository().countAll();
-    res.json({ allowed: count === 0 });
+    res.json({ allowed: false });
   } catch (err) {
     authLogger.error("Failed to get registration allowed", err);
     res.status(500).json({ error: "Failed to get registration allowed" });
@@ -938,26 +765,10 @@ router.get("/registration-allowed", async (req, res) => {
  *       500:
  *         description: Failed to set registration allowed status.
  */
-router.patch("/registration-allowed", authenticateJWT, async (req, res) => {
-  const userId = (req as AuthenticatedRequest).userId;
-  try {
-    const user = await requireCurrentAdmin(userId);
-    if (!user) {
-      return res.status(403).json({ error: "Not authorized" });
-    }
-    const { allowed } = req.body;
-    if (typeof allowed !== "boolean") {
-      return res.status(400).json({ error: "Invalid value for allowed" });
-    }
-    await createCurrentSettingsRepository().set(
-      "allow_registration",
-      allowed ? "true" : "false",
-    );
-    res.json({ allowed });
-  } catch (err) {
-    authLogger.error("Failed to set registration allowed", err);
-    res.status(500).json({ error: "Failed to set registration allowed" });
-  }
+router.patch("/registration-allowed", authenticateJWT, async (_req, res) => {
+  return res.status(403).json({
+    error: "Public registration is permanently disabled in NodeShell v0.1",
+  });
 });
 
 /**
@@ -1269,26 +1080,11 @@ router.get("/password-reset-allowed", async (req, res) => {
  *       500:
  *         description: Failed to set password reset allowed status.
  */
-router.patch("/password-reset-allowed", authenticateJWT, async (req, res) => {
-  const userId = (req as AuthenticatedRequest).userId;
-  try {
-    const user = await requireCurrentAdmin(userId);
-    if (!user) {
-      return res.status(403).json({ error: "Not authorized" });
-    }
-    const { allowed } = req.body;
-    if (typeof allowed !== "boolean") {
-      return res.status(400).json({ error: "Invalid value for allowed" });
-    }
-    await createCurrentSettingsRepository().set(
-      "allow_password_reset",
-      allowed ? "true" : "false",
-    );
-    res.json({ allowed });
-  } catch (err) {
-    authLogger.error("Failed to set password reset allowed", err);
-    res.status(500).json({ error: "Failed to set password reset allowed" });
-  }
+router.patch("/password-reset-allowed", authenticateJWT, async (_req, res) => {
+  return res.status(403).json({
+    error:
+      "Browser-based password recovery is disabled in NodeShell v0.1. Use the local recovery CLI.",
+  });
 });
 
 /**
@@ -1371,6 +1167,7 @@ router.delete("/delete-account", authenticateJWT, async (req, res) => {
     res.status(500).json({ error: "Failed to delete account" });
   }
 });
+
 
 /**
  * @openapi
@@ -1471,7 +1268,6 @@ router.post("/change-password", authenticateJWT, async (req, res) => {
   res.json({ message: "Password changed successfully. Please log in again." });
 });
 
-registerUserAdminRoutes(router, authenticateJWT);
 
 /**
  * @openapi
