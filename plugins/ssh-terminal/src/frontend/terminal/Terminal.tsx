@@ -26,10 +26,8 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { SearchAddon } from "@xterm/addon-search";
 import {
-  deleteCommandFromHistory,
   enableHostAutoTmux,
   getClientSettings,
-  getCommandHistory,
   hostSetting,
 } from "../terminal-api";
 import { useTerminalSettings } from "../terminal-settings";
@@ -47,22 +45,16 @@ import {
 import { TmuxSessionPicker } from "./TmuxSessionPicker";
 import { getTerminalBufferText } from "./terminal-buffer-text.ts";
 import { getMacLineNavigationSequence } from "../lib/mac-line-navigation";
-import { useCommandTracker } from "./command-history/useCommandTracker";
 import {
   highlightTerminalOutput,
   updateControlStringMode,
 } from "../lib/terminal-syntax-highlighter";
-import { useCommandHistory } from "./command-history/CommandHistoryContext";
 import { getAndroidHardwareKeySequence } from "./android-hardware-keyboard";
 import {
   buildImageUploadFormData,
   type TerminalImageUploadSource,
 } from "./terminal-image-upload";
 import { TerminalSearchBar } from "./search/TerminalSearchBar.tsx";
-import {
-  CommandAutocomplete,
-  CommandAutosuggestion,
-} from "./command-history/CommandAutocomplete.tsx";
 import {
   TERMINAL_SIDE_PANEL_SLOT,
   TERMINAL_OVERLAY_SLOT,
@@ -74,7 +66,6 @@ import { toast } from "sonner";
 import { TerminalToolbar } from "./TerminalToolbar.tsx";
 import type { TerminalHandle, TerminalHostConfig } from "./terminal-types.ts";
 import type { Host, TabType } from "../types";
-import { isTabKeyEvent } from "./terminal-key-event.ts";
 import { installTouchWheelCoordinator } from "./touch-wheel-coordinator.ts";
 import { loadTouchInputSettings } from "./touch-input-settings-store.ts";
 import {
@@ -200,7 +191,6 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
     const { t } = useTranslation();
     const api = usePluginApi();
     const { instance: terminal, ref: xtermRef } = useXTerm();
-    const commandHistoryContext = useCommandHistory();
     const { confirmWithToast } = useConfirmation();
     const { theme: appTheme } = useTheme();
     const { addLog } = useConnectionLog();
@@ -409,51 +399,6 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
     const totpTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const activityLoggedRef = useRef(false);
-    const commandHistoryTrackingEnabled = hostSetting(
-      hostConfig,
-      "enableCommandHistory",
-      true,
-    );
-
-    const { trackInput, getCurrentCommand, updateCurrentCommand } =
-      useCommandTracker({
-        hostId: hostConfig.id,
-        enabled: commandHistoryTrackingEnabled,
-        onCommandExecuted: (command) => {
-          if (!autocompleteHistory.current.includes(command)) {
-            autocompleteHistory.current = [
-              command,
-              ...autocompleteHistory.current,
-            ];
-          }
-        },
-      });
-
-    const getCurrentCommandRef = useRef(getCurrentCommand);
-    const updateCurrentCommandRef = useRef(updateCurrentCommand);
-
-    useEffect(() => {
-      getCurrentCommandRef.current = getCurrentCommand;
-      updateCurrentCommandRef.current = updateCurrentCommand;
-    }, [getCurrentCommand, updateCurrentCommand]);
-
-    const [showAutocomplete, setShowAutocomplete] = useState(false);
-    const [autocompleteSuggestions, setAutocompleteSuggestions] = useState<
-      string[]
-    >([]);
-    const [autocompleteSelectedIndex, setAutocompleteSelectedIndex] =
-      useState(0);
-    const [autocompletePosition, setAutocompletePosition] = useState({
-      top: 0,
-      left: 0,
-    });
-    const [autosuggestion, setAutosuggestion] = useState("");
-    const [autosuggestionPosition, setAutosuggestionPosition] = useState({
-      top: 0,
-      left: 0,
-    });
-    const [autosuggestionStyle, setAutosuggestionStyle] =
-      useState<React.CSSProperties>({});
     const [dock, setDock] = useState<{
       id: string;
       props: Record<string, unknown>;
@@ -462,16 +407,6 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
       host,
     });
     const hasDock = dockContributions.length > 0;
-    const autocompleteHistory = useRef<string[]>([]);
-    const currentAutocompleteCommand = useRef<string>("");
-    const currentAutosuggestionCommand = useRef<string>("");
-
-    const showAutocompleteRef = useRef(false);
-    const autocompleteSuggestionsRef = useRef<string[]>([]);
-    const autocompleteSelectedIndexRef = useRef(0);
-    const autosuggestionRef = useRef("");
-    const autosuggestionSuppressedRef = useRef(false);
-
     const searchAddonRef = useRef<SearchAddon | null>(null);
     const searchInputRef = useRef<HTMLInputElement | null>(null);
     const [showSearch, setShowSearch] = useState(false);
@@ -487,74 +422,6 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
     const searchCaseSensitiveRef = useRef(false);
     const searchWholeWordRef = useRef(false);
     const searchRegexRef = useRef(false);
-
-    const [showHistoryDialog] = useState(false);
-    const [, setCommandHistory] = useState<string[]>([]);
-    const [, setIsLoadingHistory] = useState(false);
-
-    const setIsLoadingRef = useRef(commandHistoryContext.setIsLoading);
-    const setCommandHistoryContextRef = useRef(
-      commandHistoryContext.setCommandHistory,
-    );
-
-    useEffect(() => {
-      setIsLoadingRef.current = commandHistoryContext.setIsLoading;
-      setCommandHistoryContextRef.current =
-        commandHistoryContext.setCommandHistory;
-    }, [
-      commandHistoryContext.setIsLoading,
-      commandHistoryContext.setCommandHistory,
-    ]);
-
-    useEffect(() => {
-      if (showHistoryDialog && hostConfig.id) {
-        setIsLoadingHistory(true);
-        setIsLoadingRef.current(true);
-        getCommandHistory(api, hostConfig.id!)
-          .then((history) => {
-            setCommandHistory(history);
-            setCommandHistoryContextRef.current(history);
-          })
-          .catch((error) => {
-            console.error("Failed to load command history:", error);
-            setCommandHistory([]);
-            setCommandHistoryContextRef.current([]);
-          })
-          .finally(() => {
-            setIsLoadingHistory(false);
-            setIsLoadingRef.current(false);
-          });
-      }
-    }, [showHistoryDialog, hostConfig.id]);
-
-    useEffect(() => {
-      const autocompleteEnabled = termUser.commandAutocomplete;
-
-      if (hostConfig.id && autocompleteEnabled) {
-        getCommandHistory(api, hostConfig.id!)
-          .then((history) => {
-            autocompleteHistory.current = history;
-          })
-          .catch((error) => {
-            console.error("Failed to load autocomplete history:", error);
-            autocompleteHistory.current = [];
-          });
-      } else {
-        autocompleteHistory.current = [];
-      }
-    }, [hostConfig.id, termUser.commandAutocomplete]);
-
-    useEffect(() => {
-      showAutocompleteRef.current = showAutocomplete;
-    }, [showAutocomplete]);
-
-    useEffect(() => {
-      autocompleteSuggestionsRef.current = autocompleteSuggestions;
-    }, [autocompleteSuggestions]);
-
-    useEffect(() => {
-      autocompleteSelectedIndexRef.current = autocompleteSelectedIndex;
-    }, [autocompleteSelectedIndex]);
 
     useEffect(() => {
       showSearchRef.current = showSearch;
@@ -2367,81 +2234,6 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
       return text;
     }
 
-    const handleSelectCommand = useCallback(
-      (command: string) => {
-        if (!terminal || !webSocketRef.current) return;
-
-        for (const char of command) {
-          webSocketRef.current.send(
-            JSON.stringify({ type: "input", data: char }),
-          );
-        }
-
-        setTimeout(() => {
-          terminal.focus();
-        }, 100);
-      },
-      [terminal],
-    );
-
-    useEffect(() => {
-      commandHistoryContext.setOnSelectCommand(handleSelectCommand);
-    }, [handleSelectCommand]);
-
-    const handleAutocompleteSelect = useCallback(
-      (selectedCommand: string) => {
-        if (!webSocketRef.current) return;
-
-        const currentCmd = currentAutocompleteCommand.current;
-        const completion = selectedCommand.substring(currentCmd.length);
-
-        for (const char of completion) {
-          webSocketRef.current.send(
-            JSON.stringify({ type: "input", data: char }),
-          );
-        }
-
-        updateCurrentCommand(selectedCommand);
-
-        setShowAutocomplete(false);
-        setAutocompleteSuggestions([]);
-        currentAutocompleteCommand.current = "";
-        clearAutosuggestion();
-
-        setTimeout(() => {
-          terminal?.focus();
-        }, 50);
-      },
-      [clearAutosuggestion, terminal, updateCurrentCommand],
-    );
-
-    const handleDeleteCommand = useCallback(
-      async (command: string) => {
-        if (!hostConfig.id) return;
-
-        try {
-          await deleteCommandFromHistory(api, hostConfig.id, command);
-
-          setCommandHistory((prev) => {
-            const newHistory = prev.filter((cmd) => cmd !== command);
-            setCommandHistoryContextRef.current(newHistory);
-            return newHistory;
-          });
-
-          autocompleteHistory.current = autocompleteHistory.current.filter(
-            (cmd) => cmd !== command,
-          );
-        } catch (error) {
-          console.error("Failed to delete command from history:", error);
-        }
-      },
-      [hostConfig.id],
-    );
-
-    useEffect(() => {
-      commandHistoryContext.setOnDeleteCommand(handleDeleteCommand);
-    }, [handleDeleteCommand]);
-
     // Separate theme and options updates to avoid terminal re-initialization flashes
     useEffect(() => {
       if (!terminal) return;
@@ -3771,20 +3563,6 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
             backgroundColor={backgroundColor}
           />
         )}
-
-        <CommandAutocomplete
-          visible={showAutocomplete}
-          suggestions={autocompleteSuggestions}
-          selectedIndex={autocompleteSelectedIndex}
-          position={autocompletePosition}
-          onSelect={handleAutocompleteSelect}
-        />
-        <CommandAutosuggestion
-          visible={!showAutocomplete && Boolean(autosuggestion)}
-          suggestion={autosuggestion}
-          position={autosuggestionPosition}
-          style={autosuggestionStyle}
-        />
 
         <TerminalSearchBar
           visible={showSearch}
