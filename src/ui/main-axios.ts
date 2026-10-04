@@ -352,6 +352,18 @@ function createApiInstance(
       logger.requestStart(method, fullUrl, context);
     }
 
+    const unsafeMethod = ["POST", "PUT", "PATCH", "DELETE"].includes(method);
+    if (unsafeMethod && !isElectron()) {
+      const csrfToken = getCookie("nodeshell_csrf");
+      if (csrfToken) {
+        if (config.headers.set) {
+          config.headers.set("X-NodeShell-CSRF", csrfToken);
+        } else {
+          config.headers["X-NodeShell-CSRF"] = csrfToken;
+        }
+      }
+    }
+
     const deviceId = getDeviceId();
     if (deviceId) {
       if (config.headers.set) {
@@ -907,11 +919,13 @@ export {
 export async function registerUser(
   username: string,
   password: string,
+  setupToken?: string,
 ): Promise<Record<string, unknown>> {
   try {
     const response = await authApi.post("/users/create", {
       username,
       password,
+      ...(setupToken ? { setupToken } : {}),
     });
     return response.data;
   } catch (error) {
