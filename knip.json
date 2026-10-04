@@ -10,22 +10,18 @@
         "src/ui/plugin-host/testing-host.tsx",
         "src/**/tests/**/*.{ts,tsx}",
         "scripts/**/*.{cjs,mjs}",
-        "electron/main.cjs",
-        "electron/preload.js",
         "vitest.config.ts",
         "vitest.setup.ts",
         "vite.config.ts"
       ],
       "project": [
         "src/**/*.{ts,tsx}",
-        "electron/**/*.cjs",
         "scripts/**/*.{cjs,mjs}"
       ],
-      "ignoreBinaries": ["powershell"],
+      "ignoreBinaries": [],
       "ignoreDependencies": [
         "@codemirror/theme-one-dark",
         "@codemirror/view",
-        "@electron/notarize",
         "@radix-ui/react-alert-dialog",
         "@radix-ui/react-checkbox",
         "@radix-ui/react-label",
@@ -64,7 +60,6 @@
         "lucide-react",
         "motion",
         "radix-ui",
-        "socks",
         "ssh2",
         "undici",
         "husky",
@@ -74,8 +69,15 @@
       ]
     },
     "packages/plugin-sdk": {
-      "entry": ["src/*.ts", "src/testing/*.ts", "cli/**/*.mjs"],
-      "project": ["src/**/*.ts", "cli/**/*.mjs"]
+      "entry": [
+        "src/*.ts",
+        "src/testing/*.ts",
+        "cli/**/*.mjs"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "cli/**/*.mjs"
+      ]
     },
     "plugins/*": {
       "entry": [
@@ -84,7 +86,10 @@
         "tests/**/*.{ts,tsx}",
         "vitest.config.ts"
       ],
-      "project": ["src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}"]
+      "project": [
+        "src/**/*.{ts,tsx}",
+        "tests/**/*.{ts,tsx}"
+      ]
     }
   }
 }
