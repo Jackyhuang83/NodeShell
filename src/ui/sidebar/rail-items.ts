@@ -3,7 +3,6 @@ import {
   KeyRound,
   Plug,
   Server,
-  Settings,
   User,
   type LucideIcon,
 } from "lucide-react";
@@ -201,7 +200,6 @@ export function useRailItems(): RailItemDef[] {
  */
 export const RAIL_UTILITY_ITEMS: RailItemDef[] = [
   { id: "user-profile", icon: User, labelKey: "nav.userProfile" },
-  { id: "admin-settings", icon: Settings, labelKey: "nav.admin" },
 ];
 
 /** Ids that may be opened in the right dock. */
