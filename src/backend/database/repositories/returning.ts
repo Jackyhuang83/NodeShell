@@ -212,14 +212,6 @@ export async function upsert<T extends SQLiteTable>(
 ): Promise<void> {
   const db = context.drizzle;
 
-  if (context.dialect === "mysql") {
-    const insert = db.insert(table).values(values) as unknown as {
-      onDuplicateKeyUpdate: (config: { set: UpdateValues<T> }) => Promise<void>;
-    };
-    await insert.onDuplicateKeyUpdate({ set: conflict.set });
-    return;
-  }
-
   await db
     .insert(table)
     .values(values)

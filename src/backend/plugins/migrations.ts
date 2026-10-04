@@ -235,23 +235,14 @@ export async function applyPluginMigrations(
  * to be migrated row by row.
  */
 export function adoptLegacyTableSql(
-  dialect: DatabaseDialect,
+  _dialect: DatabaseDialect,
   legacyName: string,
   newName: string,
 ): string {
-  if (dialect === "mysql") {
-    return `RENAME TABLE \`${legacyName}\` TO \`${newName}\`;`;
-  }
   return `ALTER TABLE "${legacyName}" RENAME TO "${newName}";`;
 }
 
 /** Whether a table exists, asked in the dialect's own catalog. */
-export function tableExistsSql(dialect: DatabaseDialect, table: string) {
-  if (dialect === "sqlite") {
-    return sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${table}`;
-  }
-  if (dialect === "postgres") {
-    return sql`SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = ${table}`;
-  }
-  return sql`SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ${table}`;
+export function tableExistsSql(_dialect: DatabaseDialect, table: string) {
+  return sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${table}`;
 }

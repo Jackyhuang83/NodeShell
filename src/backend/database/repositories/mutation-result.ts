@@ -134,8 +134,8 @@ export function insertedId(result: unknown): number | null {
  * Call sites that genuinely need the affected rows use this to choose between
  * one statement and a read-then-write inside a transaction.
  */
-export function supportsReturning(dialect: DatabaseDialect): boolean {
-  return dialect !== "mysql";
+export function supportsReturning(_dialect: DatabaseDialect): boolean {
+  return true;
 }
 
 /**

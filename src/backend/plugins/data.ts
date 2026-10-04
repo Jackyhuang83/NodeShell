@@ -167,13 +167,8 @@ async function createMigrationRunner(
         checksum: row.checksum,
       }));
     },
-    execute:
-      dialect === "postgres"
-        ? executeInTransaction
-        : dialect === "mysql"
-          ? executeNamingFailure
-          : execute,
-    transaction: dialect === "sqlite" ? sqliteTransaction : undefined,
+    execute,
+    transaction: sqliteTransaction,
     record: async (pluginId, migration) => {
       await repository.record(pluginId, migration.id, migration.checksum);
     },
@@ -284,31 +279,19 @@ export function ownedTableNames(
   );
 }
 
-function dropTableByName(dialect: DatabaseDialect, table: string): string {
-  const quoted = dialect === "mysql" ? "`" + table + "`" : `"${table}"`;
-  return `DROP TABLE IF EXISTS ${quoted};`;
+function dropTableByName(_dialect: DatabaseDialect, table: string): string {
+  return `DROP TABLE IF EXISTS "${table}";`;
 }
 
-async function listDatabaseTables(dialect: DatabaseDialect): Promise<string[]> {
+async function listDatabaseTables(
+  _dialect: DatabaseDialect,
+): Promise<string[]> {
   const { getDb } = await import("../database/db/index.js");
   const db = getDb() as unknown as {
-    all?: (query: unknown) => Promise<Array<Record<string, unknown>>>;
-    execute?: (query: unknown) => Promise<unknown>;
+    all: (query: unknown) => Promise<Array<Record<string, unknown>>>;
   };
-  if (dialect === "sqlite") {
-    const rows = await db.all!(
-      sql`SELECT name FROM sqlite_master WHERE type = 'table'`,
-    );
-    return rows.map((row) => String(row.name));
-  }
-  const query =
-    dialect === "postgres"
-      ? sql`SELECT table_name AS name FROM information_schema.tables WHERE table_schema = current_schema()`
-      : sql`SELECT table_name AS name FROM information_schema.tables WHERE table_schema = DATABASE()`;
-  const result = await db.execute!(query);
-  // node-postgres answers { rows }, mysql2 answers [rows, fields].
-  const rows = (
-    Array.isArray(result) ? result[0] : (result as { rows?: unknown[] }).rows
-  ) as Array<Record<string, unknown>>;
-  return rows.map((row) => String(row.name ?? row.NAME));
+  const rows = await db.all(
+    sql`SELECT name FROM sqlite_master WHERE type = 'table'`,
+  );
+  return rows.map((row) => String(row.name));
 }
