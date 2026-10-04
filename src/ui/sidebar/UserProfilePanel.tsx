@@ -1,11 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { copyToClipboard } from "@/lib/clipboard";
 import {
   getUserInfo,
-  getApiKeys,
-  createApiKey,
-  deleteApiKey,
   changePassword,
   deleteAccount,
   logoutUser,
@@ -15,7 +11,6 @@ import {
   saveUserPreferences,
   getUserPreferences,
 } from "@/main-axios";
-import { getDatabaseTransferUrl } from "@/lib/database-transfer-url";
 import { readRailPreference, setRailPreference } from "./rail-preferences";
 import { useHostSidebarPreferences } from "./tree/hooks/useHostSidebarPreferences";
 import type { LinkedAccountInfo, UserRole } from "@/main-axios";
@@ -36,15 +31,11 @@ import {
 import {
   AlertCircle,
   ChevronDown,
-  Copy,
-  Database,
   Eye,
   EyeOff,
   KeyRound,
   LayoutTemplate,
-  Network,
   Palette,
-  Plus,
   RotateCcw,
   Shield,
   ShieldCheck,
@@ -65,7 +56,6 @@ import {
   FONT_SIZES,
   UI_FONTS,
 } from "@/lib/theme";
-import type { ApiKey } from "@/main-axios";
 import { useTheme } from "@/components/theme-provider";
 import type { FontSizeId, ThemeId, UiFontId } from "@/types/ui-types";
 import { toast } from "sonner";
@@ -84,8 +74,6 @@ type UserProfileSection =
   | "interface"
   | "appearance"
   | "security"
-  | "api-keys"
-  | "data"
   | FeatureSectionId;
 
 const THEMES: { id: ThemeId; preview: string }[] = [
@@ -193,179 +181,6 @@ type ApiErrorLike = {
 
 function apiErrorMessage(error: unknown, fallback: string) {
   return (error as ApiErrorLike).response?.data?.error || fallback;
-}
-
-type CreatedProfileApiKey = {
-  id: string;
-  name: string;
-  token?: string;
-  tokenPrefix?: string;
-  createdAt?: string;
-  expiresAt?: string | null;
-};
-
-export function NewApiKeyDialog({
-  open,
-  onOpenChange,
-  onAdd,
-  userId,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  onAdd: (key: CreatedProfileApiKey) => void;
-  userId: string;
-}) {
-  const { t } = useTranslation();
-  const [name, setName] = useState("");
-  const [expiry, setExpiry] = useState("");
-  const [createdToken, setCreatedToken] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-
-  const close = () => {
-    setName("");
-    setExpiry("");
-    setCreatedToken(null);
-    onOpenChange(false);
-  };
-
-  const handleCreate = async () => {
-    if (!name.trim()) {
-      toast.error(t("newUi.sidebar.userProfile.apiKeyNameRequired"));
-      return;
-    }
-    if (creating) return;
-    setCreating(true);
-    try {
-      const created = await createApiKey(
-        name.trim(),
-        userId,
-        expiry ? new Date(expiry).toISOString() : undefined,
-      );
-      onAdd(created);
-      setCreatedToken(created.token);
-      toast.success(t("newUi.sidebar.userProfile.apiKeyCreated", { name }));
-    } catch {
-      toast.error(t("newUi.sidebar.userProfile.apiKeyCreateFailed"));
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(nextOpen) => {
-        if (nextOpen || !createdToken) onOpenChange(nextOpen);
-      }}
-    >
-      <DialogContent className="sm:max-w-md rounded-none border-border bg-card p-0 gap-0 overflow-hidden">
-        <DialogHeader className="px-5 pt-5 pb-4 border-b border-border">
-          <div className="flex items-center gap-2.5">
-            <div className="size-8 border border-border bg-muted flex items-center justify-center shrink-0">
-              <Network className="size-3.5 text-accent-brand" />
-            </div>
-            <div>
-              <DialogTitle className="text-base font-bold leading-none">
-                {t("newUi.sidebar.userProfile.createApiKeyTitle")}
-              </DialogTitle>
-              <DialogDescription className="text-xs text-muted-foreground mt-0.5">
-                {t("newUi.sidebar.userProfile.createApiKeyDescription")}
-              </DialogDescription>
-            </div>
-          </div>
-        </DialogHeader>
-
-        {createdToken ? (
-          <div className="flex flex-col gap-3 px-5 py-4">
-            <span className="text-xs font-semibold text-accent-brand">
-              {t("newUi.sidebar.userProfile.apiKeyCreatedWarning")}
-            </span>
-            <div className="flex items-center gap-2 border border-border bg-muted/30 px-2 py-2">
-              <code className="min-w-0 flex-1 break-all text-xs text-accent-brand">
-                {createdToken}
-              </code>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-7 shrink-0"
-                aria-label={t("newUi.sidebar.userProfile.copyApiKey")}
-                onClick={() => {
-                  copyToClipboard(createdToken);
-                  toast.info(t("newUi.sidebar.userProfile.copiedToClipboard"));
-                }}
-              >
-                <Copy className="size-3.5" />
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-4 px-5 py-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-                {t("newUi.sidebar.userProfile.apiKeyNameLabel")}
-              </label>
-              <Input
-                autoFocus
-                placeholder={t(
-                  "newUi.sidebar.userProfile.apiKeyNamePlaceholder",
-                )}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-                className="rounded-none bg-muted/50 border-border text-sm h-9"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-                {t("newUi.sidebar.userProfile.expiryDateLabel")}{" "}
-                <span className="text-muted-foreground/50 normal-case font-medium">
-                  ({t("newUi.sidebar.userProfile.optional")})
-                </span>
-              </label>
-              <Input
-                type="date"
-                value={expiry}
-                onChange={(e) => setExpiry(e.target.value)}
-                className="rounded-none bg-muted/50 border-border text-sm h-9"
-              />
-            </div>
-          </div>
-        )}
-
-        <DialogFooter className="px-5 py-3 border-t border-border bg-muted/20">
-          {createdToken ? (
-            <Button
-              variant="outline"
-              className="rounded-none border-accent-brand/40 text-[10px] font-bold uppercase tracking-widest text-accent-brand"
-              onClick={close}
-            >
-              {t("newUi.sidebar.userProfile.done")}
-            </Button>
-          ) : (
-            <>
-              <Button
-                variant="ghost"
-                onClick={close}
-                className="rounded-none text-[10px] font-bold uppercase tracking-widest"
-              >
-                {t("newUi.sidebar.userProfile.cancel")}
-              </Button>
-              <Button
-                variant="outline"
-                className="border-accent-brand/40 text-accent-brand hover:bg-accent-brand/10 rounded-none text-[10px] font-bold uppercase tracking-widest gap-1.5"
-                onClick={handleCreate}
-                disabled={creating}
-              >
-                <KeyRound className="size-3" />{" "}
-                {t("newUi.sidebar.userProfile.createKey")}
-              </Button>
-            </>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
 }
 
 function PasswordChangeSection({
@@ -543,14 +358,8 @@ export function UserProfilePanel({
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  // Data export/import
-  const [importFile, setImportFile] = useState<File | null>(null);
-  const [exportLoading, setExportLoading] = useState(false);
-  const [importLoading, setImportLoading] = useState(false);
-
   // UI state
   const [showPassword, setShowPassword] = useState(false);
-  const [newKeyOpen, setNewKeyOpen] = useState(false);
   const colorInputRef = useRef<HTMLInputElement>(null);
   const { theme, setTheme } = useTheme();
   const localSnapshot = useRef<Record<string, string | null>>({});
@@ -635,9 +444,6 @@ export function UserProfilePanel({
     }
   });
 
-  // API keys
-  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
-
   // RBAC roles
   const [userRoles, setUserRoles] = useState<UserRole[]>([]);
 
@@ -678,9 +484,6 @@ export function UserProfilePanel({
             .catch(() => {});
         }
       })
-      .catch(() => {});
-    getApiKeys()
-      .then(({ apiKeys: keys }) => setApiKeys(keys))
       .catch(() => {});
     getVersionInfo()
       .then((info) => {
@@ -1071,124 +874,10 @@ export function UserProfilePanel({
     }
   }
 
-  async function handleExportData() {
-    setExportLoading(true);
-    try {
-      const apiUrl = getDatabaseTransferUrl("export", {
-        electron: isElectron(),
-        configuredServerUrl: null,
-        location: window.location,
-      });
-
-      const response = await fetch(apiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({}),
-      });
-
-      if (response.ok) {
-        const blob = await response.blob();
-        const contentDisposition = response.headers.get("content-disposition");
-        const filename =
-          contentDisposition?.match(/filename="([^"]+)"/)?.[1] ||
-          "termix-export.sqlite";
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-        toast.success(t("newUi.sidebar.userProfile.exportSuccess"));
-      } else {
-        const err = await response.json().catch(() => ({}));
-        toast.error(err.error || t("newUi.sidebar.userProfile.exportFailed"));
-      }
-    } catch {
-      toast.error(t("newUi.sidebar.userProfile.exportFailed"));
-    } finally {
-      setExportLoading(false);
-    }
-  }
-
-  async function handleImportData() {
-    if (!importFile) {
-      toast.error(t("newUi.sidebar.userProfile.importSelectFile"));
-      return;
-    }
-    setImportLoading(true);
-    try {
-      const apiUrl = getDatabaseTransferUrl("import", {
-        electron: isElectron(),
-        configuredServerUrl: null,
-        location: window.location,
-      });
-
-      const formData = new FormData();
-      formData.append("file", importFile);
-
-      const response = await fetch(apiUrl, {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        if (result.success) {
-          const s = result.summary;
-          const total =
-            (s.sshHostsImported || 0) +
-            (s.sshCredentialsImported || 0) +
-            (s.pluginItemsImported || 0) +
-            (s.settingsImported || 0);
-          toast.success(
-            t("newUi.sidebar.userProfile.importCompleted", {
-              total,
-              skipped: s.skippedItems || 0,
-            }),
-          );
-          setImportFile(null);
-          setTimeout(() => window.location.reload(), 1500);
-        } else {
-          toast.error(
-            t("newUi.sidebar.userProfile.importFailed", {
-              error: result.summary?.errors?.join(", ") || "Unknown error",
-            }),
-          );
-        }
-      } else {
-        const err = await response.json().catch(() => ({}));
-        toast.error(
-          t("newUi.sidebar.userProfile.importFailed", {
-            error: err.error || "Unknown error",
-          }),
-        );
-      }
-    } catch {
-      toast.error(
-        t("newUi.sidebar.userProfile.importFailed", {
-          error: "Unknown error",
-        }),
-      );
-    } finally {
-      setImportLoading(false);
-    }
-  }
-
   const canChangePasword = !isOidc || isDualAuth;
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-2 p-3">
-      <NewApiKeyDialog
-        open={newKeyOpen}
-        onOpenChange={setNewKeyOpen}
-        onAdd={(key) => setApiKeys((prev) => [key as ApiKey, ...prev])}
-        userId={userId}
-      />
-
       {/* Donate banner */}
       <div className="border border-accent-brand/40 bg-accent-brand/10 px-3 py-2.5 flex flex-col gap-1.5">
         <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-accent-brand">
@@ -1801,186 +1490,6 @@ export function UserProfilePanel({
               onLogout={onLogout}
             />
           )}
-        </div>
-      </AccordionSection>
-
-      {/* API Keys */}
-      <AccordionSection
-        id="api-keys"
-        label={t("newUi.sidebar.userProfile.sectionApiKeys")}
-        icon={<Network className="size-3.5" />}
-        open={openSections.has("api-keys")}
-        onToggle={() => toggle("api-keys")}
-      >
-        <div className="flex flex-col gap-2 pt-3">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-muted-foreground">
-              {t("newUi.sidebar.userProfile.apiKeyCount", {
-                count: apiKeys.length,
-              })}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-6 text-[10px] font-bold uppercase tracking-widest border-accent-brand/40 text-accent-brand hover:bg-accent-brand/10 gap-1"
-              onClick={() => setNewKeyOpen(true)}
-            >
-              <Plus className="size-3" />{" "}
-              {t("newUi.sidebar.userProfile.newKey")}
-            </Button>
-          </div>
-
-          <div className="flex flex-col divide-y divide-border">
-            {apiKeys.length === 0 ? (
-              <div className="py-6 text-center text-muted-foreground text-xs">
-                {t("newUi.sidebar.userProfile.noApiKeys")}
-              </div>
-            ) : (
-              apiKeys.map((key) => (
-                <div
-                  key={key.id}
-                  className="flex items-start justify-between py-2.5 gap-2"
-                >
-                  <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-xs font-semibold truncate">
-                        {key.name}
-                      </span>
-                      {key.isActive && (
-                        <span className="text-[9px] font-bold px-1 py-px border border-accent-brand/40 bg-accent-brand/10 text-accent-brand uppercase shrink-0">
-                          {t("newUi.sidebar.userProfile.apiKeyActive")}
-                        </span>
-                      )}
-                    </div>
-                    <span className="text-[10px] font-mono text-muted-foreground truncate">
-                      {key.tokenPrefix}…
-                    </span>
-                    <span className="text-[10px] text-muted-foreground">
-                      {t("newUi.sidebar.userProfile.apiKeyUser")}:{" "}
-                      {key.username}
-                    </span>
-                    {key.expiresAt && (
-                      <span className="text-[10px] text-muted-foreground">
-                        {t("newUi.sidebar.userProfile.apiKeyExpires")}:{" "}
-                        {new Date(key.expiresAt).toLocaleDateString()}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-0.5 shrink-0">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-6 text-muted-foreground hover:text-destructive"
-                      onClick={async () => {
-                        try {
-                          await deleteApiKey(key.id);
-                          setApiKeys((prev) =>
-                            prev.filter((k) => k.id !== key.id),
-                          );
-                          toast.success(
-                            t("newUi.sidebar.userProfile.apiKeyRevoked", {
-                              name: key.name,
-                            }),
-                          );
-                        } catch {
-                          toast.error(
-                            t("newUi.sidebar.userProfile.apiKeyRevokeFailed"),
-                          );
-                        }
-                      }}
-                    >
-                      <Trash2 className="size-3" />
-                    </Button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          <div className="border-t border-border pt-2 text-[10px] text-muted-foreground flex flex-col gap-1">
-            <p>
-              {t("newUi.sidebar.userProfile.apiKeyUsageHint")}{" "}
-              <code className="font-mono text-accent-brand bg-accent-brand/10 px-1">
-                Authorization: Bearer
-              </code>{" "}
-              {t("newUi.sidebar.userProfile.apiKeyUsageHintHeader")}
-            </p>
-            <p>{t("newUi.sidebar.userProfile.apiKeyPermissionsHint")}</p>
-          </div>
-        </div>
-      </AccordionSection>
-
-      <AccordionSection
-        id="data"
-        label={t("newUi.sidebar.userProfile.sectionData")}
-        icon={<Database className="size-3.5" />}
-        open={openSections.has("data")}
-        onToggle={() => toggle("data")}
-      >
-        <div className="flex flex-col gap-3 pt-3">
-          <div className="flex flex-col gap-1.5">
-            <span className="text-xs font-medium">
-              {t("newUi.sidebar.userProfile.exportData")}
-            </span>
-            <span className="text-[10px] text-muted-foreground">
-              {t("newUi.sidebar.userProfile.exportDataDesc")}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              className="self-start text-xs border-accent-brand/40 text-accent-brand hover:bg-accent-brand/10 hover:text-accent-brand mt-1"
-              onClick={handleExportData}
-              disabled={exportLoading}
-            >
-              {exportLoading
-                ? t("newUi.sidebar.userProfile.exporting")
-                : t("newUi.sidebar.userProfile.export")}
-            </Button>
-          </div>
-          <div className="flex flex-col gap-1.5 border-t border-border pt-3">
-            <span className="text-xs font-medium">
-              {t("newUi.sidebar.userProfile.importData")}
-            </span>
-            <span className="text-[10px] text-muted-foreground">
-              {importFile
-                ? t("newUi.sidebar.userProfile.importDataSelected", {
-                    name: importFile.name,
-                  })
-                : t("newUi.sidebar.userProfile.importDataDesc")}
-            </span>
-            <div className="flex items-center gap-2 mt-1">
-              <div className="relative">
-                <input
-                  type="file"
-                  accept=".sqlite,.db"
-                  onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="pointer-events-none text-xs"
-                >
-                  {importFile
-                    ? t("newUi.sidebar.userProfile.changeFile")
-                    : t("newUi.sidebar.userProfile.selectFile")}
-                </Button>
-              </div>
-              {importFile && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-xs border-accent-brand/40 text-accent-brand hover:bg-accent-brand/10 hover:text-accent-brand"
-                  onClick={handleImportData}
-                  disabled={importLoading}
-                >
-                  {importLoading
-                    ? t("newUi.sidebar.userProfile.importing")
-                    : t("newUi.sidebar.userProfile.import")}
-                </Button>
-              )}
-            </div>
-          </div>
         </div>
       </AccordionSection>
 
