@@ -644,10 +644,6 @@ router.post(
         .json({ error: "That auth type cannot be used for Quick Connect" });
     }
 
-    if (authType === "credential") {
-      return res.status(400).json({ error: "Saved credentials are disabled in Quick Connect until backend-only references are complete." });
-    }
-
     try {
       let resolvedPassword = password;
       let resolvedKey = key;
@@ -656,28 +652,37 @@ router.post(
       let resolvedAuthType = authType;
       let resolvedUsername = username;
 
-      if (authType === "credential" && credentialId) {
-        const cred = await findUsableCredential(Number(credentialId), userId);
+      if (authType === "credential") {
+        const numericCredentialId = Number(credentialId);
+        if (
+          !Number.isInteger(numericCredentialId) ||
+          numericCredentialId <= 0
+        ) {
+          return res.status(400).json({ error: "Credential ID is required" });
+        }
 
+        // Validate access and resolve only the non-secret username here.
+        // Password/private key material stays server-side and is resolved
+        // later by ctx.ssh.resolveQuickConnect() in the terminal backend.
+        const cred = await findUsableCredential(numericCredentialId, userId);
         if (!cred) {
           return res.status(404).json({ error: "Credential not found" });
         }
 
-        resolvedPassword = pickResolvedPassword(password, cred.password) as
-          string | undefined;
-        resolvedKey = cred.privateKey as string | undefined;
-        resolvedKeyPassword = cred.keyPassword as string | undefined;
-        resolvedKeyType = cred.keyType as string | undefined;
-        resolvedAuthType = cred.authType as string | undefined;
+        resolvedPassword = undefined;
+        resolvedKey = undefined;
+        resolvedKeyPassword = undefined;
+        resolvedKeyType = undefined;
+        resolvedAuthType = "credential";
 
-        if (!overrideCredentialUsername) {
-          resolvedUsername = cred.username as string;
+        if (!overrideCredentialUsername && cred.username) {
+          resolvedUsername = String(cred.username);
         }
       }
 
       const tempHost: Record<string, unknown> = {
         id: -Date.now(),
-        userId: userId,
+        userId,
         name: `${resolvedUsername}@${ip}:${port}`,
         ip,
         port: Number(port),
@@ -686,10 +691,17 @@ router.post(
         tags: [],
         pin: false,
         authType: resolvedAuthType || authType,
-        password: resolvedPassword,
-        key: resolvedKey,
-        keyPassword: resolvedKeyPassword,
-        keyType: resolvedKeyType,
+        ...(authType === "credential"
+          ? {
+              credentialId: Number(credentialId),
+              overrideCredentialUsername: !!overrideCredentialUsername,
+            }
+          : {
+              password: resolvedPassword,
+              key: resolvedKey,
+              keyPassword: resolvedKeyPassword,
+              keyType: resolvedKeyType,
+            }),
         jumpHosts: [],
         statusCheckEnabled: true,
         statusCheckInterval: null,
