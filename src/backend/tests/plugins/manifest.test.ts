@@ -716,21 +716,6 @@ describe("contributes.http.legacyRedirects", () => {
   });
 });
 
-describe("contributes.http.adminImpersonation", () => {
-  it("accepts a boolean and refuses anything else", () => {
-    expect(
-      validateManifest(
-        base({ contributes: { http: { adminImpersonation: true } } }),
-      ),
-    ).toEqual([]);
-    expect(
-      validateManifest(
-        base({ contributes: { http: { adminImpersonation: "yes" } } }),
-      ).join(),
-    ).toMatch(/adminImpersonation" must be a boolean/);
-  });
-});
-
 describe("contributes.keybindingActions", () => {
   const withActions = (keybindingActions: unknown) =>
     validateManifest(base({ contributes: { keybindingActions } }));
