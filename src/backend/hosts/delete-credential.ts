@@ -6,8 +6,7 @@ import {
 
 /**
  * Deletes a credential the user owns: hosts using it fall back to password
- * auth with no secret. Shared by the delete
- * route and sync. Null when it does not exist or is not the user's.
+ * auth with no secret. Null when it does not exist or is not the user's.
  */
 export async function deleteOwnedCredential(
   userId: string,
