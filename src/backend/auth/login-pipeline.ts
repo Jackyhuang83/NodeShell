@@ -36,11 +36,7 @@ import {
   listSecondFactors,
   type SecondFactor,
 } from "./registry.js";
-import {
-  issueSession,
-  sendSession,
-  syncSharedCredentialsForUserRoles,
-} from "./session-issuer.js";
+import { issueSession, sendSession } from "./session-issuer.js";
 import {
   LoginMethodError,
   type PendingLogin,
@@ -235,10 +231,6 @@ export async function runLogin(
   const user = await resolveUser(identity, deviceType);
 
   await unlockUser(user, identity, deviceType);
-  await syncSharedCredentialsForUserRoles(
-    user.id,
-    `${context.methodId}_role_shared_credentials`,
-  );
 
   const factors = shouldRunSecondFactors(context.methodId)
     ? await evaluateSecondFactors(user.id)

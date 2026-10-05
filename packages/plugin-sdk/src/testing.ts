@@ -58,10 +58,6 @@ import type {
   PluginHostRecord,
   PluginHostCreateInput,
   PluginHostUpdateInput,
-  PluginHostAccess,
-  PluginHostShareResult,
-  PluginShareableUser,
-  PluginShareableRole,
   PluginSshKeyCredential,
   PluginSshKeyCredentialInput,
 } from "./backend.js";
@@ -875,18 +871,6 @@ export function createFakeContext(
     hosts: {
       list: async () => [...hostsById.values()],
       get: async (hostId) => hostsById.get(hostId) ?? null,
-      checkAccess: async (hostId): Promise<PluginHostAccess> => {
-        const found = hostsById.get(hostId);
-        if (!found)
-          return { hasAccess: false, isOwner: false, isShared: false };
-        const isOwner = found.userId === actor;
-        return {
-          hasAccess: true,
-          isOwner,
-          isShared: !isOwner,
-          permissionLevel: "manage",
-        };
-      },
       create: async (
         host: PluginHostCreateInput,
       ): Promise<PluginHostRecord> => {
@@ -1596,10 +1580,6 @@ export function createMockCtx(
         require("hosts:read");
         return ctx.hosts.get(hostId);
       },
-      checkAccess: async (hostId, level) => {
-        require("hosts:read");
-        return ctx.hosts.checkAccess(hostId, level);
-      },
       create: async (host) => {
         require("hosts:write");
         return ctx.hosts.create(host);
@@ -1615,18 +1595,6 @@ export function createMockCtx(
       listOwned: async () => {
         require("hosts:write");
         return ctx.hosts.listOwned();
-      },
-      share: async (hostId, targets, permissionLevel, durationHours) => {
-        require("hosts:write");
-        return ctx.hosts.share(hostId, targets, permissionLevel, durationHours);
-      },
-      listUsers: async () => {
-        require("hosts:write");
-        return ctx.hosts.listUsers();
-      },
-      listRoles: async () => {
-        require("hosts:write");
-        return ctx.hosts.listRoles();
       },
       trackSession: (hostId) => {
         require("hosts:read");
