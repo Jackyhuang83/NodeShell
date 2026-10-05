@@ -274,7 +274,12 @@ export async function activate(ctx: PluginContext) {
       throw new Error("Cannot open transfer connection: unknown host");
     }
 
-    const host = await ctx.asUser(userId, () => ctx.ssh.resolveHost(hostId));
+    const host = await ctx.asOwner(() => {
+      if (ctx.currentActor() !== userId) {
+        throw new Error("Session access denied");
+      }
+      return ctx.ssh.resolveHost(hostId);
+    });
     if (!host) {
       throw new Error("Host not found for transfer connection");
     }
@@ -1233,13 +1238,16 @@ export async function activate(ctx: PluginContext) {
   ): Promise<void> {
     try {
       const host = await ctx.hosts.get(hostId);
-      await ctx.asUser(userId, () =>
-        ctx.hosts.recordActivity(
+      await ctx.asOwner(() => {
+        if (ctx.currentActor() !== userId) {
+          throw new Error("Session access denied");
+        }
+        return ctx.hosts.recordActivity(
           hostId,
           "file_manager",
           host?.name || `${username}@${ip}:${port}`,
-        ),
-      );
+        );
+      });
     } catch (error) {
       fileLogger.warn("Failed to log file manager activity", {
         operation: "activity_log_error",
