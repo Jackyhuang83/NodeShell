@@ -308,7 +308,7 @@ export class HostRepository {
     userId: string,
     hostId: number,
   ): Promise<{ syncId: string | null } | null> {
-    await this.deleteAccessForHost(hostId);
+    await this.deletePluginSettingsForHost(hostId);
 
     const rows = await deleteReturning(
       this.context,
@@ -321,7 +321,7 @@ export class HostRepository {
   }
 
   async deleteByUserId(userId: string): Promise<number> {
-    // Bulk path, so it never passes through deleteAccessForHost: clear the
+    // Bulk path, so it never passes through deletePluginSettingsForHost: clear the
     // host-scope plugin settings for these hosts before the rows go.
     const owned = await this.context.drizzle
       .select({ id: hosts.id })
@@ -351,7 +351,7 @@ export class HostRepository {
     return rowsAffected(result);
   }
 
-  async deleteAccessForHost(hostId: number): Promise<number> {
+  private async deletePluginSettingsForHost(hostId: number): Promise<number> {
     // plugin_settings.scope_id is polymorphic, so it has no foreign key to
     // ssh_data and the engine will not cascade it.
     const result = await this.context.drizzle
