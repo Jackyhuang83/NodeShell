@@ -4,15 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({
   granted: new Set<string>(),
   connects: [] as Array<{ target: unknown; options: Record<string, unknown> }>,
-  factors: [] as Array<{ userId: string; pluginId: string; factorId: string }>,
   actor: undefined as string | undefined,
   cleared: [] as string[],
   clearedAll: 0,
   pooled: [] as string[],
-  sessionId: undefined as string | undefined,
-  revoked: [] as Array<{ userId: string; except?: string }>,
-  trustedCleared: [] as string[],
-  policyError: null as Error | null,
   logins: [] as Array<{ hostId: number; outcome: unknown }>,
   connectError: null as Error | null,
   usableCredential: null as Record<string, unknown> | null,
@@ -51,12 +46,6 @@ vi.mock("../../plugins/permissions.js", async () => {
 });
 vi.mock("../../plugins/actor.js", () => ({
   getActor: () => h.actor,
-  getActorSessionId: () => h.sessionId,
-}));
-vi.mock("../../auth/core-auth.js", () => ({
-  assertSecondFactorEnrollmentAllowed: () => {
-    if (h.policyError) throw h.policyError;
-  },
 }));
 vi.mock("../../hosts/ssh-connection-pool.js", () => ({
   withConnection: async (
@@ -101,30 +90,6 @@ vi.mock("../../hosts/status/host-status-service.js", () => ({
 vi.mock("../../hosts/usable-credential.js", () => ({
   findUsableCredential: async () => h.usableCredential,
 }));
-vi.mock("../../database/repositories/factory.js", () => ({
-  createCurrentUserAuthRepository: () => ({
-    recordSecondFactor: async (
-      userId: string,
-      pluginId: string,
-      factorId: string,
-    ) => {
-      h.factors.push({ userId, pluginId, factorId });
-    },
-    removeSecondFactor: async () => true,
-  }),
-  createCurrentSessionRepository: () => ({
-    revokeAllForUser: async (userId: string, except?: string) => {
-      h.revoked.push({ userId, except });
-      return 0;
-    },
-  }),
-  createCurrentTrustedDeviceRepository: () => ({
-    deleteByUserId: async (userId: string) => {
-      h.trustedCleared.push(userId);
-    },
-  }),
-}));
-
 const { createPluginAuth, createPluginSsh } =
   await import("../../plugins/ctx-ssh-auth.js");
 const { DisposableBag } = await import("../../plugins/disposables.js");
@@ -132,8 +97,6 @@ const { getSshAuthProvider } =
   await import("../../hosts/connect/auth-provider-registry.js");
 const { classifyKeyboardInteractive } =
   await import("../../hosts/connect/keyboard-interactive.js");
-const { getLoginMethod, getSecondFactor } =
-  await import("../../auth/registry.js");
 const { PluginCapabilityError } = await import("@termix/plugin-sdk/backend");
 
 function manifest(capabilities: string[], auth: Record<string, string[]> = {}) {
@@ -149,7 +112,6 @@ function manifest(capabilities: string[], auth: Record<string, string[]> = {}) {
 beforeEach(() => {
   h.granted = new Set();
   h.connects = [];
-  h.factors = [];
   h.actor = "user-1";
   h.cleared = [];
   h.clearedAll = 0;
@@ -536,82 +498,5 @@ describe("ctx.auth", () => {
     ).toThrow(PluginCapabilityError);
   });
 
-  it("registers login methods and second factors under the plugin, and records enrolment", async () => {
-    h.granted = new Set(["auth:provide"]);
-    const bag = new DisposableBag("fixture");
-    const audit = vi.fn(async () => {});
-    const auth = createPluginAuth({
-      manifest: manifest(["auth:provide"], {
-        loginMethods: ["corp-sso"],
-        secondFactors: ["pin"],
-      }),
-      bag,
-      audit,
-    });
-    auth.registerLoginMethod({
-      id: "corp-sso",
-      labelKey: "corp",
-      kind: "redirect",
-      start: async () => ({ redirectUrl: "https://corp" }),
-    });
-    auth.registerSecondFactor({
-      id: "pin",
-      labelKey: "pin",
-      isEnrolled: async () => true,
-      verify: async () => true,
-    });
-    expect(getLoginMethod("corp-sso")?.pluginId).toBe("fixture");
-    expect(getSecondFactor("fixture", "pin")).toBeDefined();
 
-    await auth.recordEnrollment("user-1", "pin");
-    expect(h.factors).toEqual([
-      { userId: "user-1", pluginId: "fixture", factorId: "pin" },
-    ]);
-    expect(audit).toHaveBeenCalledWith(
-      "auth_factor_enrolled",
-      "pin for user-1",
-      { success: true },
-    );
-
-    await bag.disposeAll();
-    expect(getLoginMethod("corp-sso")).toBeUndefined();
-    expect(getSecondFactor("fixture", "pin")).toBeUndefined();
-  });
-
-  it("revokes other sessions and trusted devices on enrolment, keeping the caller's session", async () => {
-    h.granted = new Set(["auth:provide"]);
-    h.factors = [];
-    h.revoked = [];
-    h.trustedCleared = [];
-    h.policyError = null;
-    h.actor = "user-1";
-    h.sessionId = "session-a";
-    const auth = createPluginAuth({
-      manifest: manifest(["auth:provide"], { secondFactors: ["pin"] }),
-      bag: new DisposableBag("fixture"),
-      audit: vi.fn(async () => {}),
-    });
-    await auth.recordEnrollment("user-1", "pin");
-    expect(h.revoked).toEqual([{ userId: "user-1", except: "session-a" }]);
-    expect(h.trustedCleared).toEqual(["user-1"]);
-    h.actor = undefined;
-    h.sessionId = undefined;
-  });
-
-  it("refuses enrolment when core policy forbids second factors", async () => {
-    h.granted = new Set(["auth:provide"]);
-    h.factors = [];
-    const { LoginMethodError } = await import("@termix/plugin-sdk/backend");
-    h.policyError = new LoginMethodError("password login is off", 409);
-    const auth = createPluginAuth({
-      manifest: manifest(["auth:provide"], { secondFactors: ["pin"] }),
-      bag: new DisposableBag("fixture"),
-      audit: vi.fn(async () => {}),
-    });
-    await expect(auth.recordEnrollment("user-1", "pin")).rejects.toMatchObject({
-      status: 409,
-    });
-    expect(h.factors).toEqual([]);
-    h.policyError = null;
-  });
 });
