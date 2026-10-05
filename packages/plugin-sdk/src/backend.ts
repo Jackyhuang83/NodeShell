@@ -157,7 +157,7 @@ export interface PluginServices {
   /**
    * The service must be listed in the manifest's `requires` (or be one this
    * plugin provides). `provider` picks a named provider; omitted, the unnamed
-   * one. A `userId` other than the acting user needs users:impersonate.
+   * one. A compatibility `userId` may only repeat the current actor.
    */
   get: <T extends object>(
     service: string,
@@ -1810,14 +1810,10 @@ export interface PluginContext {
   readonly plugins: PluginPlugins;
 
   /**
-   * Runs `fn` with `userId` as the acting user, for background work that has
-   * no request behind it. Always audited, and every core API inside still
-   * applies that user's RBAC.
-   *
-   * Needs users:impersonate. That and a `userId` option on services.get or
-   * secrets.getShared are the only ways a plugin can name a user.
+   * Runs `fn` as the canonical NodeShell Owner for background work that has
+   * no request behind it. Core resolves the Owner; plugins cannot name users.
    */
-  asUser: <T>(userId: string, fn: () => Promise<T> | T) => Promise<T>;
+  asOwner: <T>(fn: () => Promise<T> | T) => Promise<T>;
 
   /** The acting user for the current call, when there is one. */
   currentActor: () => string | undefined;
