@@ -57,40 +57,12 @@ interface AuthenticatedRequest extends Request {
   sessionId?: string;
   pendingTOTP?: boolean;
   dataKey?: Buffer;
-  actingAdminUserId?: string;
 }
 
 interface RequestWithHeaders extends Request {
   headers: Request["headers"] & {
     "x-forwarded-proto"?: string;
   };
-}
-
-const ADMIN_TARGET_USER_HEADER = "x-admin-target-user";
-
-// Core data-plane routes an admin may hit on behalf of another user.
-// Everything else (TOTP, sessions, ...) rejects the header, and so does every
-// plugin route unless its manifest sets contributes.http.adminImpersonation.
-const IMPERSONATION_PATH_ALLOWLIST = [/^\/host\/db\//, /^\/credentials(\/|$)/];
-
-const PLUGIN_API_PATH = /^\/plugin-api\/([a-z][a-z0-9-]*)(\/|$)/;
-
-let pluginAllowsImpersonation: (pluginId: string) => boolean = () => false;
-
-/** Set by the plugin runtime: whether a running plugin opted in. */
-export function setPluginImpersonationCheck(
-  check: (pluginId: string) => boolean,
-): void {
-  pluginAllowsImpersonation = check;
-}
-
-/** Whether an admin may send X-Admin-Target-User to this path. */
-export function allowsAdminImpersonation(path: string): boolean {
-  if (IMPERSONATION_PATH_ALLOWLIST.some((pattern) => pattern.test(path))) {
-    return true;
-  }
-  const plugin = PLUGIN_API_PATH.exec(path);
-  return !!plugin && pluginAllowsImpersonation(plugin[1]);
 }
 
 class AuthManager {
@@ -756,97 +728,8 @@ class AuthManager {
       authReq.sessionId = payload.sessionId;
       authReq.pendingTOTP = payload.pendingTOTP;
 
-      if (authReq.headers[ADMIN_TARGET_USER_HEADER]) {
-        const handled = await this.applyAdminImpersonation(
-          authReq,
-          res,
-          payload.userId,
-        );
-        if (handled) return;
-      }
-
       next();
     };
-  }
-
-  /**
-   * Handle the X-Admin-Target-User header: admins may act on another user's
-   * data for an allowlisted set of data-plane routes. On success req.userId
-   * becomes the target user and actingAdminUserId records the real caller.
-   * Returns true when a response was already sent (request must stop).
-   */
-  private async applyAdminImpersonation(
-    req: AuthenticatedRequest,
-    res: Response,
-    adminUserId: string,
-  ): Promise<boolean> {
-    const rawHeader = req.headers[ADMIN_TARGET_USER_HEADER];
-    const targetUserId = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
-
-    if (!targetUserId || targetUserId === adminUserId) {
-      return false;
-    }
-
-    const userRepository = createCurrentUserRepository();
-    const admin = await userRepository.findById(adminUserId);
-    if (!admin?.isAdmin) {
-      databaseLogger.warn("Impersonation attempt by non-admin", {
-        operation: "admin_impersonation_denied",
-        userId: adminUserId,
-        targetUserId,
-        path: req.originalUrl,
-      });
-      res.status(403).json({
-        error: "Admin access required",
-        code: "IMPERSONATION_DENIED",
-      });
-      return true;
-    }
-
-    const path = (req.originalUrl || req.url || "").split("?")[0];
-    if (!allowsAdminImpersonation(path)) {
-      res.status(403).json({
-        error: "Impersonation is not allowed for this route",
-        code: "IMPERSONATION_NOT_ALLOWED",
-      });
-      return true;
-    }
-
-    const target = await userRepository.findById(targetUserId);
-    if (!target) {
-      res.status(404).json({
-        error: "Target user not found",
-        code: "TARGET_USER_NOT_FOUND",
-      });
-      return true;
-    }
-
-    if (!DataCrypto.canUserAccessData(targetUserId)) {
-      res.status(423).json({
-        error: "Target user's data stays locked until their next login",
-        code: "TARGET_DATA_LOCKED",
-      });
-      return true;
-    }
-
-    req.userId = targetUserId;
-    req.actingAdminUserId = adminUserId;
-
-    const { ipAddress, userAgent } = getRequestMeta(req);
-    void logAudit({
-      userId: adminUserId,
-      username: admin.username,
-      action: "admin_impersonated_request",
-      resourceType: "user",
-      resourceId: targetUserId,
-      resourceName: target.username,
-      details: JSON.stringify({ method: req.method, path }),
-      ipAddress,
-      userAgent,
-      success: true,
-    });
-
-    return false;
   }
 
   createDataAccessMiddleware() {
