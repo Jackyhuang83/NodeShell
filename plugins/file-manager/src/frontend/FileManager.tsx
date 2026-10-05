@@ -22,19 +22,14 @@ import {
 import { FileWindow } from "./components/FileWindow.tsx";
 import { DownloadProgressToast } from "./components/DownloadProgressToast.tsx";
 import { DiffWindow } from "./components/DiffWindow.tsx";
-import { useDragToDesktop } from "./hooks/useDragToDesktop";
-import { useDragToSystemDesktop } from "./hooks/useDragToSystemDesktop";
 import { useConfirmation } from "@termix/plugin-sdk/ui";
 import { toast } from "sonner";
 import { useTranslation } from "@termix/plugin-sdk/frontend";
 import { FileManagerDialogs } from "./FileManagerDialogs.tsx";
 import { PassphraseDialog } from "@termix/plugin-sdk/ui";
 import { FileManagerToolbar } from "./FileManagerToolbar.tsx";
-import { LocalFilePane } from "./LocalFilePane.tsx";
-import { useLocalTransfers } from "./hooks/useLocalTransfers.ts";
 import { usePaneWidth } from "./hooks/usePaneWidth.ts";
 import { PaneResizeHandle } from "./components/PaneResizeHandle.tsx";
-import { isLocalFileBrowserAvailable } from "./lib/local-files";
 import { TransferToHostDialog } from "./components/TransferToHostDialog.tsx";
 import { FileManagerTrashDialog } from "./FileManagerTrashDialog.tsx";
 import { TerminalWindow } from "./components/TerminalWindow.tsx";
@@ -121,11 +116,7 @@ import {
   restoreItems,
 } from "./optimistic-file-list";
 
-const LOCAL_PANE_OPEN_STORAGE_KEY = "termix:file-manager:local-pane:open";
 const SIDEBAR_OPEN_STORAGE_KEY = "termix:file-manager:sidebar:open";
-const LOCAL_PANE_WIDTH_STORAGE_KEY = "termix:file-manager:local-pane:width";
-const LOCAL_PANE_MIN_WIDTH = 300;
-const LOCAL_PANE_DEFAULT_WIDTH = 440;
 const SIDEBAR_WIDTH_STORAGE_KEY = "termix:file-manager:sidebar:width";
 const SIDEBAR_MIN_WIDTH = 160;
 const SIDEBAR_DEFAULT_WIDTH = 224; // matches the previous fixed w-56
@@ -234,17 +225,7 @@ function FileManagerContent({
   const [showPassphraseDialog, setShowPassphraseDialog] = useState(false);
   const [pinnedFiles, setPinnedFiles] = useState<Set<string>>(new Set());
   const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0);
-  // Desktop-only Local | Remote split view (Termius-style dual pane).
-  const localPaneAvailable = isLocalFileBrowserAvailable();
-  const [localPaneOpen, setLocalPaneOpen] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(LOCAL_PANE_OPEN_STORAGE_KEY) === "true";
-    } catch {
-      return false;
-    }
-  });
-  const [localPaneRefreshToken, setLocalPaneRefreshToken] = useState(0);
-  // Desktop directories sidebar visibility (mobile uses the overlay state).
+  // Wide-screen directories sidebar visibility (mobile uses the overlay state).
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
     try {
       return localStorage.getItem(SIDEBAR_OPEN_STORAGE_KEY) !== "false";
@@ -264,13 +245,6 @@ function FileManagerContent({
     });
   }, []);
   const panesRowRef = useRef<HTMLDivElement>(null);
-  const localPaneSize = usePaneWidth({
-    storageKey: LOCAL_PANE_WIDTH_STORAGE_KEY,
-    defaultWidth: LOCAL_PANE_DEFAULT_WIDTH,
-    minWidth: LOCAL_PANE_MIN_WIDTH,
-    maxFraction: 0.65,
-    containerRef: panesRowRef,
-  });
   const sidebarSize = usePaneWidth({
     storageKey: SIDEBAR_WIDTH_STORAGE_KEY,
     defaultWidth: SIDEBAR_DEFAULT_WIDTH,
@@ -278,17 +252,6 @@ function FileManagerContent({
     maxFraction: 0.4,
     containerRef: panesRowRef,
   });
-  const toggleLocalPane = useCallback(() => {
-    setLocalPaneOpen((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem(LOCAL_PANE_OPEN_STORAGE_KEY, String(next));
-      } catch {
-        // storage unavailable
-      }
-      return next;
-    });
-  }, []);
   const [trashOpen, setTrashOpen] = useState(false);
   const [hasConnectionError, setHasConnectionError] = useState<boolean>(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -385,16 +348,6 @@ function FileManagerContent({
     onItemsDropped: handleItemsDropped,
     onError: (error) => toast.error(error),
     maxFileSize: 5120,
-  });
-
-  const dragToDesktop = useDragToDesktop({
-    sshSessionId: sshSessionId || "",
-    sshHost: currentHost!,
-  });
-
-  const systemDrag = useDragToSystemDesktop({
-    sshSessionId: sshSessionId || "",
-    sshHost: currentHost!,
   });
 
   const startKeepalive = useCallback(() => {
@@ -555,52 +508,6 @@ function FileManagerContent({
       activityLoggingRef.current = false;
     }
   }, [currentHost]);
-
-  const handleFileDragStart = useCallback(
-    (files: FileItem[]) => {
-      systemDrag.startDragToSystem(files, {
-        enableToast: true,
-        onSuccess: () => {
-          clearSelection();
-        },
-        onError: (error) => {
-          console.error("Drag failed:", error);
-        },
-      });
-    },
-    [systemDrag, clearSelection],
-  );
-
-  const handleFileDragEnd = useCallback(
-    (e: DragEvent, draggedFiles: FileItem[]) => {
-      const isOutside =
-        e.clientX < 0 ||
-        e.clientX > window.innerWidth ||
-        e.clientY < 0 ||
-        e.clientY > window.innerHeight;
-
-      if (isOutside) {
-        if (draggedFiles.length === 0) {
-          console.error("No files to drag - this should not happen");
-          return;
-        }
-
-        systemDrag.startDragToSystem(draggedFiles, {
-          enableToast: true,
-          onSuccess: () => {
-            clearSelection();
-          },
-          onError: (error) => {
-            console.error("Drag failed:", error);
-          },
-        });
-        systemDrag.handleDragEnd(e);
-      } else {
-        systemDrag.cancelDragToSystem();
-      }
-    },
-    [systemDrag, clearSelection],
-  );
 
   const isConnectingRef = useRef(false);
 
@@ -1065,46 +972,6 @@ function FileManagerContent({
     window.addEventListener("file-manager:refresh", handler);
     return () => window.removeEventListener("file-manager:refresh", handler);
   }, [currentHost?.id, handleRefreshDirectory]);
-
-  const localTransfers = useLocalTransfers({
-    sshSessionId,
-    hostId: currentHost?.id,
-    ensureSSHConnection,
-    onRemoteChanged: (remoteDir) => {
-      if (sshSessionId) invalidateCachedFileList(sshSessionId, remoteDir);
-      handleRefreshDirectory();
-      setSidebarRefreshTrigger((prev) => prev + 1);
-    },
-    onLocalChanged: () => setLocalPaneRefreshToken((prev) => prev + 1),
-  });
-
-  // Entries dragged from the local pane onto the remote grid (or onto one of
-  // its folders) upload into that folder, preserving directory structure.
-  const handleLocalFilesDrop = useCallback(
-    (localPaths: string[], targetDir?: FileItem) => {
-      const remoteDir = targetDir?.path ?? currentPathRef.current;
-      void localTransfers.uploadLocalPaths(localPaths, remoteDir);
-    },
-    [localTransfers],
-  );
-
-  // Remote rows dragged onto the local pane download into the folder shown
-  // there (or the folder row they were dropped on).
-  const handleRemoteItemsDroppedToLocal = useCallback(
-    (remotePaths: string[], localDir: string) => {
-      const known = new Map(files.map((f) => [f.path, f]));
-      const items: FileItem[] = remotePaths.map(
-        (p) =>
-          known.get(p) ?? {
-            name: p.split("/").filter(Boolean).pop() || p,
-            path: p,
-            type: "file",
-          },
-      );
-      void localTransfers.downloadRemoteItems(items, localDir);
-    },
-    [files, localTransfers],
-  );
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -3086,37 +2953,6 @@ function FileManagerContent({
     );
   }
 
-  async function handleDragToDesktop(files: FileItem[]) {
-    if (!currentHost || !sshSessionId) {
-      toast.error(t("fileManager.noSSHConnection"));
-      return;
-    }
-
-    try {
-      if (systemDrag.isFileSystemAPISupported) {
-        await systemDrag.handleDragToSystem(files, {
-          enableToast: true,
-          onError: (error) => {
-            console.error("System-level drag failed:", error);
-          },
-        });
-      } else {
-        if (files.length === 1) {
-          await dragToDesktop.dragFileToDesktop(files[0]);
-        } else if (files.length > 1) {
-          await dragToDesktop.dragFilesToDesktop(files);
-        }
-      }
-    } catch (error: unknown) {
-      console.error("Drag to desktop failed:", error);
-      toast.error(
-        t("fileManager.dragFailed") +
-          ": " +
-          getErrorMessage(error, String(error)),
-      );
-    }
-  }
-
   function handleOpenTerminal(path: string) {
     if (!currentHost) {
       toast.error(t("fileManager.noHostSelected"));
@@ -3435,9 +3271,6 @@ function FileManagerContent({
           handleFilesDropped={handleFilesDropped}
           handleCreateNewFolder={handleCreateNewFolder}
           handleCreateNewFile={handleCreateNewFile}
-          showLocalPaneToggle={localPaneAvailable}
-          localPaneOpen={localPaneAvailable && localPaneOpen}
-          onToggleLocalPane={toggleLocalPane}
           sidebarOpen={sidebarOpen}
           onToggleSidebar={toggleSidebar}
         />
@@ -3495,32 +3328,6 @@ function FileManagerContent({
             />
           )}
 
-          {localPaneAvailable && localPaneOpen && (
-            <>
-              <div
-                className="hidden md:flex flex-shrink-0 relative overflow-hidden min-h-0 flex-col border border-border bg-card"
-                style={{
-                  width: localPaneSize.width,
-                  minWidth: LOCAL_PANE_MIN_WIDTH,
-                  maxWidth: "65%",
-                }}
-              >
-                <LocalFilePane
-                  refreshToken={localPaneRefreshToken}
-                  onClose={toggleLocalPane}
-                  onRemoteItemsDropped={handleRemoteItemsDroppedToLocal}
-                  onUploadToRemote={handleLocalFilesDrop}
-                />
-              </div>
-              <PaneResizeHandle
-                label={t("fileManager.resizeLocalPane")}
-                onMouseDown={localPaneSize.startResize}
-                onDoubleClick={localPaneSize.resetWidth}
-                active={localPaneSize.isResizing}
-              />
-            </>
-          )}
-
           <div className="flex-1 basis-0 relative overflow-hidden min-h-0 flex flex-col border border-border bg-card">
             <div className="flex-1 relative min-h-0 h-full">
               <FileManagerGrid
@@ -3532,9 +3339,6 @@ function FileManagerContent({
                 onRefresh={handleRefreshDirectory}
                 onUpload={handleFilesDropped}
                 onUploadItems={handleItemsDropped}
-                onLocalFilesDrop={
-                  localPaneAvailable ? handleLocalFilesDrop : undefined
-                }
                 parentPath={
                   currentPath === "/"
                     ? null
@@ -3572,8 +3376,6 @@ function FileManagerContent({
                 hasClipboard={!!clipboard}
                 onFileDrop={handleFileDrop}
                 onFileDiff={handleFileDiff}
-                onSystemDragStart={handleFileDragStart}
-                onSystemDragEnd={handleFileDragEnd}
                 createIntent={createIntent}
                 onConfirmCreate={handleConfirmCreate}
                 onCancelCreate={handleCancelCreate}
@@ -3614,7 +3416,6 @@ function FileManagerContent({
                 onNewFile={handleCreateNewFile}
                 onRefresh={handleRefreshDirectory}
                 hasClipboard={!!clipboard}
-                onDragToDesktop={() => handleDragToDesktop(contextMenu.files)}
                 onOpenTerminal={(path) => handleOpenTerminal(path)}
                 onRunExecutable={(file) => handleRunExecutable(file)}
                 onPinFile={handlePinFile}

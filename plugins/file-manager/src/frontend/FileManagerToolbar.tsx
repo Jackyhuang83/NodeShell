@@ -8,7 +8,6 @@ import {
   Folder,
   FolderPlus,
   Grid3X3,
-  Laptop,
   Layout,
   List,
   Plus,
@@ -66,10 +65,6 @@ type FileManagerToolbarProps = {
   handleFilesDropped: (fileList: FileList) => void;
   handleCreateNewFolder: () => void;
   handleCreateNewFile: () => void;
-  /** Desktop app only: show the Local | Remote split-view toggle. */
-  showLocalPaneToggle?: boolean;
-  localPaneOpen?: boolean;
-  onToggleLocalPane?: () => void;
   /** Desktop directories sidebar (mobile uses the overlay instead). */
   sidebarOpen?: boolean;
   onToggleSidebar?: () => void;
@@ -226,9 +221,6 @@ export function FileManagerToolbar({
   handleFilesDropped,
   handleCreateNewFolder,
   handleCreateNewFile,
-  showLocalPaneToggle = false,
-  localPaneOpen = false,
-  onToggleLocalPane,
   sidebarOpen = true,
   onToggleSidebar,
 }: FileManagerToolbarProps) {
@@ -370,22 +362,6 @@ export function FileManagerToolbar({
             />
           </div>
 
-          {showLocalPaneToggle && (
-            <Button
-              variant={localPaneOpen ? "secondary" : "ghost"}
-              size="icon"
-              onClick={onToggleLocalPane}
-              title={
-                localPaneOpen
-                  ? t("fileManager.hideLocalFiles")
-                  : t("fileManager.showLocalFiles")
-              }
-              aria-pressed={localPaneOpen}
-              className={`hidden md:inline-flex size-8 rounded-none border border-border ${localPaneOpen ? "bg-accent-brand/10 text-accent-brand border-accent-brand/40" : ""}`}
-            >
-              <Laptop className="size-4" />
-            </Button>
-          )}
 
           <div className="flex items-center border border-border rounded-none overflow-hidden">
             <Button

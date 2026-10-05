@@ -34,11 +34,6 @@ import type { FileItem } from "./host-types";
 import type { CreateIntent } from "./file-manager-types.ts";
 import { formatFileSize } from "./file-manager-utils.ts";
 import {
-  beginRemoteFilesDrag,
-  isLocalFilesDrag,
-  parseLocalFilesDragPayload,
-} from "./local-transfer-utils.ts";
-import {
   useResizableColumns,
   type ResizableColumnSpec,
 } from "./hooks/useResizableColumns.ts";
@@ -70,12 +65,8 @@ const LIST_COLUMNS: ResizableColumnSpec[] = [
 const LIST_COLUMNS_STORAGE_KEY = "termix:file-manager:columns:remote";
 
 interface DragState {
-  /**
-   * internal: rows of this grid being moved around
-   * external: files dragged in from the OS
-   * local: entries dragged from the desktop app's local pane
-   */
-  type: "none" | "internal" | "external" | "local";
+  /** internal: rows moved within the grid; external: browser file uploads. */
+  type: "none" | "internal" | "external";
   files: FileItem[];
   draggedFiles?: FileItem[];
   target?: FileItem;
@@ -93,8 +84,6 @@ interface FileManagerGridProps {
   onUpload?: (files: FileList) => void;
   /** OS drop that contains at least one directory (needs a recursive walk). */
   onUploadItems?: (entries: FileSystemEntry[]) => void;
-  /** Entries dragged from the local pane; `targetDir` when dropped on a folder. */
-  onLocalFilesDrop?: (localPaths: string[], targetDir?: FileItem) => void;
   onDownload?: (files: FileItem[]) => void;
   onContextMenu?: (event: React.MouseEvent, file?: FileItem) => void;
   viewMode?: "grid" | "list";
@@ -110,8 +99,6 @@ interface FileManagerGridProps {
   onUndo?: () => void;
   onFileDrop?: (draggedFiles: FileItem[], targetFile: FileItem) => void;
   onFileDiff?: (file1: FileItem, file2: FileItem) => void;
-  onSystemDragStart?: (files: FileItem[]) => void;
-  onSystemDragEnd?: (e: DragEvent, files: FileItem[]) => void;
   hasClipboard?: boolean;
   createIntent?: CreateIntent | null;
   onConfirmCreate?: (name: string) => void;
@@ -231,7 +218,6 @@ export function FileManagerGrid({
   onRefresh,
   onUpload,
   onUploadItems,
-  onLocalFilesDrop,
   onDownload,
   onContextMenu,
   viewMode = "grid",
@@ -247,7 +233,6 @@ export function FileManagerGrid({
   onUndo,
   onFileDrop,
   onFileDiff,
-  onSystemDragEnd,
   hasClipboard,
   createIntent,
   onConfirmCreate,
@@ -415,10 +400,14 @@ export function FileManagerGrid({
       mousePosition: { x: e.clientX, y: e.clientY },
     });
 
-    beginRemoteFilesDrag(
-      e.dataTransfer,
-      filesToDrag.map((f) => f.path),
+    e.dataTransfer.setData(
+      "text/plain",
+      JSON.stringify({
+        type: "internal_files",
+        files: filesToDrag.map((f) => f.path),
+      }),
     );
+    e.dataTransfer.effectAllowed = "move";
   };
 
   const handleFileDragOver = (e: React.DragEvent, targetFile: FileItem) => {
@@ -431,20 +420,6 @@ export function FileManagerGrid({
     ) {
       setDragState((prev) => ({ ...prev, target: targetFile }));
       e.dataTransfer.dropEffect = "move";
-    } else if (isLocalFilesDrag(e.dataTransfer)) {
-      e.dataTransfer.dropEffect = "copy";
-      const nextTarget =
-        targetFile.type === "directory" ? targetFile : undefined;
-      if (
-        dragState.type !== "local" ||
-        dragState.target?.path !== nextTarget?.path
-      ) {
-        setDragState((prev) => ({
-          ...prev,
-          type: "local",
-          target: nextTarget,
-        }));
-      }
     }
   };
 
@@ -458,25 +433,11 @@ export function FileManagerGrid({
   };
 
   const handleFileDrop = (e: React.DragEvent, targetFile: FileItem) => {
-    // OS drops belong to the pane's upload handler, even over an existing row.
-    if (dragState.type !== "internal" && !isLocalFilesDrag(e.dataTransfer))
-      return;
+    // Browser file drops belong to the pane upload handler. Row drops here
+    // are only internal remote moves/diffs.
+    if (dragState.type !== "internal") return;
     e.preventDefault();
     e.stopPropagation();
-
-    if (isLocalFilesDrag(e.dataTransfer)) {
-      const localPaths = parseLocalFilesDragPayload(
-        e.dataTransfer.getData("text/plain"),
-      );
-      setDragState({ type: "none", files: [], counter: 0 });
-      if (localPaths) {
-        onLocalFilesDrop?.(
-          localPaths,
-          targetFile.type === "directory" ? targetFile : undefined,
-        );
-      }
-      return;
-    }
 
     if (dragState.type !== "internal" || dragState.files.length === 0) {
       setDragState((prev) => ({ ...prev, target: undefined }));
@@ -504,11 +465,8 @@ export function FileManagerGrid({
     setDragState({ type: "none", files: [], counter: 0 });
   };
 
-  const handleFileDragEnd = (e: React.DragEvent) => {
-    const draggedFiles = dragState.draggedFiles || [];
+  const handleFileDragEnd = () => {
     setDragState({ type: "none", files: [], counter: 0 });
-
-    onSystemDragEnd?.(e.nativeEvent, draggedFiles);
   };
 
   const [isSelecting, setIsSelecting] = useState(false);
@@ -532,12 +490,9 @@ export function FileManagerGrid({
       const isInternalDrag = dragState.type === "internal";
 
       if (!isInternalDrag) {
-        const nextType = isLocalFilesDrag(e.dataTransfer)
-          ? "local"
-          : "external";
         setDragState((prev) => ({
           ...prev,
-          type: nextType,
+          type: "external",
           counter: prev.counter + 1,
         }));
       }
@@ -552,10 +507,7 @@ export function FileManagerGrid({
 
       const isInternalDrag = dragState.type === "internal";
 
-      if (
-        !isInternalDrag &&
-        (dragState.type === "external" || dragState.type === "local")
-      ) {
+      if (!isInternalDrag && dragState.type === "external") {
         setDragState((prev) => {
           const newCounter = prev.counter - 1;
           return {
@@ -841,9 +793,6 @@ export function FileManagerGrid({
       // Read everything off dataTransfer before any setState: the browser
       // clears it once the handler unwinds and a state flush can get there
       // first.
-      const localPaths = isLocalFilesDrag(e.dataTransfer)
-        ? parseLocalFilesDragPayload(e.dataTransfer.getData("text/plain"))
-        : null;
       const files = e.dataTransfer.files;
       const entries: FileSystemEntry[] = [];
       if (onUploadItems && e.dataTransfer.items?.length > 0) {
@@ -855,10 +804,6 @@ export function FileManagerGrid({
 
       setDragState({ type: "none", files: [], counter: 0 });
 
-      if (localPaths) {
-        onLocalFilesDrop?.(localPaths);
-        return;
-      }
       if (onUploadItems && entries.some((entry) => entry.isDirectory)) {
         onUploadItems(entries);
         return;
@@ -867,7 +812,7 @@ export function FileManagerGrid({
         onUpload(files);
       }
     },
-    [onUpload, onUploadItems, onLocalFilesDrop, dragState],
+    [onUpload, onUploadItems, dragState],
   );
 
   const handleFileClick = (file: FileItem, event: React.MouseEvent) => {
@@ -1152,7 +1097,7 @@ export function FileManagerGrid({
           className={cn(
             "absolute inset-0 overflow-y-auto thin-scrollbar",
             compact ? "p-2" : "p-4",
-            (dragState.type === "external" || dragState.type === "local") &&
+            dragState.type === "external" &&
               "bg-muted/20 border-2 border-dashed border-primary",
           )}
           onClick={handleGridClick}
@@ -1552,15 +1497,12 @@ export function FileManagerGrid({
             positioned child of a scroll container scrolls away with the
             content, so the hint would land above the viewport whenever the
             list is scrolled down. */}
-        {(dragState.type === "external" ||
-          (dragState.type === "local" && !dragState.target)) && (
+        {dragState.type === "external" && (
           <div className="absolute inset-0 flex items-center justify-center bg-background/50 z-10 pointer-events-none">
             <div className="text-center p-8 bg-card/95 border border-accent-brand/40 flex flex-col items-center gap-4">
               <Upload className="size-12 text-accent-brand" />
               <p className="text-[10px] font-bold uppercase tracking-widest text-accent-brand">
-                {dragState.type === "local"
-                  ? t("fileManager.dropToUploadHere")
-                  : t("fileManager.dragFilesToUpload")}
+                {t("fileManager.dragFilesToUpload")}
               </p>
             </div>
           </div>

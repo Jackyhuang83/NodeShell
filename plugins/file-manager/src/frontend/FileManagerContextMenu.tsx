@@ -57,7 +57,6 @@ interface ContextMenuProps {
   onPaste?: () => void;
   onPreview?: (file: FileItem) => void;
   hasClipboard?: boolean;
-  onDragToDesktop?: () => void;
   onOpenTerminal?: (path: string) => void;
   onRunExecutable?: (file: FileItem) => void;
   onPinFile?: (file: FileItem) => void;
@@ -101,7 +100,6 @@ export function FileManagerContextMenu({
   onPaste,
   onPreview,
   hasClipboard = false,
-  onDragToDesktop,
   onOpenTerminal,
   onRunExecutable,
   onPinFile,
@@ -362,7 +360,7 @@ export function FileManagerContextMenu({
     }
 
     if (
-      (hasFiles && (onPreview || onDragToDesktop)) ||
+      (hasFiles && onPreview) ||
       (isSingleFile &&
         files[0].type === "file" &&
         (onPinFile || onUnpinFile)) ||

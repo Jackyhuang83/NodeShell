@@ -47,7 +47,6 @@ export const CAPABILITY_CATALOG: readonly CapabilityInfo[] = [
   entry("users:impersonate", "high"),
   entry("db:core-refs", "high"),
   entry("auth:provide", "high"),
-  entry("device:serial", "high"),
   entry("notify:hub", "high"),
 
   entry("hosts:write", "medium"),
@@ -60,7 +59,6 @@ export const CAPABILITY_CATALOG: readonly CapabilityInfo[] = [
   entry("events:core", "medium"),
   entry("notify:send", "medium"),
   entry("audit:read", "medium"),
-  entry("desktop:window", "medium"),
 
   entry("hosts:read", "low"),
   entry("db:own", "low"),

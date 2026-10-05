@@ -37,10 +37,6 @@
       "types": "./dist/frontend.d.ts",
       "default": "./dist/frontend.js"
     },
-    "./desktop": {
-      "types": "./dist/desktop.d.ts",
-      "default": "./dist/desktop.js"
-    },
     "./manifest": {
       "types": "./dist/manifest.d.ts",
       "default": "./dist/manifest.js"
