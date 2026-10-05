@@ -37,28 +37,6 @@ async function sessionCookieMaxAge(rememberMe: boolean): Promise<number> {
   return hours * 60 * 60 * 1000;
 }
 
-export async function syncSharedCredentialsForUserRoles(
-  userId: string,
-  operation: string,
-): Promise<void> {
-  try {
-    const { SharedHostSecretsManager } =
-      await import("../utils/shared-host-secrets-manager.js");
-    await SharedHostSecretsManager.getInstance().snapshotForUserRoles(userId);
-    const { SharedCredentialSecretsManager } =
-      await import("../utils/shared-credential-secrets-manager.js");
-    await SharedCredentialSecretsManager.getInstance().snapshotForUserRoles(
-      userId,
-    );
-  } catch (error) {
-    authLogger.warn("Failed to sync role shared host secrets", {
-      operation,
-      userId,
-      error,
-    });
-  }
-}
-
 export interface IssueSessionOptions {
   methodId: string;
   rememberMe: boolean;

@@ -40,25 +40,13 @@ export async function runCoreBootMigrations(): Promise<void> {
     await import("./utils/crypto-migration/dek-migration.js");
   await runBootDekMigration({ cleanupLegacy: true });
 
-  const { runLegacySharedCredentialCleanup } =
-    await import("./utils/crypto-migration/legacy-share-cleanup.js");
-  await runLegacySharedCredentialCleanup();
 
   await AuthManager.getInstance().initialize();
   DataCrypto.initialize();
 
 
-  const { runLegacySharedSshAuthOptInMigration } =
-    await import("./utils/crypto-migration/legacy-shared-ssh-auth-opt-in-migration.js");
-  await runLegacySharedSshAuthOptInMigration();
 
-  const { runSharedHostSecretsMigration } =
-    await import("./utils/crypto-migration/shared-host-secrets-migration.js");
-  await runSharedHostSecretsMigration();
 
-  const { runPrivateSharedSshAuthMigration } =
-    await import("./utils/crypto-migration/private-shared-ssh-auth-migration.js");
-  await runPrivateSharedSshAuthMigration();
 
 
   const { runHostStatusConfigMigration } =

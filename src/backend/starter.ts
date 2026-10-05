@@ -11,7 +11,6 @@ import {
   versionLogger,
   setGlobalLogLevel,
 } from "./utils/logger.js";
-import { getTrustedProxyAuthConfig } from "./utils/trusted-proxy-auth.js";
 
 /**
  * host:port from DATABASE_URL for the startup log. Parsed rather than printed
@@ -82,8 +81,6 @@ function describeDatabaseHost(): string {
       version: version,
     });
 
-    const trustedProxyAuth = getTrustedProxyAuthConfig();
-
     const systemCrypto = SystemCrypto.getInstance();
     await systemCrypto.initializeJWTSecret();
     await systemCrypto.initializeDatabaseKey();
@@ -116,31 +113,6 @@ function describeDatabaseHost(): string {
         : { host: describeDatabaseHost() }),
     });
 
-    if (trustedProxyAuth.enabled) {
-      // Enabled external login methods are refused at runtime instead: their
-      // plugins are not running yet at this point.
-      const { createCurrentUserAuthRepository, createCurrentUserRepository } =
-        await import("./database/repositories/factory.js");
-      const [users, secondFactorUsers] = await Promise.all([
-        createCurrentUserRepository().listAll(),
-        createCurrentUserAuthRepository().listUserIdsWithSecondFactors(),
-      ]);
-      const conflictingUser = users.some(
-        (user) => user.isOidc || secondFactorUsers.has(user.id),
-      );
-      if (process.env.OIDC_CLIENT_ID || conflictingUser) {
-        throw new Error(
-          "Trusted proxy authentication cannot start while OIDC or a second factor is enabled",
-        );
-      }
-      systemLogger.info("Trusted proxy authentication enabled", {
-        operation: "trusted_proxy_auth_enabled",
-        usernameHeader: trustedProxyAuth.usernameHeader,
-        roleHeader: trustedProxyAuth.roleHeader,
-        trustedProxyCount: trustedProxyAuth.trustedProxies.length,
-      });
-    }
-
     const { runCoreBootMigrations } = await import("./boot.js");
     await runCoreBootMigrations();
 
@@ -152,12 +124,6 @@ function describeDatabaseHost(): string {
     const { serverReady } = await import("./database/database.js");
     await serverReady;
 
-    // Before any role is edited: a role may hold a plugin permission whose
-    // plugin is disabled or gone, and PUT /rbac/roles/:id has to keep
-    // accepting it.
-    const { primeKnownPermissions } =
-      await import("./utils/known-permissions.js");
-    await primeKnownPermissions();
     // Bundled plugins own their HTTP/WS routes and lifecycle. Keeping plugin
     // servers out of core startup means disabling a plugin removes its routes.
 
