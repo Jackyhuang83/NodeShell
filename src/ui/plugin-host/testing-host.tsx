@@ -50,12 +50,6 @@ import {
   listKeybindingActions,
   listKeybindingDefaults,
 } from "@/shell/keybinding-registry";
-import {
-  getLoginMethodUI,
-  getSecondFactorUI,
-  listLoginMethodUIs,
-  listSecondFactorUIs,
-} from "./auth-registry";
 import { ActionSlot, ComponentSlot } from "@/shell/ActionSlot";
 import type { Host, Tab } from "@/types/ui-types";
 import { createPluginApp } from "./app";
@@ -246,9 +240,6 @@ export async function renderPlugin(
           (contribution) => contribution.actionId,
         ),
       actions: () => mine(listActions()).map((action) => action.id),
-      loginMethods: () => mine(listLoginMethodUIs()).map((method) => method.id),
-      secondFactors: () =>
-        mine(listSecondFactorUIs()).map((factor) => factor.id),
       paletteGroups: () => mine(listPaletteGroups()).map((group) => group.id),
       keybindingActions: () =>
         mine(listKeybindingActions()).map((action) => action.id),
@@ -363,46 +354,6 @@ export async function renderPlugin(
           {...props}
         />,
       );
-    },
-
-    renderLoginMethod(id, props = {}) {
-      const method = getLoginMethodUI(id) ?? missing("a login method", id);
-      const Component = method.component;
-      return wrap(
-        <Component
-          methodId={id}
-          instances={[]}
-          rememberMe={false}
-          disabled={false}
-          submit={async () => {}}
-          startRedirect={async () => {}}
-          complete={async () => {}}
-          {...props}
-        />,
-      );
-    },
-
-    renderSecondFactor(id, props = {}) {
-      const factor = getSecondFactorUI(id) ?? missing("a second factor", id);
-      const Component = factor.component;
-      return wrap(
-        <Component
-          factorId={id}
-          rememberMe={false}
-          disabled={false}
-          verify={async () => {}}
-          challenge={async () => null}
-          cancel={() => {}}
-          {...props}
-        />,
-      );
-    },
-
-    renderEnrollment(id) {
-      const entry = getSecondFactorUI(id) ?? getLoginMethodUI(id);
-      const Component =
-        entry?.enrollment ?? missing("an enrolment section", id);
-      return wrap(<Component />);
     },
 
     renderSlot(slotId, props = {}) {
