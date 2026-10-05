@@ -78,7 +78,6 @@ import {
   toPortableLogins,
   writeProtocolAuth,
 } from "../hosts/protocol-auth/protocol-auth.js";
-import { parseUserAgent } from "../utils/user-agent-parser.js";
 import type { GitHubRelease, AuthenticatedRequest } from "../../types/index.js";
 import { DatabaseSaveTrigger } from "./db/index.js";
 import Database from "better-sqlite3";
@@ -620,32 +619,16 @@ app.post("/encryption/regenerate-jwt", requireAdmin, async (req, res) => {
 app.post("/database/export", authenticateJWT, async (req, res) => {
   try {
     const userId = (req as AuthenticatedRequest).userId;
-    const deviceInfo = parseUserAgent(req);
-
     const userRepository = createCurrentUserRepository();
     const user = await userRepository.findById(userId);
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    const isOidcUser = !!user.isOidc;
-
     if (!DataCrypto.getUserDataKey(userId)) {
-      if (isOidcUser) {
-        const oidcUnlocked = await authManager.authenticateExternalUser(
-          userId,
-          deviceInfo.type,
-        );
-        if (!oidcUnlocked) {
-          return res.status(403).json({
-            error: "Failed to unlock user data with SSO credentials",
-          });
-        }
-      } else {
-        return res.status(403).json({
-          error: "User data is locked. Please log in again.",
-        });
-      }
+      return res.status(403).json({
+        error: "User data is locked. Please log in again.",
+      });
     }
 
     apiLogger.info("Exporting user data as SQLite", {
@@ -1041,8 +1024,6 @@ app.post(
       }
 
       const userId = (req as AuthenticatedRequest).userId;
-      const deviceInfo = parseUserAgent(req);
-
       const userRepository = createCurrentUserRepository();
       const userRecord = await userRepository.findById(userId);
 
@@ -1050,24 +1031,10 @@ app.post(
         return res.status(404).json({ error: "User not found" });
       }
 
-      const isOidcUser = !!userRecord.isOidc;
-
       if (!DataCrypto.getUserDataKey(userId)) {
-        if (isOidcUser) {
-          const oidcUnlocked = await authManager.authenticateExternalUser(
-            userId,
-            deviceInfo.type,
-          );
-          if (!oidcUnlocked) {
-            return res.status(403).json({
-              error: "Failed to unlock user data with SSO credentials",
-            });
-          }
-        } else {
-          return res.status(403).json({
-            error: "User data is locked. Please log in again.",
-          });
-        }
+        return res.status(403).json({
+          error: "User data is locked. Please log in again.",
+        });
       }
 
       apiLogger.info("Importing SQLite data", {
