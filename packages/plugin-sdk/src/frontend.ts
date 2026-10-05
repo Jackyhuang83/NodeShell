@@ -688,73 +688,11 @@ export interface SshAuthEditorContribution {
   component?: ComponentType<SshAuthEditorProps>;
 }
 
-/** What the login screen hands a login method's UI. */
-export interface LoginMethodUIProps {
-  methodId: string;
-  /** Enabled instances from the server, e.g. one per SSO provider. */
-  instances: Array<{ id: string; label: string }>;
-  rememberMe: boolean;
-  disabled: boolean;
-  /** What the user typed in the username field, when there is one. */
-  username?: string;
-  /**
-   * Form methods: posts the body to the method's verify endpoint, then the
-   * login screen finishes the login or shows the second-factor step.
-   */
-  submit: (body: Record<string, unknown>, instanceId?: string) => Promise<void>;
-  /** Redirect methods: sends the browser (or the system browser) away. */
-  startRedirect: (instanceId?: string) => Promise<void>;
-  /** Hands a login response from a request the UI made itself. */
-  complete: (response: Record<string, unknown>) => Promise<void>;
-}
-
-/**
- * A button or form on the login screen. `id` matches the login method the
- * backend registered with ctx.auth.registerLoginMethod; the screen shows it
- * only while the server reports that method as enabled.
- */
-export interface LoginMethodContribution {
-  id: string;
-  titleKey: string;
-  icon?: IconComponent;
-  component: ComponentType<LoginMethodUIProps>;
-  /**
-   * "inline" also draws the method under the password form, for a local
-   * method people use instead of a password (a passkey). Otherwise it only
-   * shows in the list of other sign-in methods.
-   */
-  placement?: "inline";
-  /** Enrolment, shown in Settings > Security (registering a passkey). */
-  enrollment?: ComponentType<Record<string, unknown>>;
-}
-
 /**
  * How an SSH keyboard-interactive prompt is shown by TOTPDialog: a code field
  * (the default), a password, a menu choice, or a push approval.
  */
 export type MFAPromptMode = "totp" | "password" | "menu" | "push";
-
-/** What the second-factor step hands a factor's UI. */
-export interface SecondFactorUIProps {
-  factorId: string;
-  rememberMe: boolean;
-  disabled: boolean;
-  /** Sends the user's answer; the login screen finishes or shows the error. */
-  verify: (body: Record<string, unknown>) => Promise<void>;
-  /** Whatever the backend factor's challenge() returns. */
-  challenge: () => Promise<unknown>;
-  cancel: () => void;
-}
-
-export interface SecondFactorContribution {
-  /** Matches the id the backend registered with ctx.auth.registerSecondFactor. */
-  id: string;
-  titleKey: string;
-  /** The challenge shown after the first login step. */
-  component: ComponentType<SecondFactorUIProps>;
-  /** Enrolment, shown in Settings > Security. */
-  enrollment?: ComponentType<Record<string, unknown>>;
-}
 
 /** The subset of axios a plugin uses, rooted at /plugin-api/<id>/. */
 export interface PluginApiClient {
@@ -876,8 +814,6 @@ export interface TermixApp extends TermixAppInfo {
     component: ComponentType<Record<string, unknown>>,
   ) => Disposer;
   registerSshAuthEditor: (editor: SshAuthEditorContribution) => Disposer;
-  registerLoginMethod: (method: LoginMethodContribution) => Disposer;
-  registerSecondFactorUI: (factor: SecondFactorContribution) => Disposer;
 
   /**
    * Translates a key from the plugin's own locales, for code outside a
