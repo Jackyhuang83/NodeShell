@@ -50,24 +50,15 @@ export async function verifyPasswordLogin(request: {
     );
   }
 
-  const user = await createCurrentUserRepository().findByUsername(username);
-  if (!user) {
+  const user = await createCurrentUserRepository().findOwner();
+  if (!user || user.username !== username) {
     loginRateLimiter.recordFailedAttempt(clientIp, username);
-    authLogger.warn("Login failed: user not found", {
+    authLogger.warn("Login failed: username is not the NodeShell owner", {
       operation: "user_login",
       username,
       ip: clientIp,
     });
     throw new LoginMethodError("Invalid username or password", 401);
-  }
-
-  if (user.isOidc && (!user.passwordHash || user.passwordHash.trim() === "")) {
-    authLogger.warn("OIDC-only user attempted traditional login", {
-      operation: "user_login",
-      username,
-      userId: user.id,
-    });
-    throw new LoginMethodError("This user uses external authentication", 403);
   }
 
   const isMatch = await bcrypt.compare(password, user.passwordHash);
