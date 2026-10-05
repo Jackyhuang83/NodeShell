@@ -46,11 +46,7 @@ import {
 import { pluginApiFor, pluginFetch, pluginWsUrl } from "@/lib/plugin-transport";
 import { registerPluginComponent } from "./component-registry";
 import type { LucideIcon } from "lucide-react";
-import {
-  registerLoginMethod,
-  registerSecondFactor,
-  registerSshAuthEditor,
-} from "./auth-registry";
+import { registerSshAuthEditor } from "./auth-registry";
 import {
   pluginHostBridge,
   resolvePluginPermission,
@@ -474,34 +470,6 @@ export function createPluginApp(
           hintKey: editor.hintKey ? key(editor.hintKey) : undefined,
           component: editor.component
             ? (scoped(editor.component) as never)
-            : undefined,
-        }),
-      );
-    },
-
-    registerLoginMethod(method) {
-      return track(
-        registerLoginMethod({
-          ...method,
-          titleKey: key(method.titleKey),
-          pluginId,
-          component: scoped(method.component) as never,
-          enrollment: method.enrollment
-            ? (scoped(method.enrollment) as never)
-            : undefined,
-        }),
-      );
-    },
-
-    registerSecondFactorUI(factor) {
-      return track(
-        registerSecondFactor({
-          ...factor,
-          titleKey: key(factor.titleKey),
-          pluginId,
-          component: scoped(factor.component) as never,
-          enrollment: factor.enrollment
-            ? (scoped(factor.enrollment) as never)
             : undefined,
         }),
       );
