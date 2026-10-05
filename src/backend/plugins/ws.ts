@@ -99,20 +99,14 @@ export function parsePluginWsUrl(
   return { pluginId, path };
 }
 
-/**
- * Resolves the user behind an upgrade, or null.
- *
- * A half-authenticated session is not a user: a token still awaiting TOTP is
- * refused here exactly as createAuthMiddleware refuses it for HTTP, so a
- * socket cannot be the way around the second factor.
- */
+/** Resolves the canonical Owner behind an authenticated upgrade, or null. */
 async function verifyToken(request: IncomingMessage): Promise<string | null> {
   const token = extractWebSocketToken(request);
   if (!token) return null;
   try {
     const { AuthManager } = await import("../utils/auth-manager.js");
     const payload = await AuthManager.getInstance().verifyJWTToken(token);
-    if (!payload || payload.pendingTOTP) return null;
+    if (!payload) return null;
     return payload.userId ?? null;
   } catch {
     return null;
