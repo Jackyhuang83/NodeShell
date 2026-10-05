@@ -1,10 +1,8 @@
 /**
  * The one place a login becomes a session: JWT, cookie, response body,
- * audit line and the user_login internal event. Every login method ends here, so
- * they all behave the same way.
+ * audit line and the user_login internal event for the local Owner.
  */
 
-import { isExternalAccount } from "./external-account.js";
 import type { Request, Response } from "express";
 import { AuthManager } from "../utils/auth-manager.js";
 import { authLogger } from "../utils/logger.js";
@@ -12,20 +10,10 @@ import { loginRateLimiter } from "../utils/login-rate-limiter.js";
 import { logAudit, getRequestMeta } from "../utils/audit-logger.js";
 import { parseUserAgent } from "../utils/user-agent-parser.js";
 import { emitInternalEvent } from "../hosts/internal-events.js";
-import {
-  createCurrentSettingsRepository,
-  createCurrentUserAuthRepository,
-} from "../database/repositories/factory.js";
+import { createCurrentSettingsRepository } from "../database/repositories/factory.js";
 import type { UserRecord } from "../database/repositories/user-repository.js";
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-
-export function isNativeAppRequest(req: Request): boolean {
-  return (
-    (req.get("User-Agent") || "").startsWith("Termix-Mobile/") ||
-    req.get("X-Electron-App") === "true"
-  );
-}
 
 /** Cookie lifetime: 30 days when remembered, else session_timeout_hours. */
 async function sessionCookieMaxAge(rememberMe: boolean): Promise<number> {
@@ -42,11 +30,6 @@ export interface IssueSessionOptions {
   rememberMe: boolean;
   /** Username the rate limiter counted attempts under, to clear them. */
   rateLimitUsername?: string;
-  ssoProviderId?: number | null;
-  oidcSub?: string | null;
-  oidcSid?: string | null;
-  /** SSO logins keep desktop and mobile apps signed in for 30 days. */
-  longLivedForApps?: boolean;
 }
 
 export interface IssuedSession {
@@ -71,9 +54,6 @@ export async function issueSession(
     rememberMe: options.rememberMe,
     deviceType: deviceInfo.type,
     deviceInfo: deviceInfo.deviceInfo,
-    oidcSub: options.oidcSub ?? null,
-    oidcSid: options.oidcSid ?? null,
-    ssoProviderId: options.ssoProviderId ?? null,
   });
 
   if (options.rateLimitUsername) {
@@ -104,11 +84,7 @@ export async function issueSession(
     method: options.methodId,
   });
 
-  const maxAge =
-    options.longLivedForApps &&
-    (deviceInfo.type === "desktop" || deviceInfo.type === "mobile")
-      ? THIRTY_DAYS_MS
-      : await sessionCookieMaxAge(options.rememberMe);
+  const maxAge = await sessionCookieMaxAge(options.rememberMe);
 
   return {
     token,
@@ -118,14 +94,10 @@ export async function issueSession(
       is_admin: !!user.isAdmin,
       username: user.username,
       userId: user.id,
-      is_external: isExternalAccount(user),
-      // 2.8 name, kept until 3.0.0.
-      is_oidc: !!user.isOidc,
-      // Any second factor; the name is what 2.8 clients read.
-      totp_enabled: await createCurrentUserAuthRepository().hasSecondFactor(
-        user.id,
-      ),
-      ...(isNativeAppRequest(req) ? { token } : {}),
+      // Compatibility fields stay fixed off in the owner-only runtime.
+      is_external: false,
+      is_oidc: false,
+      totp_enabled: false,
     },
   };
 }
