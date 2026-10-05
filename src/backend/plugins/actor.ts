@@ -6,8 +6,8 @@
  *   - A request. A4's HTTP and WebSocket middleware runs the handler inside
  *     runAsActor with the user core already authenticated, so a route handler
  *     acts as the person who called it.
- *   - ctx.asUser(userId, fn), for background work with no request behind it.
- *     That call is always audited.
+ *   - ctx.asOwner(fn), for background work with no request behind it.
+ *     Core resolves the canonical Owner; plugins cannot name another user.
  *
  * Nothing else. A plugin cannot pass a user id to a guarded ctx method and
  * have it believed, which is what stops the forged-caller class of bug the
@@ -23,7 +23,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 interface ActorStore {
   userId: string;
   /** Where the identity came from, for the audit line. */
-  source: "request" | "asUser" | "service";
+  source: "request" | "owner" | "service";
   /** The session a request came in on, so core can spare it when revoking. */
   sessionId?: string;
 }
