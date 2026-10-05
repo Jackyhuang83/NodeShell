@@ -112,11 +112,8 @@ export interface FakeContextOptions {
    * name, or "<service>#<provider>" for a named provider.
    */
   services?: Record<string, object>;
-  /** Hosts ctx.hosts.list/get/checkAccess answer with. */
+  /** Hosts ctx.hosts.list/get answer with. */
   hosts?: PluginHostSummary[];
-  /** Users and roles ctx.hosts.listUsers/listRoles answer with. */
-  shareableUsers?: PluginShareableUser[];
-  shareableRoles?: PluginShareableRole[];
   /** Hosts ctx.ssh.resolveHost answers with, secrets included. */
   sshHosts?: PluginSshHost[];
   /**
@@ -273,13 +270,6 @@ export interface FakePluginContext {
     host: number | PluginSshHost;
     pool?: string;
     options?: PluginSshConnectOptions;
-  }>;
-  /** Every ctx.hosts.share call, in order. */
-  hostShares: Array<{
-    hostId: number;
-    targets: unknown[];
-    permissionLevel: string;
-    durationHours?: number;
   }>;
   /** Everything registered through ctx.auth. */
   auth: FakeAuthRegistrations;
@@ -483,7 +473,6 @@ export function createFakeContext(
     validator: Parameters<PluginContext["settings"]["onValidate"]>[1];
   }>();
   const sshConnections: FakePluginContext["sshConnections"] = [];
-  const hostShares: FakePluginContext["hostShares"] = [];
   const credentialReads: FakePluginContext["credentialReads"] = [];
   const createdSshKeys: FakePluginContext["createdSshKeys"] = [];
   const notifications: FakePluginContext["notifications"] = [];
@@ -902,17 +891,6 @@ export function createFakeContext(
       listOwned: async (): Promise<PluginHostRecord[]> => [
         ...hostRecordsById.values(),
       ],
-      share: async (
-        hostId,
-        targets,
-        permissionLevel,
-        durationHours,
-      ): Promise<PluginHostShareResult> => {
-        hostShares.push({ hostId, targets, permissionLevel, durationHours });
-        return { hostId, shared: true };
-      },
-      listUsers: async () => options.shareableUsers ?? [],
-      listRoles: async () => options.shareableRoles ?? [],
       trackSession: (hostId) => {
         trackedSessions.push(hostId);
         let active = true;
@@ -1285,7 +1263,6 @@ export function createFakeContext(
     settings,
     coreSettings,
     sshConnections,
-    hostShares,
     auth,
     credentialReads,
     createdSshKeys,
@@ -1348,11 +1325,8 @@ export interface MockContextOptions {
   router?: () => unknown;
   /** Role permissions the acting user holds. See FakeContextOptions. */
   permissions?: string[];
-  /** Hosts ctx.hosts.list/get/checkAccess serve. See FakeContextOptions. */
+  /** Hosts ctx.hosts.list/get serve. See FakeContextOptions. */
   hosts?: PluginHostSummary[];
-  /** Users and roles ctx.hosts.listUsers/listRoles serve. See FakeContextOptions. */
-  shareableUsers?: PluginShareableUser[];
-  shareableRoles?: PluginShareableRole[];
   /** Other plugins' services. See FakeContextOptions. */
   services?: Record<string, object>;
   /** Hosts ctx.ssh.resolveHost serves. See FakeContextOptions. */
@@ -1421,8 +1395,6 @@ export function createMockCtx(
     router: options.router,
     permissions: options.permissions,
     hosts: options.hosts,
-    shareableUsers: options.shareableUsers,
-    shareableRoles: options.shareableRoles,
     sshHosts: options.sshHosts,
     services: options.services,
     protocolTargets: options.protocolTargets,
