@@ -7,16 +7,14 @@
  *   - the first user ever becomes admin and skips the list
  *   - anyone else is only created when SSO auto-provisioning is on
  *   - an admin group, when the provider reports one, keeps admin in step
- *   - a mapped role set, when the provider reports one, keeps roles in step
+ *   - provider role maps are ignored in NodeShell's single-owner model
  */
 
 import { nanoid } from "nanoid";
 import { authLogger } from "../utils/logger.js";
 import { AuthManager } from "../utils/auth-manager.js";
 import { DatabaseSaveTrigger } from "../utils/database-save-trigger.js";
-import { PermissionManager } from "../utils/permission-manager.js";
 import {
-  createCurrentRoleRepository,
   createCurrentSettingsRepository,
   createCurrentUserAuthRepository,
   createCurrentUserRepository,
@@ -81,70 +79,12 @@ async function syncAdmin(
   if (!!user.isAdmin === isAdmin) return user;
   const updated =
     (await createCurrentUserRepository().update(user.id, { isAdmin })) ?? user;
-  try {
-    await createCurrentRoleRepository().switchUserRoleName({
-      userId: user.id,
-      addRoleName: isAdmin ? "admin" : "user",
-      removeRoleName: isAdmin ? "user" : "admin",
-      grantedBy: user.id,
-    });
-  } catch {
-    // Roles follow on the next sign-in; the admin flag itself is saved.
-  }
   authLogger.info("Admin status synced from the identity provider", {
     operation: "external_admin_sync",
     userId: user.id,
     isAdmin,
   });
   return updated;
-}
-
-/**
- * Adds and removes the roles a provider's group map manages. Roles assigned
- * by hand, and roles outside the map, are never touched.
- */
-async function applyRoleSync(
-  userId: string,
-  roleSync: { desired: string[]; managed: string[] },
-): Promise<void> {
-  const desired = new Set(roleSync.desired);
-  const managed = new Set(roleSync.managed);
-  const roleRepository = createCurrentRoleRepository();
-  const currentRoles = await roleRepository.listUserRoles(userId);
-  const currentNames = new Set(currentRoles.map((role) => role.roleName));
-
-  const toAdd = [...desired].filter((name) => !currentNames.has(name));
-  const toRemove = currentRoles.filter(
-    (role) => managed.has(role.roleName) && !desired.has(role.roleName),
-  );
-
-  for (const roleName of toAdd) {
-    const assigned = await roleRepository.assignRoleNameToUser({
-      userId,
-      roleName,
-      grantedBy: userId,
-    });
-    if (!assigned) {
-      authLogger.warn("Role map references a role that does not exist", {
-        operation: "external_role_map_missing_role",
-        userId,
-        roleName,
-      });
-    }
-  }
-  for (const role of toRemove) {
-    await roleRepository.removeRoleFromUser(userId, role.roleId);
-  }
-
-  if (toAdd.length > 0 || toRemove.length > 0) {
-    authLogger.info("Roles synced from provider group membership", {
-      operation: "external_role_map_sync",
-      userId,
-      added: toAdd,
-      removed: toRemove.map((role) => role.roleName),
-    });
-    PermissionManager.getInstance().invalidateUserPermissionCache(userId);
-  }
 }
 
 async function findLinkedUser(
@@ -235,25 +175,6 @@ async function createUser(
       identity.legacyIdentifier ?? `${identity.provider}:${identity.subject}`,
     ssoProviderId: identity.ssoProviderId ?? null,
   });
-
-  try {
-    const assigned = await createCurrentRoleRepository().assignRoleNameToUser({
-      userId: id,
-      roleName: created.user.isAdmin ? "admin" : "user",
-      grantedBy: id,
-    });
-    if (!assigned) {
-      authLogger.warn("Default role not found for a provisioned user", {
-        operation: "external_default_role",
-        userId: id,
-      });
-    }
-  } catch (roleError) {
-    authLogger.error("Failed to assign a default role", roleError, {
-      operation: "external_default_role",
-      userId: id,
-    });
-  }
 
   try {
     const sessionDurationMs =
@@ -360,16 +281,6 @@ export async function findOrProvisionExternalUser(
     }
   }
 
-  if (identity.roleSync) {
-    try {
-      await applyRoleSync(user.id, identity.roleSync);
-    } catch (roleSyncError) {
-      authLogger.error("Failed to sync roles from provider", roleSyncError, {
-        operation: "external_role_map_sync_failed",
-        userId: user.id,
-      });
-    }
-  }
 
   return user;
 }

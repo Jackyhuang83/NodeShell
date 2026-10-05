@@ -4,7 +4,6 @@
 
 import { getCurrentSettingValue } from "../database/repositories/factory.js";
 import { authLogger } from "../utils/logger.js";
-import { isTrustedProxyAuthEnabled } from "../utils/trusted-proxy-auth.js";
 import { registerPasswordLoginMethod } from "./builtin-login-methods.js";
 import { listLoginMethods } from "./registry.js";
 import { LoginMethodError } from "./types.js";
@@ -36,19 +35,10 @@ function isPasswordLoginSettingOn(): boolean {
 }
 
 /**
- * Refuses a new second-factor enrolment when core could not honour it: with
- * trusted proxy login on the proxy decides who signs in, and with password
- * login off users sign in through external methods that skip second factors
- * by default.
+ * Refuses a new second-factor enrolment when password login is disabled.
+ * External login methods may skip the local second-factor flow.
  */
 export function assertSecondFactorEnrollmentAllowed(): void {
-  if (isTrustedProxyAuthEnabled()) {
-    throw new LoginMethodError(
-      "Second factors are disabled while trusted proxy authentication is enabled",
-      409,
-      "trusted_proxy_enabled",
-    );
-  }
   if (!isPasswordLoginSettingOn()) {
     throw new LoginMethodError(
       "Cannot enable 2FA while password login is disabled. Enable password login first.",
@@ -74,11 +64,9 @@ export function isSecondFactorAfterExternalLoginEnabled(): boolean {
 }
 
 /**
- * Whether anyone could still sign in without a password: trusted proxy auth,
- * or a login method reporting an enabled instance (an SSO provider).
+ * Whether another enabled login method (for example SSO) can still sign in.
  */
 async function hasOtherEnabledLoginMethod(): Promise<boolean> {
-  if (isTrustedProxyAuthEnabled()) return true;
   ensureCoreLoginProviders();
   for (const method of listLoginMethods()) {
     if (method.id === "password" || !method.describe) continue;

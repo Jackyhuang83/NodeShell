@@ -4,10 +4,7 @@ import bcrypt from "bcryptjs";
 import { AuthManager } from "../../utils/auth-manager.js";
 import { SystemCrypto } from "../../utils/system-crypto.js";
 import { authLogger } from "../../utils/logger.js";
-import {
-  createCurrentRoleRepository,
-  createCurrentUserRepository,
-} from "../repositories/factory.js";
+import { createCurrentUserRepository } from "../repositories/factory.js";
 import { isLoopbackRequest } from "../../utils/loopback-request.js";
 import { resetUserPassword } from "./user-password-reset-routes.js";
 
@@ -109,16 +106,6 @@ router.post("/create-owner", async (req, res) => {
       });
     }
 
-    const roleAssigned =
-      await createCurrentRoleRepository().assignRoleNameToUser({
-        userId: id,
-        roleName: "admin",
-        grantedBy: id,
-      });
-    if (!roleAssigned) {
-      await userRepository.delete(id);
-      throw new Error("Admin role is unavailable");
-    }
 
     await AuthManager.getInstance().registerUser(id, password);
 

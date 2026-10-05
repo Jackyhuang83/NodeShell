@@ -8,10 +8,6 @@ import { databaseLogger } from "../../utils/logger.js";
 import { DatabaseFileEncryption } from "../../utils/database-file-encryption.js";
 import { SystemCrypto } from "../../utils/system-crypto.js";
 import { DatabaseMigration } from "../../utils/database-migration.js";
-import {
-  ensureSharedHostAuthOverrideProtocolSchema,
-  migrateLegacySharedHostAuthOverrides,
-} from "../../utils/shared-host-auth-override-migration.js";
 import { DatabaseSaveTrigger } from "../../utils/database-save-trigger.js";
 import { migrateAuditRetention } from "../../utils/audit-retention-migration.js";
 import { createPerformanceIndexes } from "./performance-indexes.js";
@@ -1107,27 +1103,6 @@ const migrateSchema = () => {
     }
   }
 
-  try {
-    ensureSharedHostAuthOverrideProtocolSchema(sqlite);
-  } catch (schemaError) {
-    databaseLogger.warn("Failed to prepare shared_host_auth_overrides table", {
-      operation: "schema_migration",
-      error: schemaError,
-    });
-  }
-
-  try {
-    migrateLegacySharedHostAuthOverrides(
-      sqlite,
-      getRawSettingValue,
-      setRawSettingValue,
-    );
-  } catch (migrateError) {
-    databaseLogger.warn("Failed to migrate shared host auth overrides", {
-      operation: "schema_migration",
-      error: migrateError,
-    });
-  }
 
   try {
     sqlite.prepare("SELECT credential_id FROM ssh_folders LIMIT 1").get();

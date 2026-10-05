@@ -23,7 +23,6 @@ import {
   listLoginMethods,
   type LoginMethod,
 } from "../../auth/registry.js";
-import { isTrustedProxyAuthEnabled } from "../../utils/trusted-proxy-auth.js";
 import { LoginMethodError, type VerifiedIdentity } from "../../auth/types.js";
 
 export interface PublicLoginMethod {
@@ -132,19 +131,6 @@ function instanceParam(req: Request): string | null {
   return typeof value === "string" && value ? value : null;
 }
 
-/**
- * Trusted proxy login and external methods don't mix: the proxy already
- * decided who the user is.
- */
-function refusedByTrustedProxy(method: LoginMethod, res: Response): boolean {
-  if (!method.external || !isTrustedProxyAuthEnabled()) return false;
-  res.status(409).json({
-    error:
-      "External login is disabled while trusted proxy authentication is enabled",
-  });
-  return true;
-}
-
 function methodOr404(req: Request, res: Response, id?: string) {
   ensureCoreLoginProviders();
   const method = getLoginMethod(id ?? String(req.params.methodId));
@@ -152,7 +138,6 @@ function methodOr404(req: Request, res: Response, id?: string) {
     res.status(404).json({ error: "Unknown login method" });
     return null;
   }
-  if (refusedByTrustedProxy(method, res)) return null;
   return method;
 }
 
@@ -165,7 +150,6 @@ export async function handleRedirectCallback(
   req: Request,
   res: Response,
 ): Promise<void> {
-  if (refusedByTrustedProxy(method, res)) return;
   if (!method.callback) {
     res.status(400).json({ error: "Not a redirect login method" });
     return;
