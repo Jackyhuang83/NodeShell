@@ -574,13 +574,11 @@ export function createTunnelManager(ctx: PluginContext) {
     }
     let allowed = false;
     try {
-      const access =
+      const host =
         ctx.currentActor() === userId
-          ? await ctx.hosts.checkAccess(hostId, "connect")
-          : await ctx.asUser(userId, () =>
-              ctx.hosts.checkAccess(hostId, "connect"),
-            );
-      allowed = access.hasAccess;
+          ? await ctx.hosts.get(hostId)
+          : await ctx.asUser(userId, () => ctx.hosts.get(hostId));
+      allowed = !!host;
     } catch {
       allowed = false;
     }

@@ -10,7 +10,6 @@ import {
 } from "@termix/plugin-sdk/testing";
 import type {
   PluginContext,
-  PluginHostAccess,
   PluginHostSummary,
 } from "@termix/plugin-sdk/backend";
 import type { PluginManifest } from "@termix/plugin-sdk/manifest";
@@ -51,17 +50,6 @@ export function withHosts(
   Object.assign(hosts, {
     list: async () => reachable(),
     get: async (id: number) => reachable().find((h) => h.id === id) ?? null,
-    checkAccess: async (id: number): Promise<PluginHostAccess> => {
-      const found = reachable().find((h) => h.id === id);
-      return found
-        ? {
-            hasAccess: true,
-            isOwner: found.userId === mock.ctx.currentActor(),
-            isShared: false,
-            permissionLevel: "manage",
-          }
-        : { hasAccess: false, isOwner: false, isShared: false };
-    },
   });
 }
 

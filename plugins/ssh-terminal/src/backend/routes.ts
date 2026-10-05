@@ -590,8 +590,8 @@ export function registerTerminalRoutes(
       return res.status(400).json({ error: "Invalid host or value" });
     }
     try {
-      const access = await ctx.hosts.checkAccess(hostId, "edit");
-      if (!access.hasAccess) {
+      const host = await ctx.hosts.get(hostId);
+      if (!host) {
         return res.status(403).json({ error: "Access denied to host" });
       }
       await ctx.settings.setHost(hostId, HOST_KEYS.autoTmux, enabled);

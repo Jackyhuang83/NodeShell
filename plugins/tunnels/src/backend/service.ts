@@ -131,8 +131,7 @@ export function createTunnelsService(
       const targetHost = target.targetHost?.trim();
       if (!targetHost) throw new Error("Invalid target host");
 
-      const access = await ctx.hosts.checkAccess(sourceHostId, "connect");
-      const host = access.hasAccess ? await ctx.hosts.get(sourceHostId) : null;
+      const host = await ctx.hosts.get(sourceHostId);
       if (!host) throw new Error("Host not found or access denied");
 
       const name =

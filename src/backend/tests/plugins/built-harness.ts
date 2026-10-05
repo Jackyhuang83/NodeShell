@@ -185,10 +185,6 @@ export async function bootCore(source: BootSource): Promise<BootedCore> {
 
   await runCoreBootMigrations();
 
-  const { primeKnownPermissions } =
-    await import("../../utils/known-permissions.js");
-  await primeKnownPermissions();
-
   const { initializePlugins, shutdownPlugins } =
     await import("../../plugins/index.js");
   await initializePlugins();

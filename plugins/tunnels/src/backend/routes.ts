@@ -174,8 +174,7 @@ export function registerTunnelRoutes(
         .json({ error: "Tunnel configuration does not match tunnel name" });
     }
 
-    const access = await ctx.hosts.checkAccess(sourceHostId, "connect");
-    const host = access.hasAccess ? await ctx.hosts.get(sourceHostId) : null;
+    const host = await ctx.hosts.get(sourceHostId);
     if (!host) {
       return res.status(403).json({ error: "Access denied to this host" });
     }
