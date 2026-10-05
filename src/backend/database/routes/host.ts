@@ -847,7 +847,7 @@ router.put(
         await applyProtocolAuthPlan(ownerId, Number(hostId), protocolAuthPlan);
       }
 
-      const updatedHost =      const updatedHost =
+      const updatedHost =
         await createCurrentHostResolutionRepository().findHostById(
           Number(hostId),
           ownerId,
