@@ -6,7 +6,6 @@
 import bcrypt from "bcryptjs";
 import { authLogger } from "../utils/logger.js";
 import { loginRateLimiter } from "../utils/login-rate-limiter.js";
-import { isTrustedProxyAuthEnabled } from "../utils/trusted-proxy-auth.js";
 import { createCurrentUserRepository } from "../database/repositories/factory.js";
 import { getPasswordLoginStatus } from "./core-auth.js";
 import { registerLoginMethod, type LoginMethod } from "./registry.js";
@@ -21,13 +20,6 @@ export async function verifyPasswordLogin(request: {
   ip?: string;
   socket?: { remoteAddress?: string };
 }): Promise<VerifiedIdentity & { rateLimitUsername: string }> {
-  if (isTrustedProxyAuthEnabled()) {
-    throw new LoginMethodError(
-      "Password login is disabled while trusted proxy authentication is enabled",
-      403,
-    );
-  }
-
   const { username, password } = request.body;
   const clientIp = request.ip || request.socket?.remoteAddress || "unknown";
 
