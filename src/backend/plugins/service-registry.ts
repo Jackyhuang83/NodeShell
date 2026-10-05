@@ -122,8 +122,7 @@ export class PluginServiceActorError extends Error {
 
   constructor(service: string) {
     super(
-      `A call to "${service}" has no acting user. Pass one with ` +
-        `ctx.services.get(name, { userId }) or handle.asUser(userId).`,
+      `A call to "${service}" has no acting user. Run it inside an authenticated request or ctx.asOwner().`,
     );
     this.name = "PluginServiceActorError";
   }
@@ -309,8 +308,6 @@ function recordUnsatisfied(
 export interface ServiceCallContext {
   /** Resolves the user this call acts as. */
   resolveUserId: () => string | undefined;
-  /** Called when a handle is bound to a named user with asUser(). */
-  nameUser?: (userId: string) => void;
   /** Checks a role permission for a user. */
   hasPermission: (userId: string, permission: string) => Promise<boolean>;
   /**
@@ -355,22 +352,6 @@ export function createServiceHandle<T extends object>(
   return new Proxy(target, {
     get(_target, property) {
       if (typeof property !== "string") return undefined;
-
-      if (property === "asUser") {
-        return (userId: string) =>
-          createServiceHandle<T>(
-            service,
-            consumerPluginId,
-            {
-              ...context,
-              resolveUserId: () => {
-                context.nameUser?.(userId);
-                return userId;
-              },
-            },
-            name,
-          );
-      }
 
       // Resolved at call time, not here: the provider may have gone away
       // between taking the handle and using it. A method that WAS reachable
