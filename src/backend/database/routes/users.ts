@@ -13,7 +13,6 @@ import { parseUserAgent } from "../../utils/user-agent-parser.js";
 import { deleteUserAndRelatedData } from "./delete-user-data.js";
 import { shouldShowDonationModal } from "./donation-modal-utils.js";
 import { PermissionManager } from "../../utils/permission-manager.js";
-import { registerUserApiKeyRoutes } from "./user-api-key-routes.js";
 import { registerBrandingRoutes } from "./branding-routes.js";
 import { registerUserSettingsRoutes } from "./user-settings-routes.js";
 import { registerTlsRoutes } from "./tls-routes.js";
@@ -1260,7 +1259,6 @@ registerUserExternalAccountRoutes(router, {
 registerUserSettingsRoutes(router, authenticateJWT);
 registerTlsRoutes(router, authenticateJWT);
 
-registerUserApiKeyRoutes(router, requireAdmin);
 registerBrandingRoutes(router, requireAdmin);
 
 registerAuthRoutes(router);
