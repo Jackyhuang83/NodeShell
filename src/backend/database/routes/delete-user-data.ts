@@ -10,17 +10,12 @@ import {
   createCurrentUiPreferenceRepository,
   createCurrentOpenTabRepository,
   createCurrentRecentActivityRepository,
-  createCurrentRbacAccessRepository,
-  createCurrentRoleRepository,
   createCurrentSessionRepository,
   createCurrentSettingsRepository,
-  createCurrentSharedHostSecretsRepository,
   createCurrentSshCredentialUsageRepository,
   createCurrentTrustedDeviceRepository,
   createCurrentUserPreferenceRepository,
   createCurrentUserRepository,
-  createCurrentSharedCredentialSecretsRepository,
-  createCurrentCredentialAccessRepository,
 } from "../repositories/factory.js";
 
 export async function deleteUserAndRelatedData(
@@ -36,30 +31,16 @@ export async function deleteUserAndRelatedData(
       await transferOwnership(userId, options.successorUserId);
     }
 
-    await createCurrentSharedHostSecretsRepository().deleteByTargetUserId(
-      userId,
-    );
-    await createCurrentSharedCredentialSecretsRepository().deleteByTargetUserId(
-      userId,
-    );
-    await createCurrentCredentialAccessRepository().deleteForUserReferences(
-      userId,
-    );
 
     // Plugins drop or anonymize their own rows on user.deleted, or rely on
     // their refUser() foreign keys cascading.
     const { pluginEvents, TOPICS } = await import("../../plugins/events.js");
     pluginEvents.emit(TOPICS.userDeleted, { userId });
 
-    await createCurrentRbacAccessRepository().deleteHostAccessForUserReferences(
-      userId,
-    );
 
     await createCurrentSessionRepository().revokeAllForUser(userId);
     await createCurrentApiKeyRepository().deleteByUserId(userId);
     await createCurrentTrustedDeviceRepository().deleteByUserId(userId);
-
-    await createCurrentRoleRepository().removeAllRolesFromUser(userId);
     await createCurrentAuditLogRepository().anonymizeByUserId(userId);
 
     await createCurrentSshCredentialUsageRepository().deleteByUserId(userId);

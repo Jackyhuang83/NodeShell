@@ -20,18 +20,10 @@ import { HostDefaultsRepository } from "./host-defaults-repository.js";
 import { PluginMigrationRepository } from "./plugin-migration-repository.js";
 import { PluginPermissionGrantRepository } from "./plugin-permission-grant-repository.js";
 import { UserAuthRepository } from "./user-auth-repository.js";
-import { RbacAccessRepository } from "./rbac-access-repository.js";
-import { RbacPermissionRepository } from "./rbac-permission-repository.js";
 import { RecentActivityRepository } from "./recent-activity-repository.js";
-import { RoleRepository } from "./role-repository.js";
 import { SessionRepository } from "./session-repository.js";
-import { CredentialAccessRepository } from "./credential-access-repository.js";
-import { SharedCredentialSecretsRepository } from "./shared-credential-secrets-repository.js";
-import { FolderAccessRepository } from "./folder-access-repository.js";
 import { SettingsRepository } from "./settings-repository.js";
 import { HostProtocolAuthRepository } from "./host-protocol-auth-repository.js";
-import { SharedHostAuthOverrideRepository } from "./shared-host-auth-override-repository.js";
-import { SharedHostSecretsRepository } from "./shared-host-secrets-repository.js";
 import { SshCredentialUsageRepository } from "./ssh-credential-usage-repository.js";
 import { TrustedDeviceRepository } from "./trusted-device-repository.js";
 import { UserDataExportRepository } from "./user-data-export-repository.js";
@@ -246,19 +238,7 @@ export function createCurrentPluginMigrationRepository(): PluginMigrationReposit
   );
 }
 
-export function createCurrentRbacPermissionRepository(): RbacPermissionRepository {
-  return new RbacPermissionRepository(
-    createCurrentRepositoryContext(),
-    createCurrentRepositoryWriteHook("rbac_permission_repository_write"),
-  );
-}
 
-export function createCurrentRbacAccessRepository(): RbacAccessRepository {
-  return new RbacAccessRepository(
-    createCurrentRepositoryContext(),
-    createCurrentRepositoryWriteHook("rbac_access_repository_write"),
-  );
-}
 
 export function createCurrentRecentActivityRepository(): RecentActivityRepository {
   return new RecentActivityRepository(
@@ -267,12 +247,6 @@ export function createCurrentRecentActivityRepository(): RecentActivityRepositor
   );
 }
 
-export function createCurrentRoleRepository(): RoleRepository {
-  return new RoleRepository(
-    createCurrentRepositoryContext(),
-    createCurrentRepositoryWriteHook("role_repository_write"),
-  );
-}
 
 export function createCurrentSessionRepository(): SessionRepository {
   return new SessionRepository(
@@ -288,12 +262,6 @@ export function createCurrentSettingsRepository(): SettingsRepository {
   );
 }
 
-export function createCurrentSharedHostSecretsRepository(): SharedHostSecretsRepository {
-  return new SharedHostSecretsRepository(
-    createCurrentRepositoryContext(),
-    createCurrentRepositoryWriteHook("shared_host_secrets_repository_write"),
-  );
-}
 
 export function createCurrentHostProtocolAuthRepository(): HostProtocolAuthRepository {
   return new HostProtocolAuthRepository(
@@ -302,14 +270,6 @@ export function createCurrentHostProtocolAuthRepository(): HostProtocolAuthRepos
   );
 }
 
-export function createCurrentSharedHostAuthOverrideRepository(): SharedHostAuthOverrideRepository {
-  return new SharedHostAuthOverrideRepository(
-    createCurrentRepositoryContext(),
-    createCurrentRepositoryWriteHook(
-      "shared_host_auth_override_repository_write",
-    ),
-  );
-}
 
 export function createCurrentSshCredentialUsageRepository(): SshCredentialUsageRepository {
   return new SshCredentialUsageRepository(
@@ -343,28 +303,8 @@ export function createCurrentUserRepository(): UserRepository {
   );
 }
 
-export function createCurrentFolderAccessRepository(): FolderAccessRepository {
-  return new FolderAccessRepository(
-    createCurrentRepositoryContext(),
-    createCurrentRepositoryWriteHook("folder_access_repository_write"),
-  );
-}
 
-export function createCurrentCredentialAccessRepository(): CredentialAccessRepository {
-  return new CredentialAccessRepository(
-    createCurrentRepositoryContext(),
-    createCurrentRepositoryWriteHook("credential_access_repository_write"),
-  );
-}
 
-export function createCurrentSharedCredentialSecretsRepository(): SharedCredentialSecretsRepository {
-  return new SharedCredentialSecretsRepository(
-    createCurrentRepositoryContext(),
-    createCurrentRepositoryWriteHook(
-      "shared_credential_secrets_repository_write",
-    ),
-  );
-}
 
 /**
  * Loads the settings cache. Must run during startup on engines without a
