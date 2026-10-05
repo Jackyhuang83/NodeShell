@@ -1029,37 +1029,6 @@ export function createFakeContext(
       removeEnrollment: async (userId, factorId) => {
         auth.enrollments.delete(`${userId}:${factorId}`);
       },
-      // Stands in for core's pipeline: answers with the identity as JSON, or
-      // redirects back with the error the way core does.
-      completeRedirectLogin: async (methodId, req, res) => {
-        const response = res as FakeResponse;
-        const method = auth.loginMethods.find(
-          (candidate) => candidate.id === methodId,
-        );
-        if (!method?.callback) {
-          throw new Error(`No registered redirect method "${methodId}"`);
-        }
-        try {
-          const identity = await method.callback(req as PluginLoginRequest);
-          auth.completedLogins.push({ methodId, identity });
-          response.status(200).json({ completed: methodId, identity });
-        } catch (error) {
-          const returnTo = (error as { returnTo?: string }).returnTo;
-          const message = (error as Error).message;
-          if (returnTo) {
-            const url = new URL(returnTo);
-            url.searchParams.set(
-              "error",
-              (error as { code?: string }).code ?? message,
-            );
-            response.redirect(url.toString());
-            return;
-          }
-          response
-            .status((error as { status?: number }).status ?? 500)
-            .json({ error: message });
-        }
-      },
       revokeSessions: async (match) => {
         if (!match.sub && !match.sid) return 0;
         auth.revokedSessions.push(match);
@@ -1658,10 +1627,6 @@ export function createMockCtx(
       removeEnrollment: async (userId, factorId) => {
         require("auth:provide");
         return ctx.auth.removeEnrollment(userId, factorId);
-      },
-      completeRedirectLogin: async (methodId, req, res) => {
-        require("auth:provide");
-        return ctx.auth.completeRedirectLogin(methodId, req, res);
       },
       revokeSessions: async (match) => {
         require("auth:provide");
