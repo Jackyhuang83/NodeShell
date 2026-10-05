@@ -516,12 +516,6 @@ export interface PluginHttpContribution {
    * Core routes win a clash.
    */
   legacyRedirects?: PluginLegacyRedirect[];
-  /**
-   * An admin may call this plugin's routes on behalf of another user with
-   * the X-Admin-Target-User header (the admin "manage user" panel). Without
-   * it core refuses the header on every route under /plugin-api/<id>/.
-   */
-  adminImpersonation?: boolean;
 }
 
 export interface PluginLegacyRedirect {
@@ -1444,18 +1438,10 @@ function validateHttpContribution(
   }
   rejectUnknown(
     value,
-    ["legacyPaths", "legacyRedirects", "adminImpersonation"],
+    ["legacyPaths", "legacyRedirects"],
     "contributes.http",
     errors,
   );
-  if (
-    value.adminImpersonation !== undefined &&
-    typeof value.adminImpersonation !== "boolean"
-  ) {
-    errors.push(
-      'Field "contributes.http.adminImpersonation" must be a boolean',
-    );
-  }
   validateLegacyRedirects(value.legacyRedirects, errors);
   const paths = value.legacyPaths;
   if (paths === undefined) return;
