@@ -1,6 +1,6 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
-import { hostAccess, hosts, pluginSettings } from "../db/schema.js";
+import { hosts, pluginSettings } from "../db/schema.js";
 import type { DatabaseContext } from "./database-context.js";
 import { DataCrypto } from "../../utils/data-crypto.js";
 import { rowsAffected } from "./mutation-result.js";
@@ -353,9 +353,8 @@ export class HostRepository {
 
   async deleteAccessForHost(hostId: number): Promise<number> {
     // plugin_settings.scope_id is polymorphic, so it has no foreign key to
-    // ssh_data and the engine will not cascade it. Cleared alongside the
-    // access rows, which every host delete path already goes through.
-    await this.context.drizzle
+    // ssh_data and the engine will not cascade it.
+    const result = await this.context.drizzle
       .delete(pluginSettings)
       .where(
         and(
@@ -363,10 +362,6 @@ export class HostRepository {
           eq(pluginSettings.scopeId, String(hostId)),
         ),
       );
-
-    const result = await this.context.drizzle
-      .delete(hostAccess)
-      .where(eq(hostAccess.hostId, hostId));
 
     if (rowsAffected(result) > 0) {
       await this.afterWrite();
