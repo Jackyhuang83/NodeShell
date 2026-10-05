@@ -1906,18 +1906,6 @@ export interface RenderedPluginApp {
     componentId: string,
     props?: Record<string, unknown>,
   ) => HTMLElement;
-  /** Renders a login method's UI with login screen props, overridable. */
-  renderLoginMethod: (
-    id: string,
-    props?: Record<string, unknown>,
-  ) => HTMLElement;
-  /** Renders a second factor's challenge with overridable props. */
-  renderSecondFactor: (
-    id: string,
-    props?: Record<string, unknown>,
-  ) => HTMLElement;
-  /** Renders the Settings > Security section a factor or method brought. */
-  renderEnrollment: (id: string) => HTMLElement;
   /** Renders a slot the way its owner would. */
   renderSlot: (slotId: string, props?: Record<string, unknown>) => HTMLElement;
   /** Runs deactivate and every disposer, as disabling the plugin does. */
