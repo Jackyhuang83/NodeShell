@@ -281,7 +281,6 @@ async function registerPluginPermissions(plugin: LoadedPlugin): Promise<void> {
   try {
     const {
       registerPluginPermissions: register,
-      PERMISSION_CATALOG,
       getPermissionCatalog,
     } = await import("../utils/permission-catalog.js");
     const { qualifyPermission, RESERVED_PERMISSION_PREFIXES } =
@@ -290,10 +289,7 @@ async function registerPluginPermissions(plugin: LoadedPlugin): Promise<void> {
     // The manifest validator blocks core groups and the plugin's own id, but
     // it cannot know which other plugins exist. Re-checked here because the
     // stored manifest is data.
-    const coreGroups = new Set<string>([
-      ...RESERVED_PERMISSION_PREFIXES,
-      ...PERMISSION_CATALOG.map((entry) => entry.group),
-    ]);
+    const coreGroups = new Set<string>(RESERVED_PERMISSION_PREFIXES);
     // Both the loaded plugins and any namespace already in the catalog: a
     // disabled plugin still owns its permissions, so claiming them while it is
     // off would let the namespace change hands.
