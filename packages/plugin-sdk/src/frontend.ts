@@ -1636,5 +1636,3 @@ export function useConnectionRetry({
 export type { PluginManifest } from "./manifest.js";
 export type { ReactNode };
 
-// The desktop bridge types, and the window.electronAPI global they declare.
-export type * from "./desktop.js";
