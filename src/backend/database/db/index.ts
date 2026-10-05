@@ -15,7 +15,6 @@ import {
   assertDataDirIsNotMisconfigured,
   DataDirMisconfiguredError,
 } from "../../utils/data-dir-guard.js";
-import { SYSTEM_ROLE_DEFAULTS } from "../../utils/permission-catalog.js";
 import type { PortableDatabase } from "../repositories/database-context.js";
 
 const dataDir = process.env.DATA_DIR || "./db/data";
@@ -363,45 +362,6 @@ async function initializeCompleteDatabase(): Promise<void> {
         FOREIGN KEY (host_id) REFERENCES ssh_data (id) ON DELETE CASCADE
     );
 
-    CREATE TABLE IF NOT EXISTS host_access (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        host_id INTEGER NOT NULL,
-        user_id TEXT,
-        role_id INTEGER,
-        granted_by TEXT NOT NULL,
-        permission_level TEXT NOT NULL DEFAULT 'use',
-        expires_at TEXT,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        last_accessed_at TEXT,
-        access_count INTEGER NOT NULL DEFAULT 0,
-        FOREIGN KEY (host_id) REFERENCES ssh_data (id) ON DELETE CASCADE,
-        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-        FOREIGN KEY (role_id) REFERENCES roles (id) ON DELETE CASCADE,
-        FOREIGN KEY (granted_by) REFERENCES users (id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS roles (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE,
-        display_name TEXT NOT NULL,
-        description TEXT,
-        is_system INTEGER NOT NULL DEFAULT 0,
-        permissions TEXT,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS user_roles (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL,
-        role_id INTEGER NOT NULL,
-        granted_by TEXT,
-        granted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(user_id, role_id),
-        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-        FOREIGN KEY (role_id) REFERENCES roles (id) ON DELETE CASCADE,
-        FOREIGN KEY (granted_by) REFERENCES users (id) ON DELETE SET NULL
-    );
 
     CREATE TABLE IF NOT EXISTS audit_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -420,62 +380,6 @@ async function initializeCompleteDatabase(): Promise<void> {
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
     );
 
-    CREATE TABLE IF NOT EXISTS credential_access (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        credential_id INTEGER NOT NULL,
-        user_id TEXT,
-        role_id INTEGER,
-        granted_by TEXT NOT NULL,
-        permission_level TEXT NOT NULL DEFAULT 'use',
-        expires_at TEXT,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (credential_id) REFERENCES ssh_credentials (id) ON DELETE CASCADE,
-        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-        FOREIGN KEY (role_id) REFERENCES roles (id) ON DELETE CASCADE,
-        FOREIGN KEY (granted_by) REFERENCES users (id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_credential_access_user_id ON credential_access (user_id);
-    CREATE INDEX IF NOT EXISTS idx_credential_access_role_id ON credential_access (role_id);
-    CREATE INDEX IF NOT EXISTS idx_credential_access_credential_id ON credential_access (credential_id);
-
-    CREATE TABLE IF NOT EXISTS shared_credential_secrets (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        credential_access_id INTEGER NOT NULL,
-        target_user_id TEXT NOT NULL,
-        credential_id INTEGER NOT NULL,
-        encrypted_username TEXT,
-        auth_type TEXT NOT NULL DEFAULT 'password',
-        encrypted_password TEXT,
-        encrypted_key TEXT,
-        encrypted_key_password TEXT,
-        key_type TEXT,
-        public_key TEXT,
-        cert_public_key TEXT,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE (credential_access_id, target_user_id),
-        FOREIGN KEY (credential_access_id) REFERENCES credential_access (id) ON DELETE CASCADE,
-        FOREIGN KEY (target_user_id) REFERENCES users (id) ON DELETE CASCADE,
-        FOREIGN KEY (credential_id) REFERENCES ssh_credentials (id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_shared_credential_secrets_target ON shared_credential_secrets (target_user_id, credential_id);
-
-    CREATE TABLE IF NOT EXISTS folder_access (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        owner_user_id TEXT NOT NULL,
-        folder TEXT NOT NULL,
-        user_id TEXT,
-        role_id INTEGER,
-        granted_by TEXT NOT NULL,
-        permission_level TEXT NOT NULL DEFAULT 'connect',
-        expires_at TEXT,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (owner_user_id) REFERENCES users (id) ON DELETE CASCADE,
-        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-        FOREIGN KEY (role_id) REFERENCES roles (id) ON DELETE CASCADE,
-        FOREIGN KEY (granted_by) REFERENCES users (id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_folder_access_owner_folder ON folder_access (owner_user_id, folder);
 
     CREATE TABLE IF NOT EXISTS plugins (
         id TEXT PRIMARY KEY,
@@ -562,34 +466,6 @@ async function initializeCompleteDatabase(): Promise<void> {
 
     CREATE INDEX IF NOT EXISTS idx_plugin_settings_plugin_scope ON plugin_settings (plugin_id, scope);
 
-    CREATE TABLE IF NOT EXISTS rbac_known_permissions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        permission TEXT NOT NULL,
-        plugin_id TEXT,
-        first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE (permission)
-    );
-
-    CREATE TABLE IF NOT EXISTS rbac_applied_defaults (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        role_name TEXT NOT NULL,
-        permission TEXT NOT NULL,
-        applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE (role_name, permission)
-    );
-
-    CREATE TABLE IF NOT EXISTS api_keys (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        name TEXT NOT NULL,
-        token_hash TEXT NOT NULL,
-        token_prefix TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        expires_at TEXT,
-        last_used_at TEXT,
-        is_active INTEGER NOT NULL DEFAULT 1,
-        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-    );
 
     CREATE TABLE IF NOT EXISTS user_open_tabs (
         id TEXT PRIMARY KEY,
@@ -1077,32 +953,6 @@ const migrateSchema = () => {
     });
   }
 
-  try {
-    sqlite.prepare("SELECT role_id FROM host_access LIMIT 1").get();
-  } catch {
-    try {
-      sqlite.exec("ALTER TABLE host_access ADD COLUMN role_id INTEGER REFERENCES roles(id) ON DELETE CASCADE");
-    } catch (alterError) {
-      databaseLogger.warn("Failed to add role_id column", {
-        operation: "schema_migration",
-        error: alterError,
-      });
-    }
-  }
-
-  try {
-    sqlite.prepare("SELECT override_credential_id FROM host_access LIMIT 1").get();
-  } catch {
-    try {
-      sqlite.exec("ALTER TABLE host_access ADD COLUMN override_credential_id INTEGER REFERENCES ssh_credentials(id) ON DELETE SET NULL");
-    } catch (alterError) {
-      databaseLogger.warn("Failed to add override_credential_id column", {
-        operation: "schema_migration",
-        error: alterError,
-      });
-    }
-  }
-
 
   try {
     sqlite.prepare("SELECT credential_id FROM ssh_folders LIMIT 1").get();
@@ -1165,76 +1015,6 @@ const migrateSchema = () => {
     }
   }
 
-  // share_ssh_auth arrived with 2.6.1 and defaults to 0, but sharing a host
-  // used to pass the owner's SSH authentication along unconditionally. Every
-  // host shared before the upgrade therefore stopped supplying credentials to
-  // its recipients the moment the column appeared, and they were left with
-  // "No valid authentication method provided".
-  //
-  // Turn it on for hosts that are already shared, which is where the previous
-  // behaviour was in effect and consented to. Hosts nobody has shared keep the
-  // new default; the owner decides when they share one.
-  try {
-    if (getRawSettingValue("share_ssh_auth_backfill_v1") === null) {
-      const backfilled = sqlite
-        .prepare(
-          `UPDATE ssh_data SET share_ssh_auth = 1
-           WHERE share_ssh_auth = 0
-             AND id IN (SELECT DISTINCT host_id FROM host_access)`,
-        )
-        .run();
-
-      if (backfilled.changes > 0) {
-        databaseLogger.info(
-          `Restored shared SSH authentication for ${backfilled.changes} already-shared host(s)`,
-          { operation: "share_ssh_auth_backfill_v1" },
-        );
-      }
-      setRawSettingValue("share_ssh_auth_backfill_v1", "true");
-    }
-  } catch (e) {
-    databaseLogger.warn("Failed to backfill share_ssh_auth", {
-      operation: "share_ssh_auth_backfill_v1",
-      error: e,
-    });
-  }
-
-  try {
-    sqlite.prepare("SELECT id FROM shared_host_secrets LIMIT 1").get();
-  } catch {
-    try {
-      sqlite.exec(`
-        CREATE TABLE IF NOT EXISTS shared_host_secrets (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          host_access_id INTEGER NOT NULL,
-          target_user_id TEXT NOT NULL,
-          protocol TEXT NOT NULL DEFAULT 'ssh',
-          source_type TEXT NOT NULL DEFAULT 'credential',
-          original_credential_id INTEGER,
-          encrypted_username TEXT,
-          encrypted_auth_type TEXT,
-          encrypted_password TEXT,
-          encrypted_key TEXT,
-          encrypted_key_password TEXT,
-          encrypted_key_type TEXT,
-          encrypted_domain TEXT,
-          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          UNIQUE(host_access_id, target_user_id, protocol),
-          FOREIGN KEY (host_access_id) REFERENCES host_access (id) ON DELETE CASCADE,
-          FOREIGN KEY (original_credential_id) REFERENCES ssh_credentials (id) ON DELETE CASCADE,
-          FOREIGN KEY (target_user_id) REFERENCES users (id) ON DELETE CASCADE
-        );
-      `);
-    } catch (createError) {
-      databaseLogger.warn("Failed to create shared_host_secrets table", {
-        operation: "schema_migration",
-        error: createError,
-      });
-    }
-  }
-
-  addColumnIfNotExists("shared_host_secrets", "encrypted_fields", "TEXT");
 
   try {
     sqlite.exec(`
@@ -1294,128 +1074,6 @@ const migrateSchema = () => {
     });
   }
 
-  try {
-    if (getRawSettingValue("rbac_permission_levels_v2") === null) {
-      sqlite.exec(
-        "UPDATE host_access SET permission_level = 'connect' WHERE permission_level = 'view'",
-      );
-      setRawSettingValue("rbac_permission_levels_v2", "done");
-    }
-  } catch (migrateError) {
-    databaseLogger.warn("Failed to migrate legacy view permission level", {
-      operation: "schema_migration",
-      error: migrateError,
-    });
-  }
-
-  try {
-    const existingRoles = sqlite.prepare("SELECT name, is_system FROM roles").all() as Array<{ name: string; is_system: number }>;
-
-    try {
-      const validSystemRoles = ['admin', 'user'];
-      const unwantedRoleNames = ['superAdmin', 'powerUser', 'readonly', 'member'];
-      const deleteByName = sqlite.prepare("DELETE FROM roles WHERE name = ?");
-      for (const roleName of unwantedRoleNames) {
-        deleteByName.run(roleName);
-      }
-
-      const deleteOldSystemRole = sqlite.prepare("DELETE FROM roles WHERE name = ? AND is_system = 1");
-      for (const role of existingRoles) {
-        if (role.is_system === 1 && !validSystemRoles.includes(role.name) && !unwantedRoleNames.includes(role.name)) {
-          deleteOldSystemRole.run(role.name);
-        }
-      }
-    } catch (cleanupError) {
-      databaseLogger.warn("Failed to clean up old system roles", {
-        operation: "schema_migration",
-        error: cleanupError,
-      });
-    }
-
-    const systemRoles = Object.entries(SYSTEM_ROLE_DEFAULTS).map(
-      ([name, defaults]) => ({
-        name,
-        displayName: `rbac.roles.${name}`,
-        description: defaults.description,
-        permissions: JSON.stringify(defaults.permissions),
-      }),
-    );
-
-    // Route-level RBAC needs the permission lists to exist; roles seeded by
-    // earlier versions carried NULL there. Backfill only NULL so an admin's
-    // edits to these roles are never overwritten.
-    const backfillPermissions = sqlite.prepare(
-      "UPDATE roles SET permissions = ? WHERE name = ? AND is_system = 1 AND permissions IS NULL",
-    );
-    for (const role of systemRoles) {
-      backfillPermissions.run(role.permissions, role.name);
-    }
-
-    for (const role of systemRoles) {
-      const existingRole = sqlite.prepare("SELECT id FROM roles WHERE name = ?").get(role.name);
-      if (!existingRole) {
-        try {
-          sqlite.prepare(`
-            INSERT INTO roles (name, display_name, description, is_system, permissions)
-            VALUES (?, ?, ?, 1, ?)
-          `).run(role.name, role.displayName, role.description, role.permissions);
-        } catch (insertError) {
-          databaseLogger.warn(`Failed to create system role: ${role.name}`, {
-            operation: "schema_migration",
-            error: insertError,
-          });
-        }
-      }
-    }
-
-    try {
-      const adminUsers = sqlite.prepare("SELECT id FROM users WHERE is_admin = 1").all() as { id: string }[];
-      const normalUsers = sqlite.prepare("SELECT id FROM users WHERE is_admin = 0").all() as { id: string }[];
-
-      const adminRole = sqlite.prepare("SELECT id FROM roles WHERE name = 'admin'").get() as { id: number } | undefined;
-      const userRole = sqlite.prepare("SELECT id FROM roles WHERE name = 'user'").get() as { id: number } | undefined;
-
-      if (adminRole) {
-        const insertUserRole = sqlite.prepare(`
-          INSERT OR IGNORE INTO user_roles (user_id, role_id, granted_at)
-          VALUES (?, ?, CURRENT_TIMESTAMP)
-        `);
-
-        for (const admin of adminUsers) {
-          try {
-            insertUserRole.run(admin.id, adminRole.id);
-          } catch {
-            // Ignore duplicate errors
-          }
-        }
-      }
-
-      if (userRole) {
-        const insertUserRole = sqlite.prepare(`
-          INSERT OR IGNORE INTO user_roles (user_id, role_id, granted_at)
-          VALUES (?, ?, CURRENT_TIMESTAMP)
-        `);
-
-        for (const user of normalUsers) {
-          try {
-            insertUserRole.run(user.id, userRole.id);
-          } catch {
-            // Ignore duplicate errors
-          }
-        }
-      }
-    } catch (migrationError) {
-      databaseLogger.warn("Failed to migrate existing users to roles", {
-        operation: "schema_migration",
-        error: migrationError,
-      });
-    }
-  } catch (seedError) {
-    databaseLogger.warn("Failed to seed system roles", {
-      operation: "schema_migration",
-      error: seedError,
-    });
-  }
 
   addColumnIfNotExists("users", "sso_provider_id", "INTEGER");
 
