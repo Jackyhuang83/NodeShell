@@ -74,9 +74,7 @@ describe("HostRepository and CredentialRepository", () => {
     expect(
       await repo.credentials.findByIdForUser("user-2", created.id),
     ).toBeNull();
-    expect(await repo.credentials.deleteForUser("user-1", created.id)).toEqual({
-      syncId: expect.any(String),
-    });
+    expect(await repo.credentials.deleteForUser("user-1", created.id)).toBe(true);
     expect(
       await repo.credentials.findByIdForUser("user-1", created.id),
     ).toBeNull();
@@ -321,9 +319,7 @@ describe("HostRepository and CredentialRepository", () => {
     expect(updated?.updatedAt).not.toBe("2000-01-01 00:00:00");
     expect(await repo.hosts.findByIdForUser("user-2", host.id)).toBeNull();
 
-    expect(await repo.hosts.deleteForUser("user-1", host.id)).toEqual({
-      syncId: expect.any(String),
-    });
+    expect(await repo.hosts.deleteForUser("user-1", host.id)).toBe(true);
     expect(await repo.hosts.findById(host.id)).toBeNull();
   });
 
@@ -639,9 +635,7 @@ describe("HostRepository and CredentialRepository", () => {
       VALUES ('sample', 'host', '${host.id}', 'sample-setting', '"value"');
     `);
 
-    expect(await repo.hosts.deleteForUser("user-1", host.id)).toEqual({
-      syncId: expect.any(String),
-    });
+    expect(await repo.hosts.deleteForUser("user-1", host.id)).toBe(true);
     expect(
       await adapter!.query(
         sql`SELECT id FROM plugin_settings WHERE scope = 'host' AND scope_id = ${String(host.id)}`,
