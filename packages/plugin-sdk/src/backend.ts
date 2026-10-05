@@ -1308,18 +1308,6 @@ export interface PluginAuth {
   recordEnrollment: (userId: string, factorId: string) => Promise<void>;
   removeEnrollment: (userId: string, factorId: string) => Promise<void>;
   /**
-   * Finishes a redirect login from one of this plugin's own public routes:
-   * runs the registered method's `callback`, then core finds or provisions
-   * the user, runs second factors and redirects the browser back with a
-   * session, exactly like `/users/auth/<methodId>/callback`. The method must
-   * be one this plugin registered.
-   */
-  completeRedirectLogin: (
-    methodId: string,
-    req: unknown,
-    res: unknown,
-  ) => Promise<void>;
-  /**
    * Revokes sessions whose login carried matching `logoutClaims`, for a
    * back-channel logout. Needs `sub` or `sid`; `providerId` narrows it.
    * Returns how many sessions ended.
