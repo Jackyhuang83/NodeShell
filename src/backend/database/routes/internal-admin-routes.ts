@@ -46,11 +46,14 @@ async function requireLocalInternalAdmin(
 router.use(requireLocalInternalAdmin);
 
 router.get("/status", async (_req, res) => {
-  const users = await createCurrentUserRepository().listAll();
-  const owner = users.find((user) => user.isAdmin) ?? null;
+  const userRepository = createCurrentUserRepository();
+  const [owner, userCount] = await Promise.all([
+    userRepository.findOwner(),
+    userRepository.countAll(),
+  ]);
   return res.json({
-    initialized: users.length > 0,
-    userCount: users.length,
+    initialized: userCount > 0,
+    userCount,
     owner: owner ? { username: owner.username } : null,
   });
 });
@@ -142,17 +145,9 @@ router.post("/reset-password", async (req, res) => {
     });
   }
 
-  const user = await createCurrentUserRepository().findByUsername(username);
-  if (!user) return res.status(404).json({ error: "Owner account not found" });
-  if (!user.isAdmin) {
-    return res.status(403).json({
-      error: "The local recovery channel only resets an Owner account",
-    });
-  }
-  if (user.isOidc) {
-    return res.status(409).json({
-      error: "Password recovery is not available for external-auth users",
-    });
+  const user = await createCurrentUserRepository().findOwner();
+  if (!user || user.username !== username) {
+    return res.status(404).json({ error: "Owner account not found" });
   }
 
   const authManager = AuthManager.getInstance();
