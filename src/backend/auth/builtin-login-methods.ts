@@ -1,14 +1,9 @@
-/**
- * Password login, core's one built-in method. It only proves who the user is;
- * the pipeline does second factors and the session.
- */
+/** Password verification for NodeShell's single local Owner account. */
 
 import bcrypt from "bcryptjs";
 import { authLogger } from "../utils/logger.js";
 import { loginRateLimiter } from "../utils/login-rate-limiter.js";
 import { createCurrentUserRepository } from "../database/repositories/factory.js";
-import { getPasswordLoginStatus } from "./core-auth.js";
-import { registerLoginMethod, type LoginMethod } from "./registry.js";
 import { LoginMethodError, type VerifiedIdentity } from "./types.js";
 
 function nonEmpty(value: unknown): value is string {
@@ -43,13 +38,6 @@ export async function verifyPasswordLogin(request: {
     throw error;
   }
 
-  if (!(await getPasswordLoginStatus()).allowed) {
-    throw new LoginMethodError(
-      "Password authentication is currently disabled",
-      403,
-    );
-  }
-
   const user = await createCurrentUserRepository().findOwner();
   if (!user || user.username !== username) {
     loginRateLimiter.recordFailedAttempt(clientIp, username);
@@ -80,20 +68,4 @@ export async function verifyPasswordLogin(request: {
     rememberMe: !!request.body.rememberMe,
     rateLimitUsername: username,
   };
-}
-
-const passwordLoginMethod: LoginMethod = {
-  id: "password",
-  pluginId: "core",
-  labelKey: "auth.password",
-  kind: "form",
-  describe: async () => {
-    const status = await getPasswordLoginStatus();
-    return [{ id: "password", label: "Password", enabled: status.allowed }];
-  },
-  verify: (request) => verifyPasswordLogin(request as never),
-};
-
-export function registerPasswordLoginMethod(): () => void {
-  return registerLoginMethod(passwordLoginMethod);
 }
