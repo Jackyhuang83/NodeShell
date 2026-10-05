@@ -178,14 +178,17 @@ export function createTunnelManager(ctx: PluginContext) {
     hostId: number,
     sock?: ClientChannel,
   ): Promise<PluginSshConnection<Client>> {
-    return ctx.asUser(userId, () =>
-      ctx.ssh.connect<Client>(hostId, {
+    return ctx.asOwner(() => {
+      if (ctx.currentActor() !== userId) {
+        throw new Error("Tunnel owner mismatch");
+      }
+      return ctx.ssh.connect<Client>(hostId, {
         purpose: "tunnel",
         profile: "forward",
         timeoutMs: CONNECT_TIMEOUT_MS,
         sock,
-      }),
-    );
+      });
+    });
   }
 
   function directTargetHost(config: TunnelConfig): string {
@@ -577,7 +580,9 @@ export function createTunnelManager(ctx: PluginContext) {
       const host =
         ctx.currentActor() === userId
           ? await ctx.hosts.get(hostId)
-          : await ctx.asUser(userId, () => ctx.hosts.get(hostId));
+          : await ctx.asOwner(() =>
+              ctx.currentActor() === userId ? ctx.hosts.get(hostId) : null,
+            );
       allowed = !!host;
     } catch {
       allowed = false;
