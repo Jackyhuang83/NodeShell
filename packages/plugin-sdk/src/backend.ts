@@ -96,8 +96,8 @@ export interface PluginFiles {
  * to query through `db`. Both require db:own.
  *
  * Scoped by name: every table carries the p_<id>_ prefix, and `refs` exposes
- * users, ssh_data, roles and user_roles (behind db:core-refs) so a plugin can
- * join against them. In-process code could reach around
+ * users and ssh_data (behind db:core-refs) so a plugin can join against them.
+ * In-process code could reach around
  * all of this. The capability, the prefix, lint and review are the contract,
  * not a sandbox.
  */
@@ -107,7 +107,7 @@ export interface PluginDatabase {
   /** Drizzle handle, scoped to this plugin's tables. */
   client: <T = unknown>() => Promise<T>;
   /**
-   * Core tables a plugin may join against: users, hosts, roles, userRoles.
+   * Core tables a plugin may join against: users and hosts.
    * Needs db:core-refs. Treat them as read-only.
    */
   refs: <T = unknown>() => Promise<T>;
@@ -611,42 +611,9 @@ export const PLUGIN_HOST_INPUT_KEYS = [
   "pluginSettings",
 ] as const satisfies readonly (keyof PluginHostCreateInput)[];
 
-/** The same shape canAccessHost returns internally, without secrets. */
-export interface PluginHostAccess {
-  hasAccess: boolean;
-  isOwner: boolean;
-  isShared: boolean;
-  permissionLevel?: "connect" | "view" | "edit" | "manage";
-  expiresAt?: string | null;
-}
-
-export type PluginHostShareLevel = "connect" | "view" | "edit" | "manage";
-
-export interface PluginShareTarget {
-  type: "user" | "role";
-  id: string | number;
-}
-
-export interface PluginHostShareResult {
-  hostId: number;
-  shared: boolean;
-  reason?: string;
-}
-
-/** A user or role a plugin can offer as a share target. No secrets, no roles' permission lists. */
-export interface PluginShareableUser {
-  id: string;
-  username: string;
-}
-
-export interface PluginShareableRole {
-  id: number;
-  name: string;
-  displayName: string | null;
-}
-
 /**
- * Hosts the acting user can see, and the RBAC + sharing operations a plugin
+ * Hosts owned by the acting Owner. A plugin can read or manage only those
+ * hosts; NodeShell v0.1 has no recipient/share target API.
  * needs to build a feature (like fleets) on top of hosts it does not own.
  *
  * list/get/checkAccess need hosts:read. share, and the user/role pickers a
@@ -659,11 +626,6 @@ export interface PluginHosts {
   list: () => Promise<PluginHostSummary[]>;
   /** One host the acting user can see, or null if it does not exist or they cannot. */
   get: (hostId: number) => Promise<PluginHostSummary | null>;
-  /** The same access rule ctx.ssh.connect enforces, but naming the level, not just yes/no. */
-  checkAccess: (
-    hostId: number,
-    level: PluginHostShareLevel,
-  ) => Promise<PluginHostAccess>;
   /**
    * Creates a host owned by the acting user, encrypted the same way the host
    * editor's own create route does it. Needs hosts:write. For a plugin that
@@ -671,9 +633,8 @@ export interface PluginHosts {
    */
   create: (host: PluginHostCreateInput) => Promise<PluginHostRecord>;
   /**
-   * Updates a host the acting user owns. Refuses a host it does not own
-   * (sharing a write onto someone else's host goes through share(), not
-   * update()). Needs hosts:write.
+   * Updates a host the acting Owner owns. Refuses any other row.
+   * Needs hosts:write.
    */
   update: (
     hostId: number,
@@ -696,21 +657,6 @@ export interface PluginHosts {
    * to read back, not a wider read grant than hosts:read gives via list/get.
    */
   listOwned: () => Promise<PluginHostRecord[]>;
-  /**
-   * Grants access to a host the caller manages, snapshotting shared secrets
-   * for each target the same way the host editor's own share action does.
-   * Refuses a host the caller does not hold "manage" on.
-   */
-  share: (
-    hostId: number,
-    targets: PluginShareTarget[],
-    permissionLevel: PluginHostShareLevel,
-    durationHours?: number,
-  ) => Promise<PluginHostShareResult>;
-  /** Users the caller may pick as a share target, for building a picker UI. */
-  listUsers: () => Promise<PluginShareableUser[]>;
-  /** Non-system roles the caller may pick as a share target. */
-  listRoles: () => Promise<PluginShareableRole[]>;
   /**
    * Marks a live session on a host, for the online indicator. Counted with
    * every other feature's sessions; call the returned function once when the

@@ -351,8 +351,6 @@ export function createPluginContext(
       return {
         users: schema.users,
         hosts: schema.hosts,
-        roles: schema.roles,
-        userRoles: schema.userRoles,
       };
     },
     { action: "db_refs" },
