@@ -1,8 +1,6 @@
 import {
   createCurrentHostResolutionRepository,
-  createCurrentRbacAccessRepository,
   createCurrentRecentActivityRepository,
-  createCurrentRoleRepository,
 } from "../database/repositories/factory.js";
 import { dashboardLogger } from "../utils/logger.js";
 
@@ -56,17 +54,7 @@ export async function recordRecentActivity(
       hostId,
       userId,
     );
-  if (!isOwnedHost) {
-    const roleIds = await createCurrentRoleRepository().listUserRoleIds(userId);
-    const sharedHosts =
-      await createCurrentRbacAccessRepository().listVisibleHostAccessEntries(
-        userId,
-        roleIds,
-      );
-    if (!sharedHosts.some((access) => access.hostId === hostId)) {
-      return { status: "denied" };
-    }
-  }
+  if (!isOwnedHost) return { status: "denied" };
 
   const result = await createCurrentRecentActivityRepository().create({
     userId,

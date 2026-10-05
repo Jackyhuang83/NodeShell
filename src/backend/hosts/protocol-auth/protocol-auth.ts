@@ -8,10 +8,7 @@
  * needs no core change.
  */
 
-import {
-  createCurrentHostProtocolAuthRepository,
-  createCurrentSharedHostAuthOverrideRepository,
-} from "../../database/repositories/factory.js";
+import { createCurrentHostProtocolAuthRepository } from "../../database/repositories/factory.js";
 import {
   decryptProtocolLogin,
   type HostProtocolAuthRecord,
@@ -527,77 +524,32 @@ export async function resolveOwnerProtocolLogin(
 }
 
 /**
- * A shared recipient's login: their own override credential, the owner's
- * shared snapshot, or nothing. Never the owner's stored secret.
+ * Compatibility wrapper for callers compiled against the older multi-user API.
+ * NodeShell v0.1 has no shared-host recipients: only the Owner may resolve a
+ * stored protocol login.
  */
 export async function resolveRecipientProtocolLogin(
   host: Record<string, unknown>,
   userId: string,
   declared: DeclaredHostProtocol,
 ): Promise<ResolvedProtocolLogin> {
-  const hostId = Number(host.id);
-  const { resolveRecipientSharedHostAuthentication } =
-    await import("../../utils/shared-host-auth-resolver.js");
-  const row = await createCurrentHostProtocolAuthRepository().findRow(
-    hostId,
-    declared.id,
-  );
-  const ownerFields = row ? summarize(row, null).fields : {};
-
-  let resolution: Awaited<
-    ReturnType<typeof resolveRecipientSharedHostAuthentication>
-  >;
-  try {
-    resolution = await resolveRecipientSharedHostAuthentication(
-      { ...host, password: null } as never,
-      hostId,
-      userId,
-      declared.id,
-    );
-  } catch {
-    resolution = { source: "required" };
-  }
-
-  if (resolution.source === "personal-override") {
+  if (userId !== String(host.userId)) {
     return {
-      authType: "credential",
-      username: str(resolution.credential.username),
-      password: str(resolution.credential.password),
-      fields: withDeclaredFields(declared, ownerFields),
+      authType: "direct",
+      username: "",
+      password: "",
+      fields: withDeclaredFields(declared),
     };
   }
-  if (resolution.source === "owner-shared") {
-    return {
-      authType: resolution.authType,
-      username: str(resolution.secret?.username),
-      password: str(resolution.secret?.password),
-      fields: withDeclaredFields(
-        declared,
-        resolution.secret?.fields,
-        ownerFields,
-      ),
-    };
-  }
-  return {
-    authType:
-      resolution.source === "secretless" && row?.authType === "none"
-        ? "none"
-        : "direct",
-    username: "",
-    password: "",
-    fields: withDeclaredFields(declared, ownerFields),
-  };
+  return resolveOwnerProtocolLogin(host, declared);
 }
 
-/** Credential ids a recipient chose for this host, per protocol. */
+/** No recipient credential overrides exist in the single-owner model. */
 export async function listRecipientOverrideIds(
-  hostId: number,
-  userId: string,
+  _hostId: number,
+  _userId: string,
 ): Promise<Record<string, number>> {
-  return (await createCurrentSharedHostAuthOverrideRepository().listCredentialIds(
-    hostId,
-    userId,
-  )) as Record<string, number>;
+  return {};
 }
 
 /** A login in an export or on the sync wire: plaintext, keyed by protocol. */

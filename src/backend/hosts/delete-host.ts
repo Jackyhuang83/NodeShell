@@ -1,7 +1,6 @@
 import {
   createCurrentHostRepository,
   createCurrentHostResolutionRepository,
-  createCurrentRbacAccessRepository,
   createCurrentRecentActivityRepository,
   createCurrentSshCredentialUsageRepository,
 } from "../database/repositories/factory.js";
@@ -34,7 +33,6 @@ export async function deleteOwnedHost(
   // Plugin rows tied to a host cascade on their refHost() foreign keys.
   await createCurrentSshCredentialUsageRepository().deleteByHostId(hostId);
   await createCurrentRecentActivityRepository().deleteByHostId(hostId);
-  await createCurrentRbacAccessRepository().deleteHostAccessForHost(hostId);
   await createCurrentHostRepository().deleteForUser(userId, hostId);
 
   const name = host.name ?? host.ip;

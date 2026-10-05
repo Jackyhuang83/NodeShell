@@ -6,7 +6,7 @@ import {
 
 /**
  * Deletes a credential the user owns: hosts using it fall back to password
- * auth with no secret, and shares are re-snapshotted. Shared by the delete
+ * auth with no secret. Shared by the delete
  * route and sync. Null when it does not exist or is not the user's.
  */
 export async function deleteOwnedCredential(
@@ -40,17 +40,6 @@ export async function deleteOwnedCredential(
     );
   }
 
-  const { SharedHostSecretsManager } =
-    await import("../utils/shared-host-secrets-manager.js");
-  const sharedSecretsManager = SharedHostSecretsManager.getInstance();
-  await sharedSecretsManager.deleteForCredential(credentialId);
-
   await createCurrentCredentialRepository().deleteForUser(userId, credentialId);
-
-  // Shares stay in place; re-snapshot so recipients fall back to whatever
-  // auth the host still has (or lose the stale credential copy).
-  for (const host of hostsUsingCredential) {
-    await sharedSecretsManager.resyncHost(host.id);
-  }
   return { name: (credential.name as string | null) ?? null };
 }

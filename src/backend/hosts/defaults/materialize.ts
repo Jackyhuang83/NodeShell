@@ -291,9 +291,6 @@ async function afterHostsChanged(
 
   const { pluginEvents, TOPICS } = await import("../../plugins/events.js");
   const notified = new Map<string, unknown>();
-  let secrets: {
-    resyncHost: (hostId: number) => Promise<unknown>;
-  } | null = null;
   for (const { row, plan } of changed) {
     try {
       pluginEvents.emit(TOPICS.hostUpdated, {
@@ -305,25 +302,6 @@ async function afterHostsChanged(
     }
     for (const write of plan.pluginWrites) {
       notified.set(`${write.pluginId}\u0000${write.key}`, write.value);
-    }
-    if (
-      plan.coreKeysChanged.includes("auth") ||
-      plan.coreKeysChanged.includes("username")
-    ) {
-      try {
-        if (!secrets) {
-          const { SharedHostSecretsManager } =
-            await import("../../utils/shared-host-secrets-manager.js");
-          secrets = SharedHostSecretsManager.getInstance();
-        }
-        await secrets.resyncHost(row.id);
-      } catch (error) {
-        databaseLogger.warn("Failed to resync shared host after defaults", {
-          operation: "host_defaults_resync",
-          hostId: row.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
     }
   }
   for (const [pair, value] of notified) {
