@@ -21,7 +21,6 @@ import {
   createCurrentSettingsRepository,
   createCurrentSessionRepository,
   createCurrentUserRepository,
-  createCurrentApiKeyRepository,
   createCurrentTrustedDeviceRepository,
   getCurrentSettingValue,
 } from "../database/repositories/factory.js";
@@ -56,7 +55,6 @@ interface WrappedDataKey {
 interface AuthenticatedRequest extends Request {
   userId?: string;
   sessionId?: string;
-  apiKeyId?: string;
   pendingTOTP?: boolean;
   dataKey?: Buffer;
   actingAdminUserId?: string;
@@ -652,82 +650,6 @@ class AuthManager {
     };
   }
 
-  private async handleApiKeyAuth(
-    req: AuthenticatedRequest,
-    res: Response,
-    next: NextFunction,
-    token: string,
-    requireAdmin = false,
-  ): Promise<void> {
-    if (req.headers[ADMIN_TARGET_USER_HEADER]) {
-      res.status(403).json({
-        error: "Impersonation is not allowed with API key authentication",
-        code: "IMPERSONATION_NOT_ALLOWED",
-      });
-      return;
-    }
-    try {
-      const tokenPrefix = token.substring(0, 12);
-      const apiKeyRepository = createCurrentApiKeyRepository();
-
-      const candidates =
-        await apiKeyRepository.listActiveByTokenPrefix(tokenPrefix);
-
-      if (candidates.length === 0) {
-        res.status(401).json({ error: "Invalid API key" });
-        return;
-      }
-
-      let matchedKey: (typeof candidates)[0] | null = null;
-      for (const candidate of candidates) {
-        if (await bcrypt.compare(token, candidate.tokenHash)) {
-          matchedKey = candidate;
-          break;
-        }
-      }
-
-      if (!matchedKey) {
-        res.status(401).json({ error: "Invalid API key" });
-        return;
-      }
-
-      if (matchedKey.expiresAt && new Date(matchedKey.expiresAt) < new Date()) {
-        res.status(401).json({ error: "API key has expired" });
-        return;
-      }
-
-      if (requireAdmin) {
-        const user = await createCurrentUserRepository().findById(
-          matchedKey.userId,
-        );
-        if (!user?.isAdmin) {
-          res.status(403).json({ error: "Admin access required" });
-          return;
-        }
-      }
-
-      apiKeyRepository
-        .updateLastUsedAt(matchedKey.id, new Date().toISOString())
-        .then(() => {})
-        .catch((err) => {
-          databaseLogger.warn("Failed to update API key lastUsedAt", {
-            operation: "api_key_update_last_used",
-            keyId: matchedKey!.id,
-            error: getErrorMessage(err, "Unknown"),
-          });
-        });
-
-      req.userId = matchedKey.userId;
-      req.apiKeyId = matchedKey.id;
-      next();
-    } catch (error) {
-      databaseLogger.error("API key authentication failed", error, {
-        operation: "api_key_auth_failed",
-      });
-      res.status(500).json({ error: "API key authentication failed" });
-    }
-  }
-
   createAuthMiddleware() {
     return async (req: Request, res: Response, next: NextFunction) => {
       const authReq = req as AuthenticatedRequest;
@@ -744,9 +666,6 @@ class AuthManager {
         return res.status(401).json({ error: "Missing authentication token" });
       }
 
-      if (token.startsWith("tmx_")) {
-        return this.handleApiKeyAuth(authReq, res, next, token);
-      }
 
       const payload = await this.verifyJWTToken(token);
 
@@ -956,16 +875,6 @@ class AuthManager {
 
       if (!token) {
         return res.status(401).json({ error: "Missing authentication token" });
-      }
-
-      if (token.startsWith("tmx_")) {
-        return this.handleApiKeyAuth(
-          req as AuthenticatedRequest,
-          res,
-          next,
-          token,
-          true,
-        );
       }
 
       const payload = await this.verifyJWTToken(token);
