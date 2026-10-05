@@ -1,10 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// permission-manager imports the side-effectful DB barrel and the logger at the
-// top level. Stub both so importing the module does not spin up the real
-// database / encryption stack. We then drive hasPermission via a spied
-// getUserPermissions so we test the wildcard-matching logic in isolation.
-vi.mock("../../database/db/index.js", () => ({ db: {} }));
 vi.mock("../../utils/logger.js", () => ({
   databaseLogger: {
     debug: vi.fn(),
@@ -15,376 +10,122 @@ vi.mock("../../utils/logger.js", () => ({
   },
 }));
 
-const accessState = vi.hoisted(() => ({
-  ownerId: "owner" as string,
-  grant: null as {
-    id: number;
-    permissionLevel: string;
-    expiresAt: string | null;
-  } | null,
-  touched: [] as number[],
-  adminIds: new Set<string>(),
-  rolePermissionCalls: 0,
-  rolePermissions: [] as { permissions: string }[],
-  ownedHostIds: new Set<number>(),
-  visibleGrants: [] as { hostId: number }[],
+const state = vi.hoisted(() => ({
+  ownerIds: new Set<string>(),
+  ownedByUser: new Map<string, Set<number>>(),
   ownedQueryCalls: 0,
+  failOwnedLookup: false,
+  failListLookup: false,
 }));
 
 vi.mock("../../database/repositories/factory.js", () => ({
   createCurrentHostResolutionRepository: () => ({
-    isHostOwnedByUser: async (_hostId: number, userId: string) =>
-      userId === accessState.ownerId,
-    findHostOwnerId: async () => accessState.ownerId,
-    listOwnedHostIds: async () => {
-      accessState.ownedQueryCalls += 1;
-      return accessState.ownedHostIds;
+    isHostOwnedByUser: async (hostId: number, userId: string) => {
+      if (state.failOwnedLookup) throw new Error("ownership lookup failed");
+      return state.ownedByUser.get(userId)?.has(hostId) ?? false;
     },
-  }),
-  createCurrentRbacAccessRepository: () => ({
-    listVisibleHostAccessEntries: async () => accessState.visibleGrants,
-    findActiveHostAccess: async () => accessState.grant,
-    touchHostAccess: async (id: number) => {
-      accessState.touched.push(id);
+    listOwnedHostIds: async (userId: string) => {
+      state.ownedQueryCalls += 1;
+      if (state.failListLookup) throw new Error("owned-host list failed");
+      return state.ownedByUser.get(userId) ?? new Set<number>();
     },
-    deleteExpiredHostAccess: async () => 0,
-  }),
-  createCurrentRoleRepository: () => ({
-    listUserRoleIds: async () => [],
-    listUserRolePermissions: async () => {
-      accessState.rolePermissionCalls += 1;
-      return accessState.rolePermissions;
-    },
-    userHasAnyRoleName: async () => false,
   }),
   createCurrentUserRepository: () => ({
     findById: async (userId: string) =>
-      accessState.adminIds.has(userId) ? { id: userId, isAdmin: true } : null,
+      state.ownerIds.has(userId) ? { id: userId, isAdmin: true } : null,
   }),
 }));
 
 const { PermissionManager } = await import("../../utils/permission-manager.js");
 
-type PermissionManagerInstance = ReturnType<
-  typeof PermissionManager.getInstance
->;
-
-describe("PermissionManager.hasPermission wildcard matching", () => {
-  let manager: PermissionManagerInstance;
-
-  function withPermissions(permissions: string[]) {
-    vi.spyOn(manager, "getUserPermissions").mockResolvedValue(permissions);
-  }
-
-  beforeEach(() => {
-    manager = PermissionManager.getInstance();
-    vi.restoreAllMocks();
-  });
-
-  it("grants everything for the global wildcard '*'", async () => {
-    withPermissions(["*"]);
-    expect(await manager.hasPermission("u1", "hosts.read")).toBe(true);
-    expect(await manager.hasPermission("u1", "anything.at.all")).toBe(true);
-  });
-
-  it("grants an exact permission match", async () => {
-    withPermissions(["hosts.read", "hosts.write"]);
-    expect(await manager.hasPermission("u1", "hosts.read")).toBe(true);
-  });
-
-  it("grants via a prefix wildcard", async () => {
-    withPermissions(["hosts.*"]);
-    expect(await manager.hasPermission("u1", "hosts.read")).toBe(true);
-    expect(await manager.hasPermission("u1", "hosts.write")).toBe(true);
-  });
-
-  it("grants via a deep prefix wildcard", async () => {
-    withPermissions(["admin.users.*"]);
-    expect(await manager.hasPermission("u1", "admin.users.delete")).toBe(true);
-  });
-
-  it("denies when no exact or wildcard permission matches", async () => {
-    withPermissions(["hosts.read"]);
-    expect(await manager.hasPermission("u1", "hosts.write")).toBe(false);
-    expect(await manager.hasPermission("u1", "credentials.read")).toBe(false);
-  });
-
-  it("denies when the user has no permissions", async () => {
-    withPermissions([]);
-    expect(await manager.hasPermission("u1", "hosts.read")).toBe(false);
-  });
-
-  it("does not let a narrower wildcard grant a sibling branch", async () => {
-    withPermissions(["hosts.read.*"]);
-    expect(await manager.hasPermission("u1", "hosts.write")).toBe(false);
-  });
-
-  it("resolves wildcards for a runtime-registered permission group", async () => {
-    const { registerPluginPermissions, resetPermissionCatalog } =
-      await import("../../utils/permission-catalog.js");
-
-    registerPluginPermissions({
-      group: "testplugin",
-      pluginId: "testplugin",
-      label: "Test Plugin",
-      permissions: ["testplugin.view", "testplugin.manage"],
-    });
-
-    try {
-      withPermissions(["testplugin.*"]);
-      expect(await manager.hasPermission("u1", "testplugin.view")).toBe(true);
-      expect(await manager.hasPermission("u1", "testplugin.manage")).toBe(true);
-
-      withPermissions(["*"]);
-      expect(await manager.hasPermission("u1", "testplugin.view")).toBe(true);
-    } finally {
-      resetPermissionCatalog();
-    }
-  });
-});
-
-describe("PermissionManager.canAccessHost level hierarchy", () => {
+describe("PermissionManager single-owner model", () => {
   const manager = PermissionManager.getInstance();
-  const actions = ["connect", "view", "edit", "manage"] as const;
-  const levels = ["connect", "view", "edit", "manage"] as const;
-  const rank = { connect: 1, view: 2, edit: 3, manage: 4 } as const;
 
   beforeEach(() => {
     vi.restoreAllMocks();
-    accessState.ownerId = "owner";
-    accessState.grant = null;
-    accessState.touched = [];
-    accessState.adminIds = new Set();
+    state.ownerIds = new Set(["owner"]);
+    state.ownedByUser = new Map([["owner", new Set([1, 2, 42])]]);
+    state.ownedQueryCalls = 0;
+    state.failOwnedLookup = false;
+    state.failListLookup = false;
   });
 
-  it("grants the owner every action including delete", async () => {
-    for (const action of [...actions, "delete"] as const) {
-      const info = await manager.canAccessHost("owner", 42, action);
-      expect(info).toMatchObject({ hasAccess: true, isOwner: true });
-    }
+  it("gives the Owner the global permission surface and nobody else", async () => {
+    expect(await manager.getUserPermissions("owner")).toEqual(["*"]);
+    expect(await manager.hasPermission("owner", "hosts.read")).toBe(true);
+    expect(await manager.hasPermission("owner", "anything.at.all")).toBe(true);
+
+    expect(await manager.getUserPermissions("stranger")).toEqual([]);
+    expect(await manager.hasPermission("stranger", "hosts.read")).toBe(false);
   });
 
-  it("denies everything without a grant", async () => {
-    const info = await manager.canAccessHost("stranger", 42, "connect");
-    expect(info).toMatchObject({ hasAccess: false, isShared: false });
-  });
-
-  it("enforces the connect < view < edit < manage hierarchy", async () => {
-    for (const level of levels) {
-      accessState.grant = { id: 5, permissionLevel: level, expiresAt: null };
-      for (const action of actions) {
-        const info = await manager.canAccessHost("recipient", 42, action);
-        expect(info.hasAccess).toBe(rank[level] >= rank[action]);
-        expect(info.permissionLevel).toBe(level);
-        expect(info.isShared).toBe(true);
-      }
-    }
-  });
-
-  it("never grants delete to a shared recipient", async () => {
-    accessState.grant = { id: 5, permissionLevel: "manage", expiresAt: null };
-    const info = await manager.canAccessHost("recipient", 42, "delete");
-    expect(info.hasAccess).toBe(false);
-  });
-
-  it("normalizes the legacy 'view' string mapping and unknown levels to connect", async () => {
-    accessState.grant = { id: 5, permissionLevel: "bogus", expiresAt: null };
-    const connect = await manager.canAccessHost("recipient", 42, "connect");
-    expect(connect.hasAccess).toBe(true);
-    expect(connect.permissionLevel).toBe("connect");
-
-    const view = await manager.canAccessHost("recipient", 42, "view");
-    expect(view.hasAccess).toBe(false);
-  });
-
-  it("only touches the grant timestamp on connect", async () => {
-    accessState.grant = { id: 5, permissionLevel: "manage", expiresAt: null };
-    await manager.canAccessHost("recipient", 42, "manage");
-    expect(accessState.touched).toEqual([]);
-    await manager.canAccessHost("recipient", 42, "connect");
-    expect(accessState.touched).toEqual([5]);
-  });
-
-  it("grants admins owner-equivalent access to any host via bypass", async () => {
-    accessState.adminIds = new Set(["adminUser"]);
-    for (const action of actions) {
-      const info = await manager.canAccessHost("adminUser", 42, action);
-      expect(info).toMatchObject({
+  it("grants every host action only when the authenticated Owner owns the row", async () => {
+    for (const action of ["connect", "view", "edit", "manage", "delete"] as const) {
+      expect(await manager.canAccessHost("owner", 42, action)).toEqual({
         hasAccess: true,
-        isOwner: false,
-        isAdminBypass: true,
-        permissionLevel: "manage",
+        isOwner: true,
+        isShared: false,
       });
     }
+
+    expect(await manager.canAccessHost("owner", 99, "connect")).toEqual({
+      hasAccess: false,
+      isOwner: false,
+      isShared: false,
+    });
   });
 
-  it("upgrades an under-privileged admin's share access via bypass", async () => {
-    accessState.adminIds = new Set(["adminUser"]);
-    accessState.grant = { id: 7, permissionLevel: "connect", expiresAt: null };
-    const info = await manager.canAccessHost("adminUser", 42, "manage");
-    expect(info).toMatchObject({ hasAccess: true, isAdminBypass: true });
+  it("does not provide an admin bypass for another account", async () => {
+    state.ownerIds.add("other-admin");
+    state.ownedByUser.set("other-admin", new Set());
+
+    expect(await manager.canAccessHost("other-admin", 42, "manage")).toEqual({
+      hasAccess: false,
+      isOwner: false,
+      isShared: false,
+    });
   });
 
-  it("does not grant a non-admin stranger admin bypass", async () => {
-    const info = await manager.canAccessHost("stranger", 42, "manage");
-    expect(info.hasAccess).toBe(false);
-    expect(info.isAdminBypass).toBeUndefined();
-  });
-});
+  it("denies a non-Owner before host ownership can grant anything", async () => {
+    state.ownedByUser.set("stranger", new Set([42]));
 
-describe("PermissionManager.getUserPermissions caching", () => {
-  let manager: PermissionManagerInstance;
-
-  beforeEach(() => {
-    vi.restoreAllMocks();
-    manager = PermissionManager.getInstance();
-    accessState.rolePermissionCalls = 0;
-    accessState.rolePermissions = [{ permissions: '["hosts.read"]' }];
-    manager.invalidateUserPermissionCache("cache-user");
+    expect(await manager.canAccessHost("stranger", 42, "connect")).toEqual({
+      hasAccess: false,
+      isOwner: false,
+      isShared: false,
+    });
   });
 
-  it("serves repeat lookups from cache instead of re-querying roles", async () => {
-    expect(await manager.getUserPermissions("cache-user")).toEqual([
-      "hosts.read",
-    ]);
-    expect(await manager.getUserPermissions("cache-user")).toEqual([
-      "hosts.read",
-    ]);
+  it("filters a fleet to the Owner's own host ids with one batched lookup", async () => {
+    const allowed = await manager.filterAccessibleHostIds("owner", [1, 2, 3, 42, 99]);
 
-    expect(accessState.rolePermissionCalls).toBe(1);
+    expect([...allowed].sort((a, b) => a - b)).toEqual([1, 2, 42]);
+    expect(state.ownedQueryCalls).toBe(1);
   });
 
-  it("re-reads roles after an explicit invalidation", async () => {
-    await manager.getUserPermissions("cache-user");
-    manager.invalidateUserPermissionCache("cache-user");
-    accessState.rolePermissions = [{ permissions: '["hosts.write"]' }];
+  it("returns no hosts for a non-Owner and does not query ownership", async () => {
+    const allowed = await manager.filterAccessibleHostIds("stranger", [1, 2, 42]);
 
-    expect(await manager.getUserPermissions("cache-user")).toEqual([
-      "hosts.write",
-    ]);
-    expect(accessState.rolePermissionCalls).toBe(2);
+    expect([...allowed]).toEqual([]);
+    expect(state.ownedQueryCalls).toBe(0);
   });
 
-  it("expires an entry once its own TTL has passed", async () => {
-    vi.useFakeTimers();
-    try {
-      await manager.getUserPermissions("cache-user");
-      // Just past the 5 minute TTL.
-      vi.advanceTimersByTime(5 * 60 * 1000 + 1);
-      await manager.getUserPermissions("cache-user");
-
-      expect(accessState.rolePermissionCalls).toBe(2);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("keeps a still-fresh entry when the sweep runs", async () => {
-    vi.useFakeTimers();
-    try {
-      await manager.getUserPermissions("cache-user");
-      // Fire the periodic sweep without crossing this entry's own TTL. The
-      // old implementation cleared the whole map here, expiring every active
-      // user at once.
-      vi.advanceTimersByTime(5 * 60 * 1000 - 1000);
-      await manager.getUserPermissions("cache-user");
-
-      expect(accessState.rolePermissionCalls).toBe(1);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("returns an empty set rather than throwing when role lookup fails", async () => {
-    manager.invalidateUserPermissionCache("boom-user");
-    accessState.rolePermissions = [{ permissions: "not-json" }];
-
-    expect(await manager.getUserPermissions("boom-user")).toEqual([]);
-  });
-});
-
-describe("PermissionManager.filterAccessibleHostIds", () => {
-  let manager: PermissionManagerInstance;
-
-  beforeEach(() => {
-    vi.restoreAllMocks();
-    manager = PermissionManager.getInstance();
-    accessState.adminIds = new Set();
-    accessState.ownedHostIds = new Set();
-    accessState.visibleGrants = [];
-    accessState.ownedQueryCalls = 0;
-  });
-
-  it("keeps hosts the user owns", async () => {
-    accessState.ownedHostIds = new Set([1, 2]);
-
-    const allowed = await manager.filterAccessibleHostIds("u1", [1, 2, 3]);
-
-    expect([...allowed].sort()).toEqual([1, 2]);
-  });
-
-  it("keeps hosts shared with the user", async () => {
-    accessState.visibleGrants = [{ hostId: 7 }];
-
-    const allowed = await manager.filterAccessibleHostIds("u1", [7, 8]);
-
-    expect([...allowed]).toEqual([7]);
-  });
-
-  it("combines owned and shared without duplicating", async () => {
-    accessState.ownedHostIds = new Set([1]);
-    accessState.visibleGrants = [{ hostId: 1 }, { hostId: 2 }];
-
-    const allowed = await manager.filterAccessibleHostIds("u1", [1, 2, 3]);
-
-    expect([...allowed].sort()).toEqual([1, 2]);
-  });
-
-  it("excludes another tenant's hosts", async () => {
-    accessState.ownedHostIds = new Set([1]);
-
-    const allowed = await manager.filterAccessibleHostIds("u1", [1, 99, 100]);
-
-    expect(allowed.has(99)).toBe(false);
-    expect(allowed.has(100)).toBe(false);
-  });
-
-  it("gives an admin every host without per-host lookups", async () => {
-    accessState.adminIds = new Set(["admin1"]);
-
-    const allowed = await manager.filterAccessibleHostIds(
-      "admin1",
-      [1, 2, 3, 4],
-    );
-
-    expect([...allowed].sort()).toEqual([1, 2, 3, 4]);
-  });
-
-  it("resolves the whole fleet with a single owned-hosts query", async () => {
-    accessState.ownedHostIds = new Set(
-      Array.from({ length: 500 }, (_, i) => i + 1),
-    );
-    const ids = Array.from({ length: 500 }, (_, i) => i + 1);
-
-    const allowed = await manager.filterAccessibleHostIds("u1", ids);
-
-    expect(allowed.size).toBe(500);
-    // The point of the batch path: cost does not scale with host count.
-    expect(accessState.ownedQueryCalls).toBe(1);
-  });
-
-  it("short-circuits an empty list without querying", async () => {
-    const allowed = await manager.filterAccessibleHostIds("u1", []);
+  it("short-circuits an empty fleet", async () => {
+    const allowed = await manager.filterAccessibleHostIds("owner", []);
 
     expect(allowed.size).toBe(0);
-    expect(accessState.ownedQueryCalls).toBe(0);
+    expect(state.ownedQueryCalls).toBe(0);
   });
 
-  it("fails closed when the lookup throws", async () => {
-    accessState.ownedHostIds = null as unknown as Set<number>;
+  it("fails closed when ownership checks fail", async () => {
+    state.failOwnedLookup = true;
+    expect(await manager.canAccessHost("owner", 42, "connect")).toEqual({
+      hasAccess: false,
+      isOwner: false,
+      isShared: false,
+    });
 
-    const allowed = await manager.filterAccessibleHostIds("u1", [1, 2]);
-
-    expect(allowed.size).toBe(0);
+    state.failListLookup = true;
+    expect((await manager.filterAccessibleHostIds("owner", [1, 2])).size).toBe(0);
   });
 });
