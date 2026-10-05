@@ -56,6 +56,7 @@ const {
 } = await import("../../plugins/service-registry.js");
 const { pluginEvents } = await import("../../plugins/events.js");
 const { createFixturePlugin } = await import("./fixture-plugin.js");
+const { runAsActor } = await import("../../plugins/actor.js");
 
 const SERVICE = "testplugin.greet";
 // Registered as <pluginId>.<name>, so it carries the provider fixture id.
@@ -121,7 +122,7 @@ function consumerFixture(
 ): Fixture {
   return createFixturePlugin({
     id: "docker",
-    capabilities: ["kv:own", "users:impersonate"],
+    capabilities: ["kv:own"],
     backendSource: CONSUMER_SOURCE,
     manifestOverrides: { category: "Infrastructure", requires },
   });
@@ -129,7 +130,6 @@ function consumerFixture(
 
 type GreetHandle = {
   hello: (name: string) => Promise<string>;
-  asUser: (userId: string) => { hello: (name: string) => Promise<string> };
 };
 
 function handle(): GreetHandle {
@@ -233,9 +233,9 @@ describe("plugin service contracts", () => {
   it("allows a call from a user who holds the permission", async () => {
     await activateBoth();
 
-    await expect(handle().asUser("alice").hello("world")).resolves.toBe(
-      "hello world",
-    );
+    await expect(
+      runAsActor("alice", "request", () => handle().hello("world")),
+    ).resolves.toBe("hello world");
     expect(providerCallCount()).toBe(1);
 
     const entry = state.auditEntries.at(-1);
@@ -250,10 +250,7 @@ describe("plugin service contracts", () => {
     await activateBoth();
     state.granted.delete(PERMISSION);
 
-    await handle()
-      .asUser("mallory")
-      .hello("world")
-      .then(
+    await runAsActor("mallory", "request", () => handle().hello("world")).then(
         () => expect.unreachable("should have been denied"),
         (error: InstanceType<typeof PluginServicePermissionError>) => {
           expect(error.name).toBe("PluginServicePermissionError");
@@ -277,30 +274,36 @@ describe("plugin service contracts", () => {
 
   it("honours a revoke mid-session on the very next call", async () => {
     await activateBoth();
-    const live = handle().asUser("alice");
+    const live = handle();
 
-    await expect(live.hello("first")).resolves.toBe("hello first");
+    await expect(
+      runAsActor("alice", "request", () => live.hello("first")),
+    ).resolves.toBe("hello first");
 
     // No restart, no reinstall, same handle: the check is per call, which is
     // exactly why it lives in the proxy rather than at handle creation.
     state.granted.delete(PERMISSION);
 
-    await expect(live.hello("second")).rejects.toThrow(
-      PluginServicePermissionError,
-    );
+    await expect(
+      runAsActor("alice", "request", () => live.hello("second")),
+    ).rejects.toThrow(PluginServicePermissionError);
     expect(providerCallCount()).toBe(1);
 
     // And granting it back takes effect just as immediately.
     state.granted.add(PERMISSION);
-    await expect(live.hello("third")).resolves.toBe("hello third");
+    await expect(
+      runAsActor("alice", "request", () => live.hello("third")),
+    ).resolves.toBe("hello third");
     expect(providerCallCount()).toBe(2);
   });
 
   it("surfaces a clear error once the provider is deactivated, without tearing the consumer down", async () => {
     const { consumerPlugin } = await activateBoth();
-    const live = handle().asUser("alice");
+    const live = handle();
 
-    await expect(live.hello("before")).resolves.toBe("hello before");
+    await expect(
+      runAsActor("alice", "request", () => live.hello("before")),
+    ).resolves.toBe("hello before");
 
     await loader!.deactivate("ssh-terminal");
 
@@ -312,7 +315,7 @@ describe("plugin service contracts", () => {
 
     let thrown: unknown;
     try {
-      await live.hello("after");
+      await runAsActor("alice", "request", () => live.hello("after"));
     } catch (error) {
       thrown = error;
     }
