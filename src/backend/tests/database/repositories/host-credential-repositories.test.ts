@@ -621,24 +621,31 @@ describe("HostRepository and CredentialRepository", () => {
     );
   });
 
-  it("cleans host access before deleting a host", async () => {
+  it("cleans host-scoped plugin settings before deleting a host", async () => {
     const repo = await createRepositories();
     const host = await repo.hosts.create({
       userId: "user-1",
-      name: "shared-host",
+      name: "web-with-plugin-settings",
       ip: "10.0.0.20",
       port: 22,
       username: "root",
       authType: "password",
     });
 
-    await adapter!.run(
-      sql`INSERT INTO host_access (host_id, user_id, granted_by) VALUES (${host.id}, ${"user-2"}, ${"user-1"})`,
-    );
+    await adapter!.exec(`
+      INSERT INTO plugins (id, name, version, state, manifest_json)
+      VALUES ('sample', 'Sample', '1.0.0', 'enabled', '{}');
+      INSERT INTO plugin_settings (plugin_id, scope, scope_id, key, value)
+      VALUES ('sample', 'host', '${host.id}', 'sample-setting', '"value"');
+    `);
 
-    expect(await repo.hosts.deleteAccessForHost(host.id)).toBe(1);
     expect(await repo.hosts.deleteForUser("user-1", host.id)).toEqual({
       syncId: expect.any(String),
     });
+    expect(
+      await adapter!.query(
+        sql`SELECT id FROM plugin_settings WHERE scope = 'host' AND scope_id = ${String(host.id)}`,
+      ),
+    ).toEqual([]);
   });
 });
