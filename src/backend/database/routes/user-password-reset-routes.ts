@@ -7,6 +7,8 @@ import {
   createCurrentRecentActivityRepository,
   createCurrentSshCredentialUsageRepository,
   createCurrentUserRepository,
+  createCurrentUserAuthRepository,
+  createCurrentTrustedDeviceRepository,
 } from "../repositories/factory.js";
 import { pluginEvents, TOPICS } from "../../plugins/events.js";
 
@@ -70,9 +72,10 @@ export async function resetUserPassword(
   await deleteLegacyWraps(userId);
   await authManager.logoutUser(userId);
 
-  const { resetUserSecondFactors } =
-    await import("../../auth/second-factor-admin.js");
-  await resetUserSecondFactors(userId);
+  // Clear legacy browser-2FA state so an upgraded database cannot retain
+  // stale enrolments or trusted-device bypasses after local recovery.
+  await createCurrentUserAuthRepository().clearSecondFactors(userId);
+  await createCurrentTrustedDeviceRepository().deleteByUserId(userId);
 
   authLogger.warn("Password reset locally after destructive data wipe", {
     operation: "password_reset_data_deleted",
