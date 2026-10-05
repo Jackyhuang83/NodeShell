@@ -1,9 +1,7 @@
 /**
- * The actor cannot be spoofed. It is set by a request or by ctx.asUser, and
- * every other way of naming a user (a service handle, a shared secret read)
- * is audited the same way asUser is. RBAC inside ctx.hosts and ctx.ssh is
- * applied for that actor, so a user without access to a host cannot reach it
- * through a plugin.
+ * The actor cannot be spoofed. Requests set it and background work may only
+ * resume as the canonical Owner. Plugin services inherit that ambient actor;
+ * plugins cannot name another user.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -85,7 +83,6 @@ function contextFor(pluginId: string, extra: Record<string, unknown> = {}) {
         "hosts:read",
         "ssh:connect",
         "credentials:use",
-        "users:impersonate",
       ],
       requires: [{ service: "sample.echo", versionRange: "^1.0.0" }],
       ...extra,
@@ -93,9 +90,6 @@ function contextFor(pluginId: string, extra: Record<string, unknown> = {}) {
     handle,
   );
 }
-
-const asUserLines = () =>
-  auditEntries.filter((entry) => entry.action === "plugin_as_user");
 
 beforeEach(() => {
   auditEntries.length = 0;
@@ -105,7 +99,7 @@ beforeEach(() => {
 });
 afterEach(() => clearServiceRegistry());
 
-describe("naming a user is audited like ctx.asUser", () => {
+describe("plugin services inherit the ambient actor", () => {
   function provider() {
     const ctx = contextFor("provider", {
       provides: [
@@ -115,54 +109,9 @@ describe("naming a user is audited like ctx.asUser", () => {
     ctx.services.provide("sample.echo", {
       whoAmI: async () => getActor(),
     });
-    return ctx;
   }
 
-  it("ctx.asUser writes an as_user line", async () => {
-    const ctx = contextFor("caller");
-    await ctx.asUser("victim", async () => undefined);
-    expect(asUserLines()).toHaveLength(1);
-    expect(asUserLines()[0]).toMatchObject({ resourceId: "caller" });
-  });
-
-  it("services.get({ userId }) for someone else writes one too", async () => {
-    provider();
-    const caller = contextFor("caller");
-    const handle = caller.services.get<{ whoAmI: () => Promise<string> }>(
-      "sample.echo",
-      { userId: "victim" },
-    );
-    await runAsActor("alice", "request", async () => {
-      expect(await handle.whoAmI()).toBe("victim");
-    });
-    expect(asUserLines()).toHaveLength(1);
-    expect(String(asUserLines()[0].details)).toMatch(/victim/);
-  });
-
-  it("a handle's asUser(userId) writes one too", async () => {
-    provider();
-    const caller = contextFor("caller");
-    const handle = caller.services.get<{
-      asUser: (userId: string) => { whoAmI: () => Promise<string> };
-    }>("sample.echo");
-    await runAsActor("alice", "request", async () => {
-      expect(await handle.asUser("victim").whoAmI()).toBe("victim");
-    });
-    expect(asUserLines()).toHaveLength(1);
-  });
-
-  it("naming the actor itself is not a switch and writes nothing", async () => {
-    provider();
-    const caller = contextFor("caller");
-    const handle = caller.services.get<{ whoAmI: () => Promise<string> }>(
-      "sample.echo",
-      { userId: "alice" },
-    );
-    await runAsActor("alice", "request", () => handle.whoAmI());
-    expect(asUserLines()).toHaveLength(0);
-  });
-
-  it("the provider sees the user the permission was checked for", async () => {
+  it("passes the authenticated actor to the provider", async () => {
     provider();
     const caller = contextFor("caller");
     const handle = caller.services.get<{ whoAmI: () => Promise<string> }>(
@@ -171,6 +120,15 @@ describe("naming a user is audited like ctx.asUser", () => {
     await runAsActor("alice", "request", async () => {
       expect(await handle.whoAmI()).toBe("alice");
     });
+  });
+
+  it("does not invent an actor for a background call", async () => {
+    provider();
+    const caller = contextFor("caller");
+    const handle = caller.services.get<{ whoAmI: () => Promise<string> }>(
+      "sample.echo",
+    );
+    await expect(handle.whoAmI()).rejects.toThrow(/acting user/i);
   });
 });
 
