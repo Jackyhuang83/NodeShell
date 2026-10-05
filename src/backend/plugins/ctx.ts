@@ -15,7 +15,7 @@
  *     review and the kill list.
  *
  * The actor never comes from plugin code. It comes from AsyncLocalStorage,
- * set by a request or by ctx.asUser, so a plugin cannot name a user and be
+ * set by a request or by ctx.asOwner, so a plugin cannot name another user and be
  * believed.
  */
 
@@ -188,34 +188,27 @@ export function createPluginContext(
       await import("../database/repositories/factory.js");
     return createCurrentPluginSettingsRepository();
   };
-  // A user named by the plugin instead of the ambient actor. The same thing
-  // as ctx.asUser, so it needs the same capability and gets the same audit.
+  // Compatibility userId parameters may only repeat the ambient Owner.
+  // Plugins cannot use them to select a different account in v0.1.
   const namedUser = (
     userId: string | undefined,
     via: string,
   ): string | undefined => {
-    if (!userId) return getActor();
-    if (userId !== getActor()) {
-      if (!declared.includes("users:impersonate")) {
-        throw capabilityRefused(pluginId, "users:impersonate");
-      }
-      void writeAudit(
-        manifest,
-        {
-          action: "as_user",
-          details: () => `${pluginId} acted as ${userId} through ${via}`,
-        },
-        { success: true },
+    const actor = getActor();
+    if (!userId) return actor;
+    if (userId !== actor) {
+      throw new Error(
+        `Plugin ${pluginId} cannot name another user through ${via} in owner-only mode`,
       );
     }
-    return userId;
+    return actor;
   };
 
   const secretOwner = (): string => {
     const actor = getActor();
     if (!actor) {
       throw new Error(
-        "ctx.secrets needs an acting user: call it inside a request or ctx.asUser",
+        "ctx.secrets needs an acting user: call it inside a request or ctx.asOwner",
       );
     }
     return actor;
@@ -535,8 +528,7 @@ export function createPluginContext(
           service,
           pluginId,
           {
-            // Naming a user other than the actor is the same thing as
-            // ctx.asUser, so it gets the same audit line.
+            // A compatibility userId may only repeat the ambient Owner.
             resolveUserId: () =>
               namedUser(options?.userId, `service ${service}`),
             nameUser: (userId) => namedUser(userId, `service ${service}`),
@@ -924,27 +916,25 @@ export function createPluginContext(
     },
 
     /**
-     * Background work acts as a named user. Always audited, because "this ran
-     * as someone" is exactly the thing an operator needs to be able to see.
+     * Background work may resume only as the canonical NodeShell Owner.
+     * Core resolves the account; a plugin never supplies a user id.
      */
-    asUser: async (userId, fn) => {
-      if (typeof userId !== "string" || userId.length === 0) {
-        throw new Error(
-          `Plugin ${pluginId} called ctx.asUser without a user id`,
-        );
-      }
-      if (!declared.includes("users:impersonate")) {
-        throw capabilityRefused(pluginId, "users:impersonate");
+    asOwner: async (fn) => {
+      const { createCurrentUserRepository } =
+        await import("../database/repositories/factory.js");
+      const owner = await createCurrentUserRepository().findOwner();
+      if (!owner) {
+        throw new Error("NodeShell owner is not initialized");
       }
       await writeAudit(
         manifest,
         {
-          action: "as_user",
-          details: () => `${pluginId} ran background work as ${userId}`,
+          action: "as_owner",
+          details: () => `${pluginId} resumed background work as the Owner`,
         },
         { success: true },
       );
-      return runAsActor(userId, "asUser", () => Promise.resolve(fn()));
+      return runAsActor(owner.id, "owner", () => Promise.resolve(fn()));
     },
 
     currentActor: () => getActor(),
