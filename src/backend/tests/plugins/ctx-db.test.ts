@@ -188,12 +188,7 @@ describe("ctx.db capability", () => {
 
     const refs = (await ctx.db.refs()) as Record<string, unknown>;
 
-    expect(Object.keys(refs).sort()).toEqual([
-      "hosts",
-      "roles",
-      "userRoles",
-      "users",
-    ]);
+    expect(Object.keys(refs).sort()).toEqual(["hosts", "users"]);
   });
 });
 

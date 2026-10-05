@@ -31,11 +31,7 @@ function target(id: number, extra: Partial<Target> = {}): Target {
   };
 }
 
-function setup(
-  targets: Target[],
-  reachable = true,
-  shared: Record<string, number[]> = {},
-) {
+function setup(targets: Target[], reachable = true) {
   const emitted: unknown[] = [];
   const ping = vi.fn(async () => reachable);
   const pingThroughJumpHosts = vi.fn(async () => reachable);
@@ -49,7 +45,6 @@ function setup(
   );
   const service = new HostStatusService({
     loadTargets,
-    loadSharedHostIds: async (userId) => shared[userId] ?? [],
     ping,
     pingThroughJumpHosts,
     globalInterval: () => 60,
@@ -92,29 +87,6 @@ describe("HostStatusService", () => {
     });
   });
 
-  it("checks a host shared with the user before its owner ever asks", async () => {
-    const { service, ping } = setup([target(5)], true, { recipient: [5] });
-    active = service;
-
-    await service.statusesFor("recipient", null);
-    await flush();
-
-    expect(ping).toHaveBeenCalledWith("10.0.0.5", 22);
-    expect(service.get(5)?.status).toBe("online");
-  });
-
-  it("only starts the shared hosts a desktop request names", async () => {
-    const { service, ping } = setup([target(5), target(6)], true, {
-      recipient: [5, 6],
-    });
-    active = service;
-
-    await service.statusesFor("recipient", new Set([6]));
-    await flush();
-
-    expect(ping).toHaveBeenCalledWith("10.0.0.6", 22);
-    expect(ping).not.toHaveBeenCalledWith("10.0.0.5", 22);
-  });
 
   it("reports offline for a host that does not answer", async () => {
     const { service } = setup([target(1)], false);

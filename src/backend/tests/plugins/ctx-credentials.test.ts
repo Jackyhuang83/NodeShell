@@ -310,47 +310,6 @@ describe("ctx.credentials.resolveHostProtocol", () => {
     });
   });
 
-  it("never hands a shared recipient the owner's raw secrets", async () => {
-    grants.set("demo", ["credentials:read"]);
-    state.resolution = {
-      source: "owner-shared",
-      authType: "direct",
-      secret: {
-        username: "shared",
-        password: "snap",
-        fields: { ticket: "snap-ticket" },
-      },
-    };
-    const ctx = spiceContext(["credentials:read"]);
-
-    const target = await runAsActor("guest", "request", () =>
-      ctx.credentials.resolveHostProtocol(7, "spice"),
-    );
-    expect(target?.shared).toBe(true);
-    expect(target?.auth).toEqual({
-      authType: "direct",
-      username: "shared",
-      password: "snap",
-      fields: { display: "2", ticket: "snap-ticket" },
-    });
-    expect(state.resolverCalls[0]).toMatchObject({ password: null });
-    // The owner's login is never decrypted for a recipient.
-    expect(state.ownerDecrypts).toBe(0);
-  });
-
-  it("gives a recipient with nothing shared an empty login", async () => {
-    grants.set("demo", ["credentials:read"]);
-    state.resolution = { source: "required" };
-    const ctx = spiceContext(["credentials:read"]);
-
-    const target = await runAsActor("guest", "request", () =>
-      ctx.credentials.resolveHostProtocol(7, "spice"),
-    );
-    expect(target?.auth.username).toBe("");
-    expect(target?.auth.password).toBe("");
-    expect(target?.auth.fields.ticket).toBe("");
-    expect(state.ownerDecrypts).toBe(0);
-  });
 
   it("returns null without connect access or for a missing host", async () => {
     grants.set("demo", ["credentials:read"]);

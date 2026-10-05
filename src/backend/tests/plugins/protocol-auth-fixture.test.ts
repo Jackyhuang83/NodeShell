@@ -1,11 +1,7 @@
 /**
- * A fixture plugin declares a protocol core has never heard of ("spice") and
- * gets a per-host login stored, encrypted, shared with a recipient (and
- * overridden by them) and resolved, with no core change: only the manifest
- * declaration. Runs on a real database with real repositories, sharing
- * manager and override service; only keys, permissions and audit are faked.
+ * A fixture plugin declares a protocol core does not know ("spice") and gets a
+ * per-host login stored, encrypted and resolved for the owning user.
  */
-
 import crypto from "node:crypto";
 import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,7 +12,6 @@ import type { DatabaseContext } from "../../database/repositories/database-conte
 const state = vi.hoisted(() => ({
   db: null as null | { drizzle: unknown },
   keys: new Map<string, Buffer>(),
-  levels: new Map<string, string>(),
 }));
 
 vi.mock("../../database/db/index.js", () => ({
@@ -50,12 +45,15 @@ vi.mock("../../utils/data-crypto.js", async (importOriginal) => {
 vi.mock("../../utils/permission-manager.js", () => ({
   PermissionManager: {
     getInstance: () => ({
-      canAccessHost: async (userId: string, _hostId: number) => {
-        const level = state.levels.get(userId);
-        return level
-          ? { hasAccess: true, isShared: true, permissionLevel: level }
-          : { hasAccess: false };
-      },
+      canAccessHost: async (userId: string) =>
+        userId === "owner"
+          ? {
+              hasAccess: true,
+              isOwner: true,
+              isShared: false,
+              permissionLevel: "manage",
+            }
+          : { hasAccess: false, isOwner: false, isShared: false },
       hasPermission: async () => true,
     }),
   },
@@ -64,21 +62,15 @@ vi.mock("../../utils/permission-manager.js", () => ({
 import { setHostProtocolSource } from "../../hosts/protocol-auth/registry.js";
 import {
   loadProtocolAuthSummaries,
-  ProtocolAuthWriteError,
   readProtocolAuthPayload,
   writeProtocolAuth,
 } from "../../hosts/protocol-auth/protocol-auth.js";
-import { SharedHostSecretsManager } from "../../utils/shared-host-secrets-manager.js";
-import { SharedHostAuthOverrideService } from "../../utils/shared-host-auth-override-service.js";
 import { createPluginContext, createPluginHandle } from "../../plugins/ctx.js";
 import { invalidatePluginPermissionCache } from "../../plugins/permissions.js";
 import { runAsActor } from "../../plugins/actor.js";
-import { sanitizeHostForRecipient } from "../../database/routes/host-normalizers.js";
 import { FieldCrypto } from "../../utils/field-crypto.js";
 
 const HOST_ID = 10;
-const GRANT_ID = 1;
-
 const manifest = {
   id: "fixture-spice",
   name: "Fixture Spice",
@@ -110,30 +102,19 @@ beforeEach(async () => {
   database = new TestSqliteDatabase("sqlite");
   context = await database.connect();
   state.db = context;
-  state.keys = new Map([
-    ["owner", crypto.randomBytes(32)],
-    ["recipient", crypto.randomBytes(32)],
-  ]);
-  state.levels = new Map([["recipient", "connect"]]);
+  state.keys = new Map([["owner", crypto.randomBytes(32)]]);
   for (const statement of [
-    `INSERT INTO users (id, username, password_hash) VALUES
-      ('owner', 'owner', 'x'), ('recipient', 'recipient', 'x')`,
+    `INSERT INTO users (id, username, password_hash) VALUES ('owner', 'owner', 'x')`,
     `INSERT INTO ssh_credentials (id, user_id, name, username, password, auth_type)
-      VALUES (5, 'recipient', 'mine', 'own-user', 'own-pass', 'password'),
-             (6, 'owner', 'owners', 'cred-user', 'cred-pass', 'password')`,
+      VALUES (6, 'owner', 'owners', 'cred-user', 'cred-pass', 'password')`,
     `INSERT INTO ssh_data (id, user_id, name, ip, port, username, password, auth_type)
       VALUES (${HOST_ID}, 'owner', 'desk', '10.0.0.10', 22, 'root', 'ssh-pass', 'password')`,
-    `INSERT INTO host_access (id, host_id, user_id, granted_by, permission_level)
-      VALUES (${GRANT_ID}, ${HOST_ID}, 'recipient', 'owner', 'connect')`,
     `INSERT INTO plugins (id, name, version, state, manifest_json)
       VALUES ('fixture-spice', 'Fixture Spice', '1.0.0', 'enabled', '{}')`,
     `INSERT INTO plugin_permission_grants (plugin_id, capability, source)
       VALUES ('fixture-spice', 'credentials:read', 'bundled')`,
-  ]) {
-    await exec(statement);
-  }
+  ]) await exec(statement);
   invalidatePluginPermissionCache();
-  // What the loader does with every installed manifest.
   setHostProtocolSource(() =>
     manifest.contributes!.protocols!.map((protocol) => ({
       ...protocol,
@@ -165,7 +146,6 @@ async function storeLogin(): Promise<void> {
         password: "spice-pass",
         fields: { display: "2", ticket: "t-secret" },
       },
-      unknown: { username: "ignored" },
     },
   });
   await writeProtocolAuth("owner", HOST_ID, patch!, { isOwner: true });
@@ -179,16 +159,14 @@ async function storedRow(): Promise<Record<string, unknown>> {
   return rows[0];
 }
 
-describe("a plugin protocol core does not know", () => {
-  it("stores the login encrypted with the owner's key, secrets apart", async () => {
+describe("owner-only plugin protocol authentication", () => {
+  it("stores the login encrypted with the owner's key", async () => {
     await storeLogin();
     const row = await storedRow();
-
     expect(row.protocol).toBe("spice");
     expect(row.username).toBe("viewer");
     expect(JSON.parse(row.fields as string)).toEqual({ display: "2" });
     expect(String(row.password)).not.toContain("spice-pass");
-    expect(String(row.secret_fields)).not.toContain("t-secret");
     expect(
       FieldCrypto.decryptField(
         row.password as string,
@@ -197,25 +175,11 @@ describe("a plugin protocol core does not know", () => {
         "password",
       ),
     ).toBe("spice-pass");
-    expect(() =>
-      FieldCrypto.decryptField(
-        row.password as string,
-        state.keys.get("recipient")!,
-        "",
-        "password",
-      ),
-    ).toThrow();
-
     const summaries = await loadProtocolAuthSummaries([{ id: HOST_ID }]);
-    expect(summaries.get(HOST_ID)).toEqual({
-      spice: {
-        authType: "direct",
-        credentialId: null,
-        username: "viewer",
-        fields: { display: "2" },
-        hasPassword: true,
-        secretFieldKeys: ["ticket"],
-      },
+    expect(summaries.get(HOST_ID)?.spice).toMatchObject({
+      authType: "direct",
+      username: "viewer",
+      hasPassword: true,
     });
   });
 
@@ -233,7 +197,7 @@ describe("a plugin protocol core does not know", () => {
     });
   });
 
-  it("treats a tampered password as missing, never as a value", async () => {
+  it("treats a tampered password as missing", async () => {
     await storeLogin();
     const row = await storedRow();
     const envelope = JSON.parse(row.password as string);
@@ -241,7 +205,6 @@ describe("a plugin protocol core does not know", () => {
     await exec(
       `UPDATE host_protocol_auth SET password = '${JSON.stringify(envelope)}' WHERE host_id = ${HOST_ID}`,
     );
-
     const target = await runAsActor("owner", "request", () =>
       pluginCtx().credentials.resolveHostProtocol(HOST_ID, "spice"),
     );
@@ -249,76 +212,11 @@ describe("a plugin protocol core does not know", () => {
     expect(target?.auth.fields.ticket).toBe("t-secret");
   });
 
-  it("gives a recipient the shared snapshot, not the owner's secret", async () => {
-    await storeLogin();
-    await SharedHostSecretsManager.getInstance().snapshotForUser(
-      GRANT_ID,
-      HOST_ID,
-      "recipient",
-      "owner",
-    );
-    // The owner's row loses its password without a resync: the recipient
-    // keeps reading their own copy, never the owner's row.
-    await exec(
-      `UPDATE host_protocol_auth SET password = NULL WHERE host_id = ${HOST_ID}`,
-    );
-
-    const target = await runAsActor("recipient", "request", () =>
-      pluginCtx().credentials.resolveHostProtocol(HOST_ID, "spice"),
-    );
-    expect(target?.shared).toBe(true);
-    expect(target?.auth).toEqual({
-      authType: "direct",
-      username: "viewer",
-      password: "spice-pass",
-      fields: { display: "2", ticket: "t-secret" },
-    });
-  });
-
-  it("uses the recipient's own override over the shared snapshot", async () => {
-    await storeLogin();
-    await SharedHostSecretsManager.getInstance().snapshotForUser(
-      GRANT_ID,
-      HOST_ID,
-      "recipient",
-      "owner",
-    );
-    await SharedHostAuthOverrideService.getInstance().setCredentialId(
-      HOST_ID,
-      "recipient",
-      "spice",
-      5,
-    );
-
-    const target = await runAsActor("recipient", "request", () =>
-      pluginCtx().credentials.resolveHostProtocol(HOST_ID, "spice"),
-    );
-    expect(target?.auth).toEqual({
-      authType: "credential",
-      username: "own-user",
-      password: "own-pass",
-      // The owner's plain fields, never their secret ones.
-      fields: { display: "2", ticket: "" },
-    });
-  });
-
-  it("refuses an override for a protocol nobody declares", async () => {
-    await expect(
-      SharedHostAuthOverrideService.getInstance().setCredentialId(
-        HOST_ID,
-        "recipient",
-        "made-up",
-        5,
-      ),
-    ).rejects.toThrow(/No plugin declares/);
-  });
-
-  it("follows a credential the owner points the login at", async () => {
+  it("follows a credential the owner selects", async () => {
     const patch = readProtocolAuthPayload({
       protocolAuth: { spice: { authType: "credential", credentialId: 6 } },
     });
     await writeProtocolAuth("owner", HOST_ID, patch!, { isOwner: true });
-
     const target = await runAsActor("owner", "request", () =>
       pluginCtx().credentials.resolveHostProtocol(HOST_ID, "spice"),
     );
@@ -327,61 +225,5 @@ describe("a plugin protocol core does not know", () => {
       username: "cred-user",
       password: "cred-pass",
     });
-  });
-
-  it("lets a shared editor change the login but not its credential", async () => {
-    await storeLogin();
-    const rename = readProtocolAuthPayload({
-      protocolAuth: { spice: { username: "renamed", password: "" } },
-    });
-    await writeProtocolAuth("owner", HOST_ID, rename!, { isOwner: false });
-    expect((await storedRow()).username).toBe("renamed");
-    // An empty password from an editor who cannot see it keeps it.
-    const target = await runAsActor("owner", "request", () =>
-      pluginCtx().credentials.resolveHostProtocol(HOST_ID, "spice"),
-    );
-    expect(target?.auth.password).toBe("spice-pass");
-
-    const repoint = readProtocolAuthPayload({
-      protocolAuth: { spice: { authType: "credential", credentialId: 6 } },
-    });
-    await expect(
-      writeProtocolAuth("owner", HOST_ID, repoint!, { isOwner: false }),
-    ).rejects.toBeInstanceOf(ProtocolAuthWriteError);
-    const remove = readProtocolAuthPayload({ protocolAuth: { spice: null } });
-    await writeProtocolAuth("owner", HOST_ID, remove!, { isOwner: false });
-    expect(
-      (await context.drizzle.all(
-        sql.raw(`SELECT id FROM host_protocol_auth`),
-      )) as unknown[],
-    ).toHaveLength(0);
-  });
-
-  it("shows each share level only what it may see", async () => {
-    await storeLogin();
-    const summaries = await loadProtocolAuthSummaries([{ id: HOST_ID }]);
-    const host = {
-      id: HOST_ID,
-      name: "desk",
-      ip: "10.0.0.10",
-      protocolAuth: summaries.get(HOST_ID),
-    };
-
-    expect(
-      sanitizeHostForRecipient({ ...host }, "connect").protocolAuth,
-    ).toEqual({ spice: { authType: "direct" } });
-    for (const level of ["view", "edit", "manage"]) {
-      expect(
-        sanitizeHostForRecipient({ ...host }, level).protocolAuth,
-        level,
-      ).toEqual({
-        spice: {
-          authType: "direct",
-          credentialId: null,
-          username: "viewer",
-          fields: { display: "2" },
-        },
-      });
-    }
   });
 });

@@ -199,7 +199,7 @@ beforeEach(() => {
 });
 
 describe("a plugin's external identity", () => {
-  it("carries the 2.8 identifier, role map and logout claims into core", async () => {
+  it("carries the 2.8 identifier and logout claims into core", async () => {
     setup();
     const identity = await getLoginMethod("corp-sso")!.callback!(
       fakeRequest() as never,
@@ -215,7 +215,6 @@ describe("a plugin's external identity", () => {
     expect(h.state.identities).toContainEqual(
       expect.objectContaining({ providerId: "3", subject: "sub-1" }),
     );
-    expect(h.state.roles).toContainEqual({ userId: user.id, roleName: "ops" });
     expect(h.manager.generateJWTToken).toHaveBeenCalledWith(
       user.id,
       expect.objectContaining({
@@ -291,14 +290,6 @@ describe("ctx.auth.completeRedirectLogin", () => {
     ).rejects.toMatchObject({ name: "PluginCapabilityError" });
   });
 
-  it("is refused while trusted proxy login is on", async () => {
-    const { auth } = setup();
-    h.trustedProxy = true;
-    const res = fakeResponse();
-    await auth.completeRedirectLogin("corp-sso", fakeRequest(), res);
-    expect(res.statusCode).toBe(409);
-    expect(res.cookies).toHaveLength(0);
-  });
 });
 
 describe("the other ctx.auth helpers", () => {

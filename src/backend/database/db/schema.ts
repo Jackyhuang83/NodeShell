@@ -477,36 +477,6 @@ export const hostAccess = sqliteTable(
   ],
 );
 
-export const sharedHostAuthOverrides = sqliteTable(
-  "shared_host_auth_overrides",
-  {
-    id: integer("id").primaryKey({ autoIncrement: true }),
-    hostId: integer("host_id")
-      .notNull()
-      .references(() => hosts.id, { onDelete: "cascade" }),
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    protocol: text("protocol").notNull().default("ssh"),
-    credentialId: integer("credential_id")
-      .notNull()
-      .references(() => sshCredentials.id, { onDelete: "cascade" }),
-    createdAt: text("created_at")
-      .notNull()
-      .default(sql`CURRENT_TIMESTAMP`),
-    updatedAt: text("updated_at")
-      .notNull()
-      .default(sql`CURRENT_TIMESTAMP`),
-  },
-  (table) => [
-    uniqueIndex("shared_host_auth_overrides_host_user_protocol_unique").on(
-      table.hostId,
-      table.userId,
-      table.protocol,
-    ),
-  ],
-);
-
 export const sharedHostSecrets = sqliteTable(
   "shared_host_secrets",
   {

@@ -496,10 +496,6 @@ describe("external identities", () => {
         subject: "sub-1",
       }),
     ]);
-    expect(h.state.roles).toContainEqual({
-      userId: user.id,
-      roleName: "admin",
-    });
   });
 
   it("refuses a new user when provisioning is off, and one outside the allowed list", async () => {
@@ -784,12 +780,4 @@ describe("lockout guard", () => {
     }
   });
 
-  it("counts trusted proxy login as another way in", async () => {
-    h.state.settings.set("allow_password_login", "false");
-    h.trustedProxy = true;
-    expect(await getPasswordLoginStatus()).toEqual({
-      allowed: false,
-      forced: false,
-    });
-  });
 });

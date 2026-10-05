@@ -235,17 +235,14 @@ beforeEach(() => {
 });
 
 describe("ctx.hosts", () => {
-  it("refuses list/get/checkAccess without hosts:read", async () => {
+  it("refuses list/get without hosts:read", async () => {
     const audit = vi.fn(async () => {});
     const hosts = createPluginHosts({ manifest: manifest([]), audit });
     await expect(hosts.list()).rejects.toBeInstanceOf(PluginCapabilityError);
     await expect(hosts.get(1)).rejects.toBeInstanceOf(PluginCapabilityError);
-    await expect(hosts.checkAccess(1, "view")).rejects.toBeInstanceOf(
-      PluginCapabilityError,
-    );
   });
 
-  it("lists owned and shared hosts once granted hosts:read", async () => {
+  it("lists only hosts owned by the acting user", async () => {
     h.granted = new Set(["hosts:read"]);
     h.ownedHosts = [
       {
@@ -260,118 +257,11 @@ describe("ctx.hosts", () => {
         authType: "password",
       },
     ];
-    h.sharedRows = [
-      {
-        id: 2,
-        userId: "user-2",
-        name: "shared",
-        ip: "10.0.0.2",
-        port: 22,
-        username: "root",
-        tags: null,
-        folder: null,
-        authType: "key",
-      },
-    ];
     const hosts = createPluginHosts({
       manifest: manifest(["hosts:read"]),
       audit: vi.fn(async () => {}),
     });
-    const list = await hosts.list();
-    expect(list.map((h2) => h2.id)).toEqual([1, 2]);
-  });
-
-  it("checkAccess reports the granted level", async () => {
-    h.granted = new Set(["hosts:read"]);
-    h.access = {
-      hasAccess: true,
-      isOwner: false,
-      isShared: true,
-      permissionLevel: "edit",
-      expiresAt: null,
-    };
-    const hosts = createPluginHosts({
-      manifest: manifest(["hosts:read"]),
-      audit: vi.fn(async () => {}),
-    });
-    const access = await hosts.checkAccess(1, "edit");
-    expect(access).toMatchObject({ hasAccess: true, permissionLevel: "edit" });
-  });
-
-  it("refuses share, listUsers, listRoles without hosts:write, auditing the refusal", async () => {
-    const audit = vi.fn(async () => {});
-    const hosts = createPluginHosts({ manifest: manifest([]), audit });
-    await expect(
-      hosts.share(1, [{ type: "user", id: "user-2" }], "view"),
-    ).rejects.toBeInstanceOf(PluginCapabilityError);
-    await expect(hosts.listUsers()).rejects.toBeInstanceOf(
-      PluginCapabilityError,
-    );
-    await expect(hosts.listRoles()).rejects.toBeInstanceOf(
-      PluginCapabilityError,
-    );
-    expect(audit).toHaveBeenCalledWith(
-      "hosts_share",
-      expect.any(String),
-      expect.objectContaining({ success: false }),
-    );
-  });
-
-  it("shares a host it manages and snapshots secrets per target", async () => {
-    h.granted = new Set(["hosts:write"]);
-    h.access = { hasAccess: true, isOwner: true, isShared: false };
-    const hosts = createPluginHosts({
-      manifest: manifest(["hosts:write"]),
-      audit: vi.fn(async () => {}),
-    });
-    const result = await hosts.share(
-      5,
-      [{ type: "user", id: "user-2" }],
-      "view",
-      24,
-    );
-    expect(result).toEqual({ hostId: 5, shared: true });
-    expect(h.upserts).toHaveLength(1);
-    expect(h.upserts[0]).toMatchObject({
-      hostId: 5,
-      permissionLevel: "view",
-      targetType: "user",
-      targetUserId: "user-2",
-    });
-  });
-
-  it("refuses to share a host the caller does not manage", async () => {
-    h.granted = new Set(["hosts:write"]);
-    h.access = { hasAccess: false, isOwner: false, isShared: false };
-    const hosts = createPluginHosts({
-      manifest: manifest(["hosts:write"]),
-      audit: vi.fn(async () => {}),
-    });
-    const result = await hosts.share(
-      5,
-      [{ type: "user", id: "user-2" }],
-      "view",
-    );
-    expect(result).toEqual({ hostId: 5, shared: false, reason: "forbidden" });
-  });
-
-  it("lists non-system roles and users once granted hosts:write", async () => {
-    h.granted = new Set(["hosts:write"]);
-    h.users = [{ id: "user-1", username: "alice" }];
-    h.roles = [
-      { id: 1, name: "admin", displayName: "Admin", isSystem: true },
-      { id: 2, name: "auditor", displayName: "Auditor", isSystem: false },
-    ];
-    const hosts = createPluginHosts({
-      manifest: manifest(["hosts:write"]),
-      audit: vi.fn(async () => {}),
-    });
-    expect(await hosts.listUsers()).toEqual([
-      { id: "user-1", username: "alice" },
-    ]);
-    expect(await hosts.listRoles()).toEqual([
-      { id: 2, name: "auditor", displayName: "Auditor" },
-    ]);
+    expect((await hosts.list()).map((host) => host.id)).toEqual([1]);
   });
 
   it("refuses create/update/listOwned without hosts:write", async () => {

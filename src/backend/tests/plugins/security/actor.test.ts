@@ -181,8 +181,6 @@ describe("a user cannot reach a host they have no access to", () => {
       expect(await ctx.hosts.get(99)).toBeNull();
       expect(await ctx.hosts.status.get(99)).toBeNull();
       expect(await ctx.hosts.status.check(99)).toBeNull();
-      const access = await ctx.hosts.checkAccess(99, "connect");
-      expect(access.hasAccess).toBe(false);
     });
   });
 
