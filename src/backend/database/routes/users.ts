@@ -1,135 +1,50 @@
-import { isExternalAccount } from "../../auth/external-account.js";
 import type { AuthenticatedRequest } from "../../../types/index.js";
-import express, {
-  type Request,
-  type RequestHandler,
-  type Response,
-} from "express";
+import express, { type Request, type Response } from "express";
 import bcrypt from "bcryptjs";
-import { nanoid } from "nanoid";
 import { authLogger } from "../../utils/logger.js";
 import { AuthManager } from "../../utils/auth-manager.js";
-import { deleteUserAndRelatedData } from "./delete-user-data.js";
 import { shouldShowDonationModal } from "./donation-modal-utils.js";
 import { registerBrandingRoutes } from "./branding-routes.js";
 import { registerUserSettingsRoutes } from "./user-settings-routes.js";
 import { registerTlsRoutes } from "./tls-routes.js";
 import { registerUserSessionRoutes } from "./user-session-routes.js";
-import { registerUserExternalAccountRoutes } from "./user-external-account-routes.js";
 import { registerUserDataAccessRoutes } from "./user-data-access-routes.js";
 import { registerAuthRoutes } from "./auth-routes.js";
 import { registerAuthCompatRoutes } from "./auth-compat-routes.js";
 import { logAudit, getRequestMeta } from "../../utils/audit-logger.js";
-import {
-  createCurrentSettingsRepository,
-  getCurrentSettingValue,
-  createCurrentUserAuthRepository,
-  createCurrentUserRepository,
-} from "../repositories/factory.js";
+import { createCurrentUserRepository } from "../repositories/factory.js";
 import type { UserRecord } from "../repositories/user-repository.js";
-
-import { getPasswordLoginStatus } from "../../auth/core-auth.js";
 import { verifyPasswordLogin } from "../../auth/builtin-login-methods.js";
 import { respondWithLogin, sendLoginError } from "../../auth/login-pipeline.js";
 
 const authManager = AuthManager.getInstance();
-
 const router = express.Router();
-
 
 function isNonEmptyString(val: unknown): val is string {
   return typeof val === "string" && val.trim().length > 0;
-}
-
-function isPasswordResetAllowed(): boolean {
-  return false;
 }
 
 async function findCurrentUser(userId: string): Promise<UserRecord | null> {
   return createCurrentUserRepository().findById(userId);
 }
 
-async function requireCurrentAdmin(userId: string): Promise<UserRecord | null> {
-  const user = await findCurrentUser(userId);
-  return user?.isAdmin ? user : null;
-}
-
 const authenticateJWT = authManager.createAuthMiddleware();
 const requireAdmin = authManager.createAdminMiddleware();
 
 /**
- * @openapi
- * /users/create:
- *   post:
- *     summary: Create a new user
- *     description: Creates a new user with a username and password.
- *     tags:
- *       - Users
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               username:
- *                 type: string
- *               password:
- *                 type: string
- *     responses:
- *       200:
- *         description: User created successfully.
- *       400:
- *         description: Username and password are required.
- *       403:
- *         description: Registration is currently disabled.
- *       409:
- *         description: Username already exists.
- *       500:
- *         description: Failed to create user.
+ * Browser registration is intentionally unavailable in NodeShell v0.1.
+ * Keeping this explicit denial gives older clients a safe, deterministic
+ * answer without exposing an account-creation path.
  */
 router.post("/create", async (_req, res) => {
   return res.status(403).json({
     error:
-      "Browser registration is disabled. Create the first NodeShell owner with the local admin CLI.",
+      "Browser registration is disabled. Create the NodeShell owner with the local admin CLI.",
   });
 });
 
-/**
- * @openapi
- * /users/login:
- *   post:
- *     summary: User login
- *     description: Authenticates a user and returns a JWT.
- *     tags:
- *       - Users
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               username:
- *                 type: string
- *               password:
- *                 type: string
- *     responses:
- *       200:
- *         description: Login successful.
- *       400:
- *         description: Invalid username or password.
- *       401:
- *         description: Invalid username or password.
- *       403:
- *         description: Password authentication is currently disabled.
- *       429:
- *         description: Too many login attempts.
- *       500:
- *         description: Login failed.
- */
 router.post("/login", async (req, res) => {
-  authLogger.info("User login request received", {
+  authLogger.info("Owner login request received", {
     operation: "user_login_request",
     username: req.body?.username,
   });
@@ -144,33 +59,15 @@ router.post("/login", async (req, res) => {
   }
 });
 
-/**
- * @openapi
- * /users/logout:
- *   post:
- *     summary: User logout
- *     description: Logs out the user and clears the JWT cookie.
- *     tags:
- *       - Users
- *     responses:
- *       200:
- *         description: Logged out successfully.
- *       500:
- *         description: Logout failed.
- */
 router.post("/logout", authenticateJWT, async (req, res) => {
   try {
     const authReq = req as AuthenticatedRequest;
-    const userId = authReq.userId;
-
-    if (userId) {
-      const sessionId = authReq.sessionId;
-
-      await authManager.logoutUser(userId, sessionId);
-      authLogger.info("User logged out", {
+    if (authReq.userId) {
+      await authManager.logoutUser(authReq.userId, authReq.sessionId);
+      authLogger.info("Owner logged out", {
         operation: "user_logout",
-        userId,
-        sessionId,
+        userId: authReq.userId,
+        sessionId: authReq.sessionId,
       });
     }
 
@@ -183,90 +80,48 @@ router.post("/logout", authenticateJWT, async (req, res) => {
   }
 });
 
-/**
- * @openapi
- * /users/me:
- *   get:
- *     summary: Get current user's info
- *     description: Retrieves information about the currently authenticated user.
- *     tags:
- *       - Users
- *     responses:
- *       200:
- *         description: User information.
- *       401:
- *         description: Invalid userId or user not found.
- *       500:
- *         description: Failed to get username.
- */
 router.get("/me", authenticateJWT, async (req: Request, res: Response) => {
   const userId = (req as AuthenticatedRequest).userId;
-
   if (!isNonEmptyString(userId)) {
-    authLogger.warn("Invalid userId in JWT for /users/me");
     return res.status(401).json({ error: "Invalid userId" });
   }
+
   try {
     const user = await findCurrentUser(userId);
     if (!user) {
-      authLogger.warn(`User not found for /users/me: ${userId}`);
       return res.status(401).json({ error: "User not found" });
     }
 
-    const hasPassword = user.passwordHash && user.passwordHash.trim() !== "";
-    const isDualAuth =
-      hasPassword && isExternalAccount(user) && !!user.oidcIdentifier;
-
-    const showDonationModal = shouldShowDonationModal(
-      user.registeredAt,
-      !!user.donationModalDismissed,
-    );
-
-    res.json({
+    return res.json({
       userId: user.id,
       username: user.username,
       is_admin: !!user.isAdmin,
-      is_external: isExternalAccount(user),
-      // 2.8 name, kept until 3.0.0.
-      is_oidc: !!user.isOidc,
-      is_dual_auth: isDualAuth,
-      // Any second factor; the name is what 2.8 clients read.
-      totp_enabled: await createCurrentUserAuthRepository().hasSecondFactor(
-        user.id,
+      // Compatibility fields are deliberately fixed off in the owner-only
+      // v0.1 runtime. External identities and browser 2FA are not supported.
+      is_external: false,
+      is_oidc: false,
+      is_dual_auth: false,
+      totp_enabled: false,
+      show_donation_modal: shouldShowDonationModal(
+        user.registeredAt,
+        !!user.donationModalDismissed,
       ),
-      show_donation_modal: showDonationModal,
     });
   } catch (err) {
-    authLogger.error("Failed to get username", err);
-    res.status(500).json({ error: "Failed to get username" });
+    authLogger.error("Failed to load owner profile", err);
+    return res.status(500).json({ error: "Failed to get username" });
   }
 });
 
-/**
- * @openapi
- * /users/me/dismiss-donation-modal:
- *   post:
- *     summary: Permanently dismiss the donation reminder modal
- *     description: Marks the donation reminder modal as dismissed for the currently authenticated user so it is never shown to them again.
- *     tags:
- *       - Users
- *     responses:
- *       200:
- *         description: Donation modal dismissed.
- *       401:
- *         description: Invalid userId or user not found.
- *       500:
- *         description: Failed to dismiss donation modal.
- */
 router.post(
   "/me/dismiss-donation-modal",
   authenticateJWT,
   async (req: Request, res: Response) => {
     const userId = (req as AuthenticatedRequest).userId;
-
     if (!isNonEmptyString(userId)) {
       return res.status(401).json({ error: "Invalid userId" });
     }
+
     try {
       const updated = await createCurrentUserRepository().update(userId, {
         donationModalDismissed: true,
@@ -284,139 +139,30 @@ router.post(
   },
 );
 
-/**
- * @openapi
- * /users/setup-required:
- *   get:
- *     summary: Check if setup is required
- *     description: Checks if the system requires initial setup (i.e., no users exist).
- *     tags:
- *       - Users
- *     responses:
- *       200:
- *         description: Setup status.
- *       500:
- *         description: Failed to check setup status.
- */
-router.get("/setup-required", async (req, res) => {
+router.get("/setup-required", async (_req, res) => {
   try {
     const count = await createCurrentUserRepository().countAll();
-
-    res.json({
-      setup_required: count === 0,
-    });
+    return res.json({ setup_required: count === 0 });
   } catch (err) {
     authLogger.error("Failed to check setup status", err);
-    res.status(500).json({ error: "Failed to check setup status" });
+    return res.status(500).json({ error: "Failed to check setup status" });
   }
 });
 
-/**
- * @openapi
- * /users/count:
- *   get:
- *     summary: Count users
- *     description: Returns the total number of users in the system.
- *     tags:
- *       - Users
- *     responses:
- *       200:
- *         description: User count.
- *       403:
- *         description: Admin access required.
- *       500:
- *         description: Failed to count users.
- */
-router.get("/count", authenticateJWT, async (req, res) => {
-  const userId = (req as AuthenticatedRequest).userId;
-  try {
-    const user = await requireCurrentAdmin(userId);
-    if (!user) {
-      return res.status(403).json({ error: "Admin access required" });
-    }
-
-    const count = await createCurrentUserRepository().countAll();
-    res.json({ count });
-  } catch (err) {
-    authLogger.error("Failed to count users", err);
-    res.status(500).json({ error: "Failed to count users" });
-  }
-});
-
-/**
- * @openapi
- * /users/db-health:
- *   get:
- *     summary: Database health check
- *     description: Checks if the database is accessible.
- *     tags:
- *       - Users
- *     responses:
- *       200:
- *         description: Database is accessible.
- *       500:
- *         description: Database not accessible.
- */
-router.get("/db-health", requireAdmin, async (req, res) => {
+router.get("/db-health", requireAdmin, async (_req, res) => {
   try {
     await createCurrentUserRepository().countAll();
-    res.json({ status: "ok" });
+    return res.json({ status: "ok" });
   } catch (err) {
     authLogger.error("DB health check failed", err);
-    res.status(500).json({ error: "Database not accessible" });
+    return res.status(500).json({ error: "Database not accessible" });
   }
 });
 
-/**
- * @openapi
- * /users/registration-allowed:
- *   get:
- *     summary: Get registration status
- *     description: Checks if user registration is currently allowed.
- *     tags:
- *       - Users
- *     responses:
- *       200:
- *         description: Registration status.
- *       500:
- *         description: Failed to get registration allowed status.
- */
-router.get("/registration-allowed", async (req, res) => {
-  try {
-    res.json({ allowed: false });
-  } catch (err) {
-    authLogger.error("Failed to get registration allowed", err);
-    res.status(500).json({ error: "Failed to get registration allowed" });
-  }
+router.get("/registration-allowed", async (_req, res) => {
+  return res.json({ allowed: false });
 });
 
-/**
- * @openapi
- * /users/registration-allowed:
- *   patch:
- *     summary: Set registration status
- *     description: Enables or disables user registration.
- *     tags:
- *       - Users
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               allowed:
- *                 type: boolean
- *     responses:
- *       200:
- *         description: Registration status updated.
- *       400:
- *         description: Invalid value for allowed.
- *       403:
- *         description: Not authorized.
- *       500:
- *         description: Failed to set registration allowed status.
- */
 router.patch("/registration-allowed", authenticateJWT, async (_req, res) => {
   return res.status(403).json({
     error: "Public registration is permanently disabled in NodeShell v0.1",
@@ -424,314 +170,23 @@ router.patch("/registration-allowed", authenticateJWT, async (_req, res) => {
 });
 
 /**
- * @openapi
- * /users/external-auto-provision:
- *   get:
- *     summary: Get the external account auto-create setting
- *     description: Whether a new account is created the first time someone signs in through an external login (SSO, LDAP or any login plugin). The 2.8 path /users/oidc-auto-provision is accepted too.
- *     tags:
- *       - Users
- *     responses:
- *       200:
- *         description: Auto-create setting.
+ * Password login is the only browser login mode in the v0.1 owner-only
+ * runtime. The compatibility endpoint remains read-only for older UI code.
  */
-const getExternalAutoProvision: RequestHandler = async (_req, res) => {
-  try {
-    res.json({
-      enabled: await createCurrentSettingsRepository().getBoolean(
-        "oidc_auto_provision",
-        false,
-      ),
-    });
-  } catch (err) {
-    authLogger.error("Failed to get external auto-provision setting", err);
-    res
-      .status(500)
-      .json({ error: "Failed to get external auto-provision setting" });
-  }
-};
-
-/**
- * @openapi
- * /users/external-auto-provision:
- *   patch:
- *     summary: Set the external account auto-create setting
- *     description: Enables or disables creating an account on first external sign-in. The 2.8 path /users/oidc-auto-provision is accepted too.
- *     tags:
- *       - Users
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               enabled:
- *                 type: boolean
- *     responses:
- *       200:
- *         description: Setting updated.
- *       400:
- *         description: Invalid value for enabled.
- *       403:
- *         description: Not authorized.
- *       500:
- *         description: Failed to save the setting.
- */
-const setExternalAutoProvision: RequestHandler = async (req, res) => {
-  const userId = (req as AuthenticatedRequest).userId;
-  try {
-    const user = await requireCurrentAdmin(userId);
-    if (!user) {
-      return res.status(403).json({ error: "Not authorized" });
-    }
-    const { enabled } = req.body;
-    if (typeof enabled !== "boolean") {
-      return res.status(400).json({ error: "Invalid value for enabled" });
-    }
-    await createCurrentSettingsRepository().set(
-      "oidc_auto_provision",
-      enabled ? "true" : "false",
-    );
-    res.json({ enabled });
-  } catch (err) {
-    authLogger.error("Failed to set external auto-provision", err);
-    res.status(500).json({ error: "Failed to set external auto-provision" });
-  }
-};
-
-router.get("/external-auto-provision", getExternalAutoProvision);
-router.patch(
-  "/external-auto-provision",
-  authenticateJWT,
-  setExternalAutoProvision,
-);
-// 2.8 paths, kept until 3.0.0.
-router.get("/oidc-auto-provision", getExternalAutoProvision);
-router.patch("/oidc-auto-provision", authenticateJWT, setExternalAutoProvision);
-
-/**
- * @openapi
- * /users/second-factor-after-external-login:
- *   get:
- *     summary: Get the external-login second-factor setting
- *     description: Whether an enrolled second factor is asked for after an external login method (SSO, LDAP), in addition to password and other local logins.
- *     tags:
- *       - Users
- *     responses:
- *       200:
- *         description: External-login second-factor setting.
- */
-router.get("/second-factor-after-external-login", async (_req, res) => {
-  try {
-    res.json({
-      enabled: await createCurrentSettingsRepository().getBoolean(
-        "second_factor_after_external_login",
-        false,
-      ),
-    });
-  } catch (err) {
-    authLogger.error(
-      "Failed to get second-factor-after-external-login setting",
-      err,
-    );
-    res.status(500).json({
-      error: "Failed to get second-factor-after-external-login setting",
-    });
-  }
+router.get("/password-login-allowed", async (_req, res) => {
+  return res.json({ allowed: true, forced: true });
 });
 
-/**
- * @openapi
- * /users/second-factor-after-external-login:
- *   patch:
- *     summary: Set the external-login second-factor setting
- *     description: Enables or disables asking for an enrolled second factor after an external login method (SSO, LDAP).
- *     tags:
- *       - Users
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               enabled:
- *                 type: boolean
- *     responses:
- *       200:
- *         description: External-login second-factor setting updated.
- *       400:
- *         description: Invalid value for enabled.
- *       403:
- *         description: Not authorized.
- *       500:
- *         description: Failed to set second-factor-after-external-login setting.
- */
-router.patch(
-  "/second-factor-after-external-login",
-  authenticateJWT,
-  async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    try {
-      const user = await requireCurrentAdmin(userId);
-      if (!user) {
-        return res.status(403).json({ error: "Not authorized" });
-      }
-      const { enabled } = req.body;
-      if (typeof enabled !== "boolean") {
-        return res.status(400).json({ error: "Invalid value for enabled" });
-      }
-      await createCurrentSettingsRepository().set(
-        "second_factor_after_external_login",
-        enabled ? "true" : "false",
-      );
-      res.json({ enabled });
-    } catch (err) {
-      authLogger.error(
-        "Failed to set second-factor-after-external-login setting",
-        err,
-      );
-      res.status(500).json({
-        error: "Failed to set second-factor-after-external-login setting",
-      });
-    }
-  },
-);
-
-/**
- * @openapi
- * /users/password-login-allowed:
- *   get:
- *     summary: Get password login status
- *     description: Checks if password-based login is currently allowed.
- *     tags:
- *       - Users
- *     responses:
- *       200:
- *         description: Password login status.
- *       500:
- *         description: Failed to get password login allowed status.
- */
-router.get("/password-login-allowed", async (req, res) => {
-  try {
-    const status = await getPasswordLoginStatus();
-    res.json({ allowed: status.allowed, forced: status.forced });
-  } catch (err) {
-    authLogger.error("Failed to get password login allowed", err);
-    res.status(500).json({ error: "Failed to get password login allowed" });
-  }
+router.patch("/password-login-allowed", authenticateJWT, async (_req, res) => {
+  return res.status(403).json({
+    error: "Password login cannot be disabled in NodeShell v0.1",
+  });
 });
 
-/**
- * @openapi
- * /users/password-login-allowed:
- *   patch:
- *     summary: Set password login status
- *     description: Enables or disables password-based login.
- *     tags:
- *       - Users
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               allowed:
- *                 type: boolean
- *     responses:
- *       200:
- *         description: Password login status updated.
- *       400:
- *         description: Invalid value for allowed.
- *       403:
- *         description: Not authorized.
- *       500:
- *         description: Failed to set password login allowed status.
- */
-router.patch("/password-login-allowed", authenticateJWT, async (req, res) => {
-  const userId = (req as AuthenticatedRequest).userId;
-  try {
-    const user = await requireCurrentAdmin(userId);
-    if (!user) {
-      return res.status(403).json({ error: "Not authorized" });
-    }
-    const { allowed } = req.body;
-    if (typeof allowed !== "boolean") {
-      return res.status(400).json({ error: "Invalid value for allowed" });
-    }
-    if (!allowed) {
-      const secondFactorUsers =
-        await createCurrentUserAuthRepository().countUsersWithSecondFactors();
-      if (secondFactorUsers > 0) {
-        return res.status(409).json({
-          error:
-            "Cannot disable password login while 2FA is enabled for one or more users. Disable 2FA first.",
-        });
-      }
-    }
-    await createCurrentSettingsRepository().set(
-      "allow_password_login",
-      allowed ? "true" : "false",
-    );
-    res.json({ allowed });
-  } catch (err) {
-    authLogger.error("Failed to set password login allowed", err);
-    res.status(500).json({ error: "Failed to set password login allowed" });
-  }
+router.get("/password-reset-allowed", async (_req, res) => {
+  return res.json({ allowed: false });
 });
 
-/**
- * @openapi
- * /users/password-reset-allowed:
- *   get:
- *     summary: Get password reset status
- *     description: Checks if password reset is currently allowed.
- *     tags:
- *       - Users
- *     responses:
- *       200:
- *         description: Password reset status.
- *       500:
- *         description: Failed to get password reset allowed status.
- */
-router.get("/password-reset-allowed", async (req, res) => {
-  try {
-    res.json({ allowed: isPasswordResetAllowed() });
-  } catch (err) {
-    authLogger.error("Failed to get password reset allowed", err);
-    res.status(500).json({ error: "Failed to get password reset allowed" });
-  }
-});
-
-/**
- * @openapi
- * /users/password-reset-allowed:
- *   patch:
- *     summary: Set password reset status
- *     description: Enables or disables password reset.
- *     tags:
- *       - Users
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               allowed:
- *                 type: boolean
- *     responses:
- *       200:
- *         description: Password reset status updated.
- *       400:
- *         description: Invalid value for allowed.
- *       403:
- *         description: Not authorized.
- *       500:
- *         description: Failed to set password reset allowed status.
- */
 router.patch("/password-reset-allowed", authenticateJWT, async (_req, res) => {
   return res.status(403).json({
     error:
@@ -739,303 +194,73 @@ router.patch("/password-reset-allowed", authenticateJWT, async (_req, res) => {
   });
 });
 
-/**
- * @openapi
- * /users/delete-account:
- *   delete:
- *     summary: Delete user account
- *     description: Deletes the authenticated user's account.
- *     tags:
- *       - Users
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               password:
- *                 type: string
- *     responses:
- *       200:
- *         description: Account deleted successfully.
- *       400:
- *         description: Password is required.
- *       401:
- *         description: Incorrect password.
- *       403:
- *         description: Cannot delete external authentication accounts or the last admin user.
- *       404:
- *         description: User not found.
- *       500:
- *         description: Failed to delete account.
- */
-router.delete("/delete-account", authenticateJWT, async (req, res) => {
-  const userId = (req as AuthenticatedRequest).userId;
-  const { password } = req.body;
-
-  if (!isNonEmptyString(password)) {
-    return res
-      .status(400)
-      .json({ error: "Password is required to delete account" });
-  }
-
-  try {
-    const userRecord = await findCurrentUser(userId);
-    if (!userRecord) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    if (userRecord.isOidc) {
-      return res.status(403).json({
-        error:
-          "Cannot delete external authentication accounts through this endpoint",
-      });
-    }
-
-    const isMatch = await bcrypt.compare(password, userRecord.passwordHash);
-    if (!isMatch) {
-      authLogger.warn(
-        `Incorrect password provided for account deletion: ${userRecord.username}`,
-      );
-      return res.status(401).json({ error: "Incorrect password" });
-    }
-
-    if (userRecord.isAdmin) {
-      const adminCount = await createCurrentUserRepository().countAdmins();
-      if (adminCount <= 1) {
-        return res
-          .status(403)
-          .json({ error: "Cannot delete the last admin user" });
-      }
-    }
-
-    await createCurrentUserRepository().delete(userId);
-
-    authLogger.success(`User account deleted: ${userRecord.username}`);
-    res.json({ message: "Account deleted successfully" });
-  } catch (err) {
-    authLogger.error("Failed to delete user account", err);
-    res.status(500).json({ error: "Failed to delete account" });
-  }
-});
-
-
-/**
- * @openapi
- * /users/change-password:
- *   post:
- *     summary: Change user password
- *     description: Changes the authenticated user's password.
- *     tags:
- *       - Users
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               oldPassword:
- *                 type: string
- *               newPassword:
- *                 type: string
- *     responses:
- *       200:
- *         description: Password changed successfully.
- *       400:
- *         description: Old and new passwords are required.
- *       401:
- *         description: Incorrect current password.
- *       500:
- *         description: Failed to update password and re-encrypt data.
- */
 router.post("/change-password", authenticateJWT, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const { oldPassword, newPassword } = req.body;
-  authLogger.info("Password change request", {
-    operation: "password_change_request",
-    userId,
-  });
+  const { oldPassword, newPassword } = req.body ?? {};
 
   if (!userId) {
     return res.status(401).json({ error: "User not authenticated" });
   }
-
-  if (!oldPassword || !newPassword) {
+  if (!isNonEmptyString(oldPassword) || !isNonEmptyString(newPassword)) {
     return res
       .status(400)
       .json({ error: "Old and new passwords are required." });
   }
 
-  const user = await findCurrentUser(userId);
-  if (!user) {
-    return res.status(404).json({ error: "User not found" });
-  }
-
-  const isMatch = await bcrypt.compare(oldPassword, user.passwordHash);
-  if (!isMatch) {
-    authLogger.warn("Password change failed - old password incorrect", {
-      operation: "password_change_failed",
-      userId,
-      reason: "old_password_wrong",
-    });
-    return res.status(401).json({ error: "Incorrect current password" });
-  }
-
-  const success = await authManager.changeUserPassword(
-    userId,
-    oldPassword,
-    newPassword,
-  );
-  if (!success) {
-    return res
-      .status(500)
-      .json({ error: "Failed to update password and re-encrypt data." });
-  }
-
-  const password_hash = await bcrypt.hash(newPassword, 10);
-  await createCurrentUserRepository().update(userId, {
-    passwordHash: password_hash,
-  });
-
-  authManager.logoutUser(userId);
-  authLogger.success("Password changed successfully", {
-    operation: "password_change_complete",
-    userId,
-  });
-
-  const { ipAddress: pwIp, userAgent: pwUa } = getRequestMeta(req);
-  await logAudit({
-    userId,
-    username: user.username ?? userId,
-    action: "change_password",
-    resourceType: "user",
-    resourceId: userId,
-    ipAddress: pwIp,
-    userAgent: pwUa,
-    success: true,
-  });
-
-  res.json({ message: "Password changed successfully. Please log in again." });
-});
-
-
-/**
- * @openapi
- * /users/delete-user:
- *   delete:
- *     summary: Delete user (admin only)
- *     description: Allows an admin to delete another user and all related data.
- *     tags:
- *       - Users
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               username:
- *                 type: string
- *     responses:
- *       200:
- *         description: User deleted successfully.
- *       400:
- *         description: Username is required or cannot delete yourself.
- *       403:
- *         description: Not authorized or cannot delete last admin.
- *       404:
- *         description: User not found.
- *       500:
- *         description: Failed to delete user.
- */
-router.delete("/delete-user", authenticateJWT, async (req, res) => {
-  const userId = (req as AuthenticatedRequest).userId;
-  const { username } = req.body;
-
-  if (!isNonEmptyString(username)) {
-    return res.status(400).json({ error: "Username is required" });
-  }
-
   try {
-    const userRepository = createCurrentUserRepository();
-    const adminUser = await userRepository.findById(userId);
-    if (!adminUser?.isAdmin) {
-      return res.status(403).json({ error: "Not authorized" });
-    }
-
-    if (adminUser.username === username) {
-      return res.status(400).json({ error: "Cannot delete your own account" });
-    }
-
-    const targetUser = await userRepository.findByUsername(username);
-    if (!targetUser) {
+    const user = await findCurrentUser(userId);
+    if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    if (targetUser.isAdmin) {
-      if ((await userRepository.countAdmins()) <= 1) {
-        return res
-          .status(403)
-          .json({ error: "Cannot delete the last admin user" });
-      }
+    const isMatch = await bcrypt.compare(oldPassword, user.passwordHash);
+    if (!isMatch) {
+      authLogger.warn("Password change failed - old password incorrect", {
+        operation: "password_change_failed",
+        userId,
+      });
+      return res.status(401).json({ error: "Incorrect current password" });
     }
 
-    const targetUserId = targetUser.id;
-
-    // Inherit rather than drop: the deleting admin takes over the hosts and
-    // credentials unless another successor is named; "none" discards them.
-    const { successorUserId: requestedSuccessor } = req.body ?? {};
-    let successorUserId: string | undefined = userId;
-    if (requestedSuccessor === "none") {
-      successorUserId = undefined;
-    } else if (isNonEmptyString(requestedSuccessor)) {
-      const successor = await userRepository.findById(requestedSuccessor);
-      if (!successor || successor.id === targetUserId) {
-        return res.status(400).json({ error: "Invalid successor user" });
-      }
-      successorUserId = successor.id;
+    const success = await authManager.changeUserPassword(
+      userId,
+      oldPassword,
+      newPassword,
+    );
+    if (!success) {
+      return res
+        .status(500)
+        .json({ error: "Failed to update password and re-encrypt data." });
     }
 
-    await deleteUserAndRelatedData(targetUserId, { successorUserId });
-
-    authLogger.warn("User account deleted by admin", {
-      operation: "admin_delete_user",
-      adminId: userId,
-      targetUserId,
-      targetUsername: username,
+    await createCurrentUserRepository().update(userId, {
+      passwordHash: await bcrypt.hash(newPassword, 10),
     });
+    await authManager.logoutUser(userId);
 
-    const { ipAddress: deleteIp, userAgent: deleteUa } = getRequestMeta(req);
+    const { ipAddress, userAgent } = getRequestMeta(req);
     await logAudit({
       userId,
-      username: adminUser.username ?? userId,
-      action: "delete_user",
+      username: user.username ?? userId,
+      action: "change_password",
       resourceType: "user",
-      resourceId: targetUserId,
-      resourceName: username,
-      ipAddress: deleteIp,
-      userAgent: deleteUa,
+      resourceId: userId,
+      ipAddress,
+      userAgent,
       success: true,
     });
 
-    res.json({ message: `User ${username} deleted successfully` });
+    return res.json({
+      message: "Password changed successfully. Please log in again.",
+    });
   } catch (err) {
-    authLogger.error("Failed to delete user", err);
-
-    if (err && typeof err === "object" && "code" in err) {
-      if (err.code === "SQLITE_CONSTRAINT_FOREIGNKEY") {
-        res.status(400).json({
-          error:
-            "Cannot delete user: User has associated data that cannot be removed",
-        });
-      } else {
-        res.status(500).json({ error: `Database error: ${err.code}` });
-      }
-    } else {
-      res.status(500).json({ error: "Failed to delete account" });
-    }
+    authLogger.error("Password change failed", err, {
+      operation: "password_change_error",
+      userId,
+    });
+    return res
+      .status(500)
+      .json({ error: "Failed to update password and re-encrypt data." });
   }
 });
 
@@ -1049,16 +274,12 @@ registerUserSessionRoutes(router, {
   authManager,
 });
 
-registerUserExternalAccountRoutes(router, {
-  authenticateJWT,
-  authManager,
-});
-
 registerUserSettingsRoutes(router, authenticateJWT);
 registerTlsRoutes(router, authenticateJWT);
-
 registerBrandingRoutes(router, requireAdmin);
 
+// Core login compatibility is retained for now; third-party login providers
+// are not enabled in the v0.1 release surface.
 registerAuthRoutes(router);
 registerAuthCompatRoutes(router);
 
