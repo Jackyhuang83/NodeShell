@@ -73,7 +73,7 @@ const UNGATED: Record<string, string> = {
   "schedule.every": "the plugin's own timers",
   "schedule.after": "the plugin's own timers",
   "audit.record": "writes under the runtime's actor, never a plugin value",
-  asUser: "always audited as plugin_as_user",
+  asOwner: "core resolves the canonical Owner and audits the resume",
   currentActor: "reads the actor, cannot set it",
   "http.baseUrl": "reads the request's public origin",
   "ssh.poolKey": "a string built from a host the plugin already holds",
