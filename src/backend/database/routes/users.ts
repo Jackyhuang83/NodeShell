@@ -9,8 +9,6 @@ import { registerUserSettingsRoutes } from "./user-settings-routes.js";
 import { registerTlsRoutes } from "./tls-routes.js";
 import { registerUserSessionRoutes } from "./user-session-routes.js";
 import { registerUserDataAccessRoutes } from "./user-data-access-routes.js";
-import { registerAuthRoutes } from "./auth-routes.js";
-import { registerAuthCompatRoutes } from "./auth-compat-routes.js";
 import { logAudit, getRequestMeta } from "../../utils/audit-logger.js";
 import { createCurrentUserRepository } from "../repositories/factory.js";
 import type { UserRecord } from "../repositories/user-repository.js";
@@ -278,9 +276,5 @@ registerUserSettingsRoutes(router, authenticateJWT);
 registerTlsRoutes(router, authenticateJWT);
 registerBrandingRoutes(router, requireAdmin);
 
-// Core login compatibility is retained for now; third-party login providers
-// are not enabled in the v0.1 release surface.
-registerAuthRoutes(router);
-registerAuthCompatRoutes(router);
 
 export default router;
