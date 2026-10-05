@@ -9,7 +9,6 @@
  */
 
 import {
-  LoginMethodError,
   PLUGIN_HOST_INPUT_KEYS,
   PluginCapabilityError,
 } from "./backend.js";
@@ -47,10 +46,7 @@ export interface FakeWsRoute {
   options?: PluginWebSocketOptions;
 }
 import type {
-  PluginLoginMethod,
   PluginLoginRequest,
-  PluginVerifiedIdentity,
-  PluginSecondFactor,
   PluginSshAuthProvider,
   PluginSshConnectOptions,
   PluginSshHost,
@@ -152,17 +148,8 @@ export interface FakeContextOptions {
     certificatePem: string,
     privateKeyPem: string,
   ) => PluginTlsCertificateInfo;
-  /**
-   * Makes ctx.auth.recordEnrollment refuse the way core's policy does (trusted
-   * proxy login on, password login off), with this message and a 409.
-   */
-  refuseEnrollment?: string;
   /** What ctx.http.baseUrl answers. Defaults to "https://termix.test". */
   baseUrl?: string;
-  /** What ctx.auth.countLinkedUsers answers, by provider. Defaults to 0. */
-  linkedUsers?: Record<string, number>;
-  /** Failures before ctx.auth.loginRateLimit locks a key. Defaults to 5. */
-  loginAttemptLimit?: number;
 }
 
 export interface FakeProcessOptions {
@@ -214,10 +201,6 @@ export function createFakeProcess(pid = 4242): FakeProcess {
 export interface FakeAuthRegistrations {
   sshAuthProviders: PluginSshAuthProvider[];
   keyboardInteractiveHandlers: PluginKeyboardInteractiveHandler[];
-  loginMethods: PluginLoginMethod[];
-  secondFactors: PluginSecondFactor[];
-  /** "<userId>:<factorId>" for every recorded enrolment. */
-  enrollments: Set<string>;
   /** Secret schemes registered through ctx.credentials.registerSecretResolver. */
   secretResolvers: Map<
     string,
@@ -228,14 +211,7 @@ export interface FakeAuthRegistrations {
     methodId: string;
     identity: PluginVerifiedIdentity;
   }>;
-  /** Every ctx.auth.revokeSessions call, in order. */
-  revokedSessions: Array<{
-    providerId?: number | null;
-    sub?: string | null;
-    sid?: string | null;
-  }>;
-  /** Failures recorded through ctx.auth.loginRateLimit, by "<ip>|<key>". */
-  loginFailures: Map<string, number>;
+
 }
 
 export interface FakePluginContext {
@@ -533,13 +509,7 @@ export function createFakeContext(
   const auth: FakeAuthRegistrations = {
     sshAuthProviders: [],
     keyboardInteractiveHandlers: [],
-    loginMethods: [],
-    secondFactors: [],
-    enrollments: new Set(),
     secretResolvers: new Map(),
-    completedLogins: [],
-    revokedSessions: [],
-    loginFailures: new Map(),
   };
   const sshClient = options.sshClient ?? {};
   const ownerActor = options.actor ?? "owner";
@@ -1323,13 +1293,10 @@ export interface MockContextOptions {
   /** See FakeContextOptions. */
   validateTls?: FakeContextOptions["validateTls"];
   /** See FakeContextOptions. */
-  refuseEnrollment?: string;
   /** See FakeContextOptions. */
   baseUrl?: string;
   /** See FakeContextOptions. */
-  linkedUsers?: Record<string, number>;
   /** See FakeContextOptions. */
-  loginAttemptLimit?: number;
 }
 
 export interface MockPluginContext extends FakePluginContext {
@@ -1376,10 +1343,7 @@ export function createMockCtx(
     tlsStatus: options.tlsStatus,
     installedPlugins: options.installedPlugins,
     validateTls: options.validateTls,
-    refuseEnrollment: options.refuseEnrollment,
     baseUrl: options.baseUrl,
-    linkedUsers: options.linkedUsers,
-    loginAttemptLimit: options.loginAttemptLimit,
     manifest: {
       capabilities: options.capabilities ?? [],
       ...options.manifest,
@@ -1983,8 +1947,6 @@ export interface RenderedPluginApp {
     settingsComponents: () => string[];
     slot: (slotId: string) => string[];
     actions: () => string[];
-    loginMethods: () => string[];
-    secondFactors: () => string[];
     paletteGroups: () => string[];
     keybindingActions: () => string[];
     keybindingDefaults: () => string[];
