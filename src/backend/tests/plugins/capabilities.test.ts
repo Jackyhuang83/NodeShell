@@ -34,6 +34,13 @@ vi.mock("../../database/repositories/factory.js", () => ({
       [...kvStore.keys()].filter((key) => key.startsWith(`${pluginId}:`))
         .length,
   }),
+  createCurrentUserRepository: () => ({
+    findOwner: async () => ({
+      id: "owner-1",
+      username: "owner",
+      isAdmin: true,
+    }),
+  }),
 }));
 
 vi.mock("../../utils/audit-logger.js", () => ({
@@ -146,53 +153,35 @@ describe("capability gate", () => {
   });
 });
 
-describe("ctx.asUser", () => {
-  it("makes the named user the actor and audits the switch", async () => {
+describe("ctx.asOwner", () => {
+  it("makes the canonical Owner the actor and audits the switch", async () => {
     grants.set("sample-plugin", ["kv:own"]);
-    const ctx = context(["kv:own", "users:impersonate"]);
+    const ctx = context(["kv:own"]);
 
     let seen: string | undefined;
-    await ctx.asUser("user-7", async () => {
+    await ctx.asOwner(async () => {
       seen = ctx.currentActor();
       await ctx.kv.set("k", 1);
     });
 
-    expect(seen).toBe("user-7");
-
+    expect(seen).toBe("owner-1");
     expect(
-      auditEntries.find((e) => e.action === "plugin_as_user"),
+      auditEntries.find((e) => e.action === "plugin_as_owner"),
     ).toMatchObject({ resourceId: "sample-plugin", success: true });
-
     expect(
       auditEntries.find((e) => e.action === "plugin_kv_set"),
-    ).toMatchObject({ userId: "user-7" });
+    ).toMatchObject({ userId: "owner-1" });
   });
 
   it("restores the previous actor afterwards", async () => {
-    const ctx = context(["users:impersonate"]);
-
-    await runAsActor("outer-user", "request", async () => {
-      await ctx.asUser("inner-user", async () => {
-        expect(ctx.currentActor()).toBe("inner-user");
-      });
-      expect(ctx.currentActor()).toBe("outer-user");
-    });
-  });
-
-  it("refuses an empty user id", async () => {
     const ctx = context([]);
 
-    await expect(ctx.asUser("", async () => {})).rejects.toThrow(
-      /without a user id/,
-    );
-  });
-
-  it("refuses without users:impersonate", async () => {
-    const ctx = context(["kv:own"]);
-
-    await expect(ctx.asUser("user-7", async () => {})).rejects.toThrow(
-      /users:impersonate/,
-    );
+    await runAsActor("owner-1", "request", async () => {
+      await ctx.asOwner(async () => {
+        expect(ctx.currentActor()).toBe("owner-1");
+      });
+      expect(ctx.currentActor()).toBe("owner-1");
+    });
   });
 });
 
