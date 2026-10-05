@@ -1,22 +1,13 @@
 /**
  * Copies text to the clipboard, working around environments where the async
  * Clipboard API is unavailable - notably Brave and any non-HTTPS origin, where
- * `navigator.clipboard` is undefined. Tries the Electron bridge first, then the
- * async Clipboard API, then a hidden-textarea execCommand fallback.
+ * `navigator.clipboard` is undefined. Tries the async Clipboard API first,
+ * then a hidden-textarea execCommand fallback.
  *
  * Returns true on success so callers can decide whether to show a success or
  * error toast.
  */
 export async function copyToClipboard(text: string): Promise<boolean> {
-  if (window.electronClipboard) {
-    try {
-      await window.electronClipboard.writeText(text);
-      return true;
-    } catch {
-      // fall through to browser approaches
-    }
-  }
-
   if (navigator.clipboard?.writeText) {
     try {
       await navigator.clipboard.writeText(text);
@@ -50,21 +41,12 @@ function legacyCopy(text: string): boolean {
 /**
  * Reads text from the clipboard, working around environments where the async
  * Clipboard API is unavailable - notably any non-HTTPS origin, where
- * `navigator.clipboard.readText` is undefined. Tries the Electron bridge
- * first, then the async Clipboard API, then a hidden-textarea execCommand
- * fallback (which still works over plain HTTP in Chromium-based browsers).
+ * `navigator.clipboard.readText` is undefined. Tries the async Clipboard API
+ * first, then a hidden-textarea execCommand fallback.
  *
  * Returns an empty string if every approach fails.
  */
 export async function readFromClipboard(): Promise<string> {
-  if (window.electronClipboard) {
-    try {
-      return await window.electronClipboard.readText();
-    } catch {
-      // fall through to browser approaches
-    }
-  }
-
   if (navigator.clipboard?.readText) {
     try {
       return await navigator.clipboard.readText();

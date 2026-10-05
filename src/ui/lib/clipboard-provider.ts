@@ -12,12 +12,6 @@ export class RobustClipboardProvider implements IClipboardProvider {
       if (this.pendingWrite !== null) {
         const text = this.pendingWrite;
         this.pendingWrite = null;
-        if (window.electronClipboard) {
-          window.electronClipboard.writeText(text).catch(() => {
-            this.pendingWrite = text;
-          });
-          return;
-        }
         if (navigator.clipboard?.writeText) {
           navigator.clipboard.writeText(text).catch(() => {
             this.pendingWrite = text;
@@ -36,9 +30,6 @@ export class RobustClipboardProvider implements IClipboardProvider {
   }
 
   readText(_selection: ClipboardSelectionType): string | Promise<string> {
-    if (window.electronClipboard) {
-      return window.electronClipboard.readText();
-    }
     return navigator.clipboard?.readText?.() ?? "";
   }
 
@@ -47,10 +38,6 @@ export class RobustClipboardProvider implements IClipboardProvider {
     text: string,
   ): Promise<void> {
     try {
-      if (window.electronClipboard) {
-        await window.electronClipboard.writeText(text);
-        return;
-      }
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(text);
       } else {
