@@ -157,11 +157,11 @@ export interface PluginServices {
   /**
    * The service must be listed in the manifest's `requires` (or be one this
    * plugin provides). `provider` picks a named provider; omitted, the unnamed
-   * one. A compatibility `userId` may only repeat the current actor.
+   * one. Calls always run as the current actor.
    */
   get: <T extends object>(
     service: string,
-    options?: { userId?: string; provider?: string },
+    options?: { provider?: string },
   ) => T;
   /** Names of the providers running now ("" for an unnamed one). */
   providers: (service: string) => string[];
@@ -183,8 +183,8 @@ export interface PluginSecrets {
   delete: (key: string) => Promise<void>;
   /**
    * Encrypts a value with the installation key, for a plugin that keeps a
-   * secret in its own table and has to read it without an acting user (a
-   * second factor checked during login). Needs secrets:own. Not audited.
+   * secret in its own table and has to read it without an acting user.
+   * Needs secrets:own. Not audited.
    */
   seal: (value: string) => Promise<string>;
   /** Reverses seal(). Null when the value cannot be decrypted. */
@@ -197,7 +197,6 @@ export interface PluginSecrets {
   getShared: (
     pluginId: string,
     key: string,
-    options?: { userId?: string },
   ) => Promise<string | null>;
 }
 
