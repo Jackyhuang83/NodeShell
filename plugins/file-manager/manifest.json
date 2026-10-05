@@ -23,8 +23,7 @@
     "network:serve",
     "ui:surface",
     "events:core",
-    "kv:own",
-    "users:impersonate"
+    "kv:own"
   ],
   "provides": [
     {
