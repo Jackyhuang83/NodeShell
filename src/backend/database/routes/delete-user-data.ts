@@ -20,17 +20,12 @@ import {
 
 export async function deleteUserAndRelatedData(
   userId: string,
-  options: { successorUserId?: string } = {},
+  _options: { successorUserId?: string } = {},
 ): Promise<void> {
   try {
-    // With a successor, hosts and credentials (and the shares on them)
-    // change owner instead of disappearing with the account.
-    if (options.successorUserId) {
-      const { transferOwnership } =
-        await import("../../utils/transfer-ownership.js");
-      await transferOwnership(userId, options.successorUserId);
-    }
-
+    // The successor option is retained only for source compatibility with
+    // older callers. NodeShell v0.1 is single-owner and never transfers
+    // hosts or credentials between accounts.
 
     // Plugins drop or anonymize their own rows on user.deleted, or rely on
     // their refUser() foreign keys cascading.
