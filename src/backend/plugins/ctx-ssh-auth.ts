@@ -805,20 +805,6 @@ export function createPluginAuth({ manifest, bag, audit }: Deps): PluginAuth {
       });
     },
 
-    completeRedirectLogin: async (methodId, req, res) => {
-      requireDeclared(contributes.loginMethods, methodId, "loginMethods");
-      await granted();
-      const method = getLoginMethod(methodId);
-      if (!method || method.pluginId !== pluginId) {
-        throw new Error(
-          `Plugin ${pluginId} has no registered login method "${methodId}"`,
-        );
-      }
-      const { handleRedirectCallback } =
-        await import("../database/routes/auth-routes.js");
-      await handleRedirectCallback(method, req as never, res as never);
-    },
-
     revokeSessions: async (match) => {
       await granted();
       if (!match.sub && !match.sid) return 0;
