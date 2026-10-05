@@ -388,7 +388,7 @@ router.post(
         );
       }
 
-      const baseHost = transformHostResponse(createdHost);      const baseHost = transformHostResponse(createdHost);
+      const baseHost = transformHostResponse(createdHost);
 
       const resolvedHost =
         (await resolveHostCredentials(baseHost, userId)) || baseHost;
@@ -784,7 +784,7 @@ router.put(
 
       const ownerId = hostRecord.userId;
 
-      let protocolAuthPlan: PlannedProtocolAuth | null = null;      let protocolAuthPlan: PlannedProtocolAuth | null = null;
+      let protocolAuthPlan: PlannedProtocolAuth | null = null;
       if (protocolAuthPatch) {
         try {
           protocolAuthPlan = await planProtocolAuthWrite(
