@@ -1298,43 +1298,6 @@ export interface PluginAuth {
   registerKeyboardInteractiveHandler: (
     handler: PluginKeyboardInteractiveHandler,
   ) => void;
-  registerLoginMethod: (method: PluginLoginMethod) => void;
-  registerSecondFactor: (factor: PluginSecondFactor) => void;
-  /**
-   * Marks a user as enrolled in one of this plugin's factors. Core keeps the
-   * row even when the plugin is gone, so it can refuse the login instead of
-   * skipping the factor.
-   */
-  recordEnrollment: (userId: string, factorId: string) => Promise<void>;
-  removeEnrollment: (userId: string, factorId: string) => Promise<void>;
-  /**
-   * Revokes sessions whose login carried matching `logoutClaims`, for a
-   * back-channel logout. Needs `sub` or `sid`; `providerId` narrows it.
-   * Returns how many sessions ended.
-   */
-  revokeSessions: (match: {
-    providerId?: number | null;
-    sub?: string | null;
-    sid?: string | null;
-  }) => Promise<number>;
-  /**
-   * Core's login rate limiter, the one password login uses. Keys are kept
-   * apart per plugin. Put the key in the identity's `rateLimitKey` so a
-   * successful login clears it.
-   */
-  loginRateLimit: {
-    isLocked: (
-      ip: string,
-      key: string,
-    ) => Promise<{ locked: boolean; remainingTime?: number }>;
-    recordFailure: (ip: string, key: string) => Promise<void>;
-  };
-  /**
-   * How many users are linked to an external identity from `provider` (the
-   * `provider` of the identities this plugin returns). For refusing to
-   * delete a provider people still sign in with.
-   */
-  countLinkedUsers: (provider: string) => Promise<number>;
 }
 
 /**
