@@ -89,7 +89,7 @@ export interface FakeScheduledJob {
 export interface FakeContextOptions {
   pluginId?: string;
   manifest?: Partial<PluginManifest>;
-  /** Acting user returned by currentActor and used by asUser. */
+  /** Acting user returned by currentActor and used as the fake Owner. */
   actor?: string;
   /** Seed for admin-scope ctx.settings. */
   settings?: Record<string, unknown>;
@@ -542,6 +542,7 @@ export function createFakeContext(
     loginFailures: new Map(),
   };
   const sshClient = options.sshClient ?? {};
+  const ownerActor = options.actor ?? "owner";
   let actor = options.actor;
   const held = options.permissions
     ? new Set(
@@ -1231,9 +1232,9 @@ export function createFakeContext(
       },
     },
 
-    asUser: async (userId, fn) => {
+    asOwner: async (fn) => {
       const previous = actor;
-      actor = userId;
+      actor = ownerActor;
       try {
         return await fn();
       } finally {
@@ -1434,11 +1435,6 @@ export function createMockCtx(
   const guardedDb = ctx.db;
   const gatedCtx: PluginContext = {
     ...ctx,
-
-    asUser: async (userId, fn) => {
-      require("users:impersonate");
-      return ctx.asUser(userId, fn);
-    },
 
     db: {
       define: async (definition) => {
