@@ -70,14 +70,8 @@ function openEditorAction(
   app.tabs.openTab(host, "files", { data: { initialFilePath: filePath } });
 }
 
-/** Where this plugin serves the streaming routes the desktop app calls. */
-const TRANSFER_API_PATH = "/plugin-api/file-manager";
-
 export function activate(app: TermixApp): void {
   setFileManagerApp(app);
-  if (typeof window !== "undefined") {
-    void window.electronAPI?.localTransfer?.setApiPath?.(TRANSFER_API_PATH);
-  }
   app.onDispose(() => setFileManagerApp(null));
   app.registerTab("files", FilesTab as unknown as ComponentType<TabProps>, {
     icon: FolderSearch,

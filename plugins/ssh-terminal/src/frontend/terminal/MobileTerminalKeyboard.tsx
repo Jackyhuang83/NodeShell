@@ -256,9 +256,7 @@ export function MobileTerminalKeyboard({
 
   async function handlePaste() {
     try {
-      const text = window.electronClipboard
-        ? await window.electronClipboard.readText()
-        : ((await navigator.clipboard?.readText?.()) ?? "");
+      const text = (await navigator.clipboard?.readText?.()) ?? "";
       if (text) terminalRef.current?.paste?.(text);
       else toast.error(t("terminal.clipboardReadFailed"));
     } catch {

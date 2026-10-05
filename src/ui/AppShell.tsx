@@ -56,7 +56,6 @@ import { renderTabContent } from "@/shell/tabUtils";
 import { TabBar } from "@/shell/TabBar";
 import { reconnectDisconnectedTabs } from "@/shell/reconnect-tabs";
 import {
-  dispatchCtrlW,
   createCommandPaletteShortcutMatcher,
   isShiftKey,
 } from "@/lib/app-keyboard-shortcuts";
@@ -550,12 +549,6 @@ export function AppShell({
   useEffect(() => {
     activeTabIdRef.current = activeTabId;
   }, [activeTabId]);
-  useEffect(() => {
-    return window.electronAPI?.onCloseActiveTab?.(() => {
-      if (dispatchCtrlW(document.activeElement)) return;
-      closeActiveTabRef.current();
-    });
-  }, []);
   /** The tab the user is working in: the focused pane's inside a split. */
   function focusedSessionTabId(): string | null {
     const id = activeTabIdRef.current;

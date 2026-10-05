@@ -1,7 +1,6 @@
 import type { ComponentType } from "react";
 import { Network } from "lucide-react";
 import type { TabProps, TermixApp } from "@termix/plugin-sdk/frontend";
-import { TunnelAuthPrompts } from "./TunnelAuthPrompts";
 import { TunnelTab } from "./TunnelTab";
 import { HostTunnelsSection } from "./HostTunnelsSection";
 import { setTunnelsApi } from "./api";
@@ -12,13 +11,6 @@ function TunnelTabView({ host }: TabProps) {
 }
 
 export function activate(app: TermixApp): void {
-  app.registerSlotContribution("shell.overlay", {
-    actionId: "tunnels.authPrompts",
-    titleKey: "tunnels.authTitle",
-    kind: "component",
-    component: TunnelAuthPrompts as ComponentType<Record<string, unknown>>,
-  });
-
   setTunnelsApi(app.api, {
     stream: (init) => app.fetch("/status/stream", init),
     remote: null,
