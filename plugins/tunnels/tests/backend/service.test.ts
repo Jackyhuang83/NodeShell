@@ -105,7 +105,7 @@ describe("tunnels.access forward()", () => {
   it("refuses a host the caller cannot reach and a name that is not reserved", async () => {
     const { service, mock } = setup();
 
-    await mock.ctx.asUser("user-2", async () => {
+    await mock.actAs("user-2", async () => {
       await expect(service.forward(7, target)).rejects.toThrow(/access denied/);
     });
     await expect(
@@ -166,7 +166,7 @@ describe("tunnels.access start/stop/status", () => {
       expect((await service.status(name))?.status).toBe("connected"),
     );
 
-    await mock.ctx.asUser("user-2", async () => {
+    await mock.actAs("user-2", async () => {
       expect(await service.status(name)).toBeNull();
       expect(await service.list()).toEqual({});
       await expect(service.stop(name)).rejects.toThrow(/Access denied/);
