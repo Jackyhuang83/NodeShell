@@ -13,10 +13,7 @@ import { logAudit, getRequestMeta } from "./audit-logger.js";
 import type { Request, Response, NextFunction } from "express";
 import bcrypt from "bcryptjs";
 import { nanoid } from "nanoid";
-import { and, eq, inArray } from "drizzle-orm";
 import type { DeviceType } from "./user-agent-parser.js";
-import { getDb } from "../database/db/index.js";
-import { sessions } from "../database/db/schema.js";
 import {
   createCurrentSettingsRepository,
   createCurrentSessionRepository,
@@ -31,15 +28,12 @@ interface AuthenticationResult {
   userId?: string;
   isAdmin?: boolean;
   username?: string;
-  requiresTOTP?: boolean;
-  tempToken?: string;
   error?: string;
 }
 
 interface JWTPayload {
   userId: string;
   sessionId?: string;
-  pendingTOTP?: boolean;
   dataKeyWrap?: WrappedDataKey;
   iat?: number;
   exp?: number;
@@ -107,31 +101,12 @@ class AuthManager {
     }
   }
 
-  async registerExternalUser(
-    userId: string,
-    _sessionDurationMs?: number,
-  ): Promise<void> {
-    if (!this.userKeys.hasUserDEK(userId)) {
-      await this.userKeys.createUserDEK(userId);
-    }
-  }
-
   private async ensureUserDEK(userId: string): Promise<boolean> {
     if (this.userKeys.tryGetUserDEK(userId)) {
       await this.performLazyEncryptionMigration(userId);
       return true;
     }
     return false;
-  }
-
-  async authenticateExternalUser(
-    userId: string,
-    _deviceType?: DeviceType,
-  ): Promise<boolean> {
-    if (!this.userKeys.hasUserDEK(userId)) {
-      await this.userKeys.createUserDEK(userId);
-    }
-    return this.ensureUserDEK(userId);
   }
 
   async authenticateUser(
@@ -152,17 +127,6 @@ class AuthManager {
       await this.userKeys.createUserDEK(userId);
     }
 
-    return this.ensureUserDEK(userId);
-  }
-
-  /**
-   * Opens the user's data key with the server-held wrapping, for a sign-in
-   * that carries no password (a passkey, trusted proxy login).
-   */
-  async unlockWithSystemKey(
-    userId: string,
-    _deviceType?: DeviceType,
-  ): Promise<boolean> {
     return this.ensureUserDEK(userId);
   }
 
@@ -253,13 +217,9 @@ class AuthManager {
     userId: string,
     options: {
       expiresIn?: string;
-      pendingTOTP?: boolean;
       rememberMe?: boolean;
       deviceType?: DeviceType;
       deviceInfo?: string;
-      oidcSub?: string | null;
-      oidcSid?: string | null;
-      ssoProviderId?: number | null;
     } = {},
   ): Promise<string> {
     const jwtSecret = await this.systemCrypto.getJWTSecret();
@@ -269,23 +229,12 @@ class AuthManager {
     );
     const defaultExpiry = `${timeoutValue ? parseInt(timeoutValue, 10) || 24 : 24}h`;
 
-    let expiresIn = options.expiresIn;
-    if (!expiresIn && !options.pendingTOTP) {
-      if (options.rememberMe) {
-        expiresIn = "30d";
-      } else {
-        expiresIn = defaultExpiry;
-      }
-    } else if (!expiresIn) {
-      expiresIn = defaultExpiry;
-    }
+    const expiresIn =
+      options.expiresIn ?? (options.rememberMe ? "30d" : defaultExpiry);
 
     const payload: JWTPayload = { userId };
-    if (options.pendingTOTP) {
-      payload.pendingTOTP = true;
-    }
 
-    if (!options.pendingTOTP && options.deviceType && options.deviceInfo) {
+    if (options.deviceType && options.deviceInfo) {
       const sessionId = nanoid();
       payload.sessionId = sessionId;
 
@@ -305,9 +254,6 @@ class AuthManager {
           jwtToken: this.hashSessionToken(token),
           deviceType: options.deviceType,
           deviceInfo: options.deviceInfo,
-          oidcSub: options.oidcSub ?? null,
-          oidcSid: options.oidcSid ?? null,
-          ssoProviderId: options.ssoProviderId ?? null,
           createdAt,
           expiresAt,
           lastActiveAt: createdAt,
@@ -517,52 +463,6 @@ class AuthManager {
     }
   }
 
-  async revokeSessionsByExternalSession(params: {
-    ssoProviderId?: number | null;
-    sub?: string | null;
-    sid?: string | null;
-  }): Promise<number> {
-    const { ssoProviderId, sub, sid } = params;
-    if (!sub && !sid) return 0;
-
-    try {
-      const conditions = [
-        sid ? eq(sessions.oidcSid, sid) : eq(sessions.oidcSub, sub!),
-      ];
-      if (ssoProviderId != null)
-        conditions.push(eq(sessions.ssoProviderId, ssoProviderId));
-
-      const db = getDb();
-      const matched = await db
-        .select()
-        .from(sessions)
-        .where(conditions.length === 1 ? conditions[0] : and(...conditions));
-
-      if (matched.length === 0) return 0;
-
-      const matchedIds = matched.map((s) => s.id);
-
-      await db.delete(sessions).where(inArray(sessions.id, matchedIds));
-
-      authLogger.info("Sessions revoked via OIDC back-channel logout", {
-        operation: "oidc_backchannel_logout",
-        ssoProviderId,
-        sessionCount: matchedIds.length,
-      });
-
-      const { saveMemoryDatabaseToFile } =
-        await import("../database/db/index.js");
-      await saveMemoryDatabaseToFile();
-
-      return matchedIds.length;
-    } catch (error) {
-      databaseLogger.error("Failed to revoke sessions via OIDC", error, {
-        operation: "oidc_backchannel_logout_failed",
-      });
-      throw error;
-    }
-  }
-
   async cleanupExpiredSessions(): Promise<number> {
     try {
       const sessionRepository = createCurrentSessionRepository();
@@ -583,17 +483,6 @@ class AuthManager {
         operation: "sessions_cleanup_failed",
       });
       return 0;
-    }
-  }
-
-  async getAllSessions(): Promise<Record<string, unknown>[]> {
-    try {
-      return createCurrentSessionRepository().listAll();
-    } catch (error) {
-      databaseLogger.error("Failed to get all sessions", error, {
-        operation: "sessions_get_all_failed",
-      });
-      return [];
     }
   }
 
@@ -655,13 +544,6 @@ class AuthManager {
           .clearCookie("jwt", this.getClearCookieOptions(req))
           .status(401)
           .json({ error: "Invalid token" });
-      }
-
-      if (payload.pendingTOTP) {
-        return res.status(401).json({
-          error: "TOTP verification required",
-          code: "TOTP_REQUIRED",
-        });
       }
 
       if (payload.sessionId) {
@@ -735,7 +617,6 @@ class AuthManager {
 
       authReq.userId = payload.userId;
       authReq.sessionId = payload.sessionId;
-      authReq.pendingTOTP = payload.pendingTOTP;
 
       next();
     };
