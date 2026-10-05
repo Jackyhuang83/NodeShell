@@ -154,7 +154,7 @@ router.post("/reset-password", async (req, res) => {
   try {
     // A current v3 DEK is server-wrapped and can be recovered after restart.
     // Legacy password-wrapped DEKs remain locked without the old password.
-    await authManager.unlockWithSystemKey(user.id);
+    await authManager.recoverUserDataKey(user.id);
   } catch {
     // resetUserPassword fails closed below unless destructive recovery is
     // explicitly confirmed.
