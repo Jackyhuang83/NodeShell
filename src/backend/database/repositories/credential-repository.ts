@@ -1,5 +1,4 @@
 import { and, desc, eq, sql } from "drizzle-orm";
-import { randomUUID } from "crypto";
 import { sshCredentials, sshCredentialUsage } from "../db/schema.js";
 import type { DatabaseContext } from "./database-context.js";
 import { DataCrypto } from "../../utils/data-crypto.js";
@@ -23,10 +22,7 @@ export class CredentialRepository {
   ) {}
 
   async create(credential: NewCredentialRecord): Promise<CredentialRecord> {
-    const rows = await insertReturning(this.context, sshCredentials, {
-      syncId: randomUUID(),
-      ...credential,
-    });
+    const rows = await insertReturning(this.context, sshCredentials, credential);
     await this.afterWrite();
     return rows[0];
   }
@@ -38,7 +34,6 @@ export class CredentialRepository {
     const userDataKey = DataCrypto.validateUserAccess(userId);
     const tempId = credential.id ?? Date.now();
     const dataWithTempId = {
-      syncId: randomUUID(),
       ...credential,
       id: tempId,
     };
@@ -265,7 +260,7 @@ export class CredentialRepository {
   async deleteForUser(
     userId: string,
     credentialId: number,
-  ): Promise<{ syncId: string | null } | null> {
+  ): Promise<boolean> {
     const rows = await deleteReturning(
       this.context,
       sshCredentials,
@@ -276,7 +271,7 @@ export class CredentialRepository {
     );
 
     await this.afterWrite();
-    return rows[0] ? { syncId: rows[0].syncId } : null;
+    return rows.length > 0;
   }
 
   async deleteByUserId(userId: string): Promise<number> {
