@@ -1,5 +1,4 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { randomUUID } from "crypto";
 import { hosts, pluginSettings } from "../db/schema.js";
 import type { DatabaseContext } from "./database-context.js";
 import { DataCrypto } from "../../utils/data-crypto.js";
@@ -25,10 +24,7 @@ export class HostRepository {
   ) {}
 
   async create(host: NewHostRecord): Promise<HostRecord> {
-    const rows = await insertReturning(this.context, hosts, {
-      syncId: randomUUID(),
-      ...host,
-    });
+    const rows = await insertReturning(this.context, hosts, host);
     await this.afterWrite();
     return rows[0];
   }
@@ -40,7 +36,6 @@ export class HostRepository {
     const userDataKey = DataCrypto.validateUserAccess(userId);
     const tempId = host.id ?? Date.now();
     const dataWithTempId = {
-      syncId: randomUUID(),
       ...host,
       id: tempId,
     };
@@ -307,7 +302,7 @@ export class HostRepository {
   async deleteForUser(
     userId: string,
     hostId: number,
-  ): Promise<{ syncId: string | null } | null> {
+  ): Promise<boolean> {
     await this.deletePluginSettingsForHost(hostId);
 
     const rows = await deleteReturning(
@@ -317,7 +312,7 @@ export class HostRepository {
     );
 
     await this.afterWrite();
-    return rows[0] ? { syncId: rows[0].syncId } : null;
+    return rows.length > 0;
   }
 
   async deleteByUserId(userId: string): Promise<number> {
