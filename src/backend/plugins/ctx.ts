@@ -188,22 +188,6 @@ export function createPluginContext(
       await import("../database/repositories/factory.js");
     return createCurrentPluginSettingsRepository();
   };
-  // Compatibility userId parameters may only repeat the ambient Owner.
-  // Plugins cannot use them to select a different account in v0.1.
-  const namedUser = (
-    userId: string | undefined,
-    via: string,
-  ): string | undefined => {
-    const actor = getActor();
-    if (!userId) return actor;
-    if (userId !== actor) {
-      throw new Error(
-        `Plugin ${pluginId} cannot name another user through ${via} in owner-only mode`,
-      );
-    }
-    return actor;
-  };
-
   const secretOwner = (): string => {
     const actor = getActor();
     if (!actor) {
@@ -528,10 +512,7 @@ export function createPluginContext(
           service,
           pluginId,
           {
-            // A compatibility userId may only repeat the ambient Owner.
-            resolveUserId: () =>
-              namedUser(options?.userId, `service ${service}`),
-            nameUser: (userId) => namedUser(userId, `service ${service}`),
+            resolveUserId: () => getActor(),
             hasPermission: checkPermission,
             audit: (entry) => writeServiceAudit(entry),
           },
@@ -643,10 +624,9 @@ export function createPluginContext(
         return secretRegistry.withdrawSecret(pluginId, key, registration);
       },
 
-      getShared: (providerPluginId, key, options) =>
+      getShared: (providerPluginId, key) =>
         secretRegistry.readSharedSecret(manifest, providerPluginId, key, {
-          resolveUserId: () =>
-            namedUser(options?.userId, `shared secret ${providerPluginId}`),
+          resolveUserId: () => getActor(),
           hasPermission: checkPermission,
           audit: (entry) => writeSecretAudit(entry),
         }),
