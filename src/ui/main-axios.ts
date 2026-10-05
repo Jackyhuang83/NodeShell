@@ -65,9 +65,6 @@ export interface UserInfo {
   show_donation_modal?: boolean;
 }
 
-interface UserCount {
-  count: number;
-}
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -688,20 +685,6 @@ export async function registerUser(
   }
 }
 
-export async function adminCreateUser(
-  username: string,
-  password: string,
-): Promise<Record<string, unknown>> {
-  try {
-    const response = await authApi.post("/users/admin-create", {
-      username,
-      password,
-    });
-    return response.data;
-  } catch (error) {
-    handleApiError(error, "admin create user");
-  }
-}
 
 export async function loginUser(
   username: string,
@@ -740,19 +723,6 @@ export async function loginUser(
   }
 }
 
-export async function requestTrustedProxyLogin(): Promise<{
-  enabled: boolean;
-  success?: boolean;
-  username?: string;
-  userId?: string;
-  is_admin?: boolean;
-  token?: string;
-}> {
-  const response = await authApi.post("/users/proxy-login");
-  if (response.data.token) localStorage.setItem("jwt", response.data.token);
-  if (response.data.success) markUserAuthenticated();
-  return response.data;
-}
 
 export async function logoutUser(): Promise<{
   success: boolean;
@@ -790,14 +760,6 @@ export async function dismissDonationModal(): Promise<void> {
   }
 }
 
-export async function getCurrentToken(): Promise<string | null> {
-  try {
-    const response = await authApi.get("/users/me/token");
-    return response.data?.token ?? null;
-  } catch {
-    return null;
-  }
-}
 
 export async function unlockUserData(
   password: string,
@@ -841,120 +803,6 @@ export async function getSetupRequired(): Promise<{ setup_required: boolean }> {
   }
 }
 
-// Module-level (not per-component) so concurrent/duplicate mounts -- e.g.
-// React StrictMode's intentional double-invoke of effects in dev, or any
-// other double-call -- share one in-flight request instead of each minting
-// its own session. Minting more than one session here is not just wasted
-// work: the backend sets a fresh `jwt` cookie on every call, and since the
-// auth middleware prefers the cookie over the Authorization header, a
-// second mint silently invalidates whichever token the app already started
-// using, surfacing as a spurious "session expired/revoked" on the very
-// next request.
-let desktopAutoSessionRequest: Promise<DesktopAutoSessionOutcome> | null = null;
-
-// A 403 from the auto-session endpoint means the backend positively
-// evaluated the request and declined (not loopback, or not exactly one
-// local user) -- that verdict won't change by retrying. Any other failure
-// (connection refused, timeout, 5xx) most likely means the embedded
-// backend process hasn't finished booting yet, which is routine on a cold
-// first launch, so it's worth retrying rather than treated as final.
-export type DesktopAutoSessionOutcome =
-  | { kind: "success"; data: AuthResponse }
-  | { kind: "declined" }
-  | { kind: "retry" };
-
-/**
- * Electron-only, non-iframed local login: exchanges the embedded backend's
- * auto-provisioned local user for a session without ever showing a login
- * form. If the local database contains multiple users, the backend
- * deterministically chooses the admin account, or the earliest registered
- * account if no admin exists.
- */
-export async function requestDesktopAutoSession(): Promise<DesktopAutoSessionOutcome> {
-  if (desktopAutoSessionRequest) return desktopAutoSessionRequest;
-
-  desktopAutoSessionRequest = (async () => {
-    try {
-      const response = await authApi.post("/users/internal/auto-session");
-      if (response.data?.token) {
-        localStorage.setItem("jwt", response.data.token);
-      }
-      if (response.data?.success) {
-        markUserAuthenticated();
-        return { kind: "success" as const, data: response.data };
-      }
-      return { kind: "declined" as const };
-    } catch (err) {
-      const status =
-        (err as { status?: number; response?: { status?: number } })?.status ??
-        (err as { response?: { status?: number } })?.response?.status;
-      if (status === 403) {
-        return { kind: "declined" as const };
-      }
-      return { kind: "retry" as const };
-    }
-  })();
-
-  try {
-    return await desktopAutoSessionRequest;
-  } finally {
-    desktopAutoSessionRequest = null;
-  }
-}
-
-export async function getUserCount(): Promise<UserCount> {
-  try {
-    const response = await authApi.get("/users/count");
-    return response.data;
-  } catch (error) {
-    handleApiError(error, "fetch user count");
-  }
-}
-
-export async function initiatePasswordReset(
-  username: string,
-): Promise<Record<string, unknown>> {
-  try {
-    const response = await authApi.post("/users/initiate-reset", { username });
-    return response.data;
-  } catch (error) {
-    handleApiError(error, "initiate password reset");
-  }
-}
-
-export async function verifyPasswordResetCode(
-  username: string,
-  resetCode: string,
-): Promise<Record<string, unknown>> {
-  try {
-    const response = await authApi.post("/users/verify-reset-code", {
-      username,
-      resetCode,
-    });
-    return response.data;
-  } catch (error) {
-    handleApiError(error, "verify reset code");
-  }
-}
-
-export async function completePasswordReset(
-  username: string,
-  tempToken: string,
-  newPassword: string,
-  confirmDataWipe = false,
-): Promise<Record<string, unknown>> {
-  try {
-    const response = await authApi.post("/users/complete-reset", {
-      username,
-      tempToken,
-      newPassword,
-      confirmDataWipe,
-    });
-    return response.data;
-  } catch (error) {
-    handleApiError(error, "complete password reset");
-  }
-}
 
 export async function changePassword(oldPassword: string, newPassword: string) {
   try {
