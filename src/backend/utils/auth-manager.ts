@@ -49,7 +49,6 @@ interface WrappedDataKey {
 interface AuthenticatedRequest extends Request {
   userId?: string;
   sessionId?: string;
-  pendingTOTP?: boolean;
   dataKey?: Buffer;
 }
 
