@@ -22,7 +22,7 @@ describe("bootstrap creates the tables the removed probes covered", () => {
   const TABLES = ["sessions", "trusted_devices", "audit_logs"];
 
   beforeEach(() => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "termix-bootstrap-"));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "nodeshell-bootstrap-"));
     vi.resetModules();
     process.env.DATA_DIR = dataDir;
     process.env.DB_FILE_ENCRYPTION = "false";
