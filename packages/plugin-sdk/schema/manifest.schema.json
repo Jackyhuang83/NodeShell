@@ -115,7 +115,6 @@
           "notify:send",
           "audit:read",
           "desktop:window",
-          "users:impersonate",
           "db:core-refs",
           "hosts:read",
           "db:own",
