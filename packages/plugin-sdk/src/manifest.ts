@@ -341,17 +341,12 @@ export interface PluginSettingsContribution {
 }
 
 /**
- * What a plugin adds to sign-in and SSH auth. Declared so core can tell who
- * owns an auth type or factor even while the plugin is disabled, and so the
- * login screen knows which bundles it needs before anyone has signed in.
+ * What a plugin adds to SSH authentication and secret resolution.
+ * Browser authentication is intentionally not pluggable in NodeShell v0.1.
  */
 export interface PluginAuthContribution {
   /** Values of ssh_data.auth_type this plugin provides. */
   sshAuthTypes?: string[];
-  /** Login method ids. */
-  loginMethods?: string[];
-  /** Second factor ids. */
-  secondFactors?: string[];
   /** Schemes this plugin resolves for "<scheme>://..." secret references, e.g. "op". */
   secretSchemes?: string[];
   /** Keyboard-interactive handler ids, e.g. "warpgate". */
@@ -1471,23 +1466,11 @@ function validateAuthContribution(value: unknown, errors: string[]): void {
   }
   rejectUnknown(
     value,
-    [
-      "sshAuthTypes",
-      "loginMethods",
-      "secondFactors",
-      "secretSchemes",
-      "keyboardInteractive",
-    ],
+    ["sshAuthTypes", "secretSchemes", "keyboardInteractive"],
     "contributes.auth",
     errors,
   );
-  for (const key of [
-    "sshAuthTypes",
-    "loginMethods",
-    "secondFactors",
-    "secretSchemes",
-    "keyboardInteractive",
-  ]) {
+  for (const key of ["sshAuthTypes", "secretSchemes", "keyboardInteractive"]) {
     const list = value[key];
     if (list === undefined) continue;
     if (!Array.isArray(list)) {
@@ -2141,8 +2124,6 @@ export function parseManifest(raw: unknown): ParsedManifest {
   const auth = manifest.contributes?.auth;
   const contributesAuth =
     (auth?.sshAuthTypes?.length ?? 0) +
-      (auth?.loginMethods?.length ?? 0) +
-      (auth?.secondFactors?.length ?? 0) +
       (auth?.secretSchemes?.length ?? 0) +
       (auth?.keyboardInteractive?.length ?? 0) >
     0;
