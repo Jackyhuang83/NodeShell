@@ -975,10 +975,6 @@
           "additionalProperties": false,
           "description": "HTTP options for the plugin's /plugin-api/<id>/ router.",
           "properties": {
-            "adminImpersonation": {
-              "type": "boolean",
-              "description": "An admin may call the plugin's routes on behalf of another user with the X-Admin-Target-User header."
-            },
             "legacyPaths": {
               "type": "array",
               "description": "Old URLs under /<plugin id>/ served by the plugin's router with that prefix removed.",
