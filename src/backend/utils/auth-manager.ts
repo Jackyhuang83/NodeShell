@@ -353,6 +353,15 @@ class AuthManager {
 
       const payload = jwt.verify(token, jwtSecret) as JWTPayload;
 
+      const owner = await createCurrentUserRepository().findOwner();
+      if (!owner || owner.id !== payload.userId) {
+        databaseLogger.warn("JWT rejected for non-owner account", {
+          operation: "jwt_verify_non_owner",
+          userId: payload.userId,
+        });
+        return null;
+      }
+
       if (payload.sessionId) {
         try {
           const sessionRecord = await createCurrentSessionRepository().findById(
