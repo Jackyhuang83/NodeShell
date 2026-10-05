@@ -69,6 +69,17 @@ export class UserRepository {
     return rows[0] ?? null;
   }
 
+  async findOwner(): Promise<UserRecord | null> {
+    const rows = await this.context.drizzle
+      .select()
+      .from(users)
+      .where(eq(users.isAdmin, true))
+      .orderBy(asc(users.registeredAt), asc(users.username))
+      .limit(1);
+
+    return rows[0] ?? null;
+  }
+
   async findByUsername(username: string): Promise<UserRecord | null> {
     const rows = await this.context.drizzle
       .select()
