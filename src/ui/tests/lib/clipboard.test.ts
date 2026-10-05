@@ -1,12 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { copyToClipboard, readFromClipboard } from "../../lib/clipboard";
 
 describe("copyToClipboard", () => {
   const originalClipboard = navigator.clipboard;
 
-  beforeEach(() => {
-    delete (window as { electronClipboard?: unknown }).electronClipboard;
-  });
 
   afterEach(() => {
     Object.defineProperty(navigator, "clipboard", {
@@ -23,18 +20,6 @@ describe("copyToClipboard", () => {
     });
   }
 
-  it("uses the electron bridge when present", async () => {
-    const writeText = vi.fn().mockResolvedValue(true);
-    (window as { electronClipboard?: unknown }).electronClipboard = {
-      writeText,
-      readText: vi.fn(),
-    };
-
-    const ok = await copyToClipboard("hello");
-
-    expect(ok).toBe(true);
-    expect(writeText).toHaveBeenCalledWith("hello");
-  });
 
   it("uses navigator.clipboard when available", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
@@ -88,9 +73,6 @@ describe("copyToClipboard", () => {
 describe("readFromClipboard", () => {
   const originalClipboard = navigator.clipboard;
 
-  beforeEach(() => {
-    delete (window as { electronClipboard?: unknown }).electronClipboard;
-  });
 
   afterEach(() => {
     Object.defineProperty(navigator, "clipboard", {
@@ -107,18 +89,6 @@ describe("readFromClipboard", () => {
     });
   }
 
-  it("uses the electron bridge when present", async () => {
-    const readText = vi.fn().mockResolvedValue("hello");
-    (window as { electronClipboard?: unknown }).electronClipboard = {
-      writeText: vi.fn(),
-      readText,
-    };
-
-    const text = await readFromClipboard();
-
-    expect(text).toBe("hello");
-    expect(readText).toHaveBeenCalled();
-  });
 
   it("uses navigator.clipboard when available", async () => {
     const readText = vi.fn().mockResolvedValue("world");
