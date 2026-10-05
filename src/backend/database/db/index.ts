@@ -1237,66 +1237,18 @@ const migrateSchema = () => {
   try {
     sqlite.exec(`
       DROP TABLE IF EXISTS sync_tombstones;
-
-      CREATE TABLE IF NOT EXISTS sync_records (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        entity_type TEXT NOT NULL,
-        sync_id TEXT NOT NULL,
-        revision INTEGER NOT NULL DEFAULT 0,
-        seq INTEGER NOT NULL DEFAULT 0,
-        hash TEXT,
-        deleted INTEGER NOT NULL DEFAULT 0,
-        error TEXT,
-        error_hash TEXT,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_records_user_entity_sync
-        ON sync_records(user_id, entity_type, sync_id);
-      CREATE INDEX IF NOT EXISTS idx_sync_records_user_seq
-        ON sync_records(user_id, seq);
-
-      CREATE TABLE IF NOT EXISTS sync_conflicts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        entity_type TEXT NOT NULL,
-        sync_id TEXT NOT NULL,
-        local_row TEXT NOT NULL,
-        server_revision INTEGER NOT NULL,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-      CREATE INDEX IF NOT EXISTS idx_sync_conflicts_user
-        ON sync_conflicts(user_id);
-
-      CREATE TABLE IF NOT EXISTS sync_link (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        server_url TEXT NOT NULL,
-        server_name TEXT,
-        server_version TEXT,
-        session_token TEXT,
-        custom_headers TEXT,
-        basic_auth TEXT,
-        allow_invalid_certificate INTEGER NOT NULL DEFAULT 0,
-        remote_user_id TEXT,
-        remote_username TEXT,
-        account TEXT,
-        scope TEXT,
-        known_types TEXT,
-        cursor INTEGER NOT NULL DEFAULT 0,
-        status TEXT NOT NULL DEFAULT 'idle',
-        last_error TEXT,
-        linked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        last_sync_at TEXT
-      );
+      DROP TABLE IF EXISTS sync_conflicts;
+      DROP TABLE IF EXISTS sync_records;
+      DROP TABLE IF EXISTS sync_link;
     `);
-  } catch (createError) {
-    databaseLogger.warn("Failed to create sync tables", {
+  } catch (dropError) {
+    databaseLogger.warn("Failed to remove legacy desktop sync tables", {
       operation: "schema_migration",
-      error: createError,
+      error: dropError,
     });
   }
-  // --- sync end ---
+
+
 
   // Audit trails and session recordings used to be deleted along with the user
   // they referenced, which defeats the point of keeping them.
