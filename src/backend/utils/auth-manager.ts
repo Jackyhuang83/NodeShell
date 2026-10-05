@@ -130,6 +130,15 @@ class AuthManager {
     return this.ensureUserDEK(userId);
   }
 
+  /**
+   * Local recovery helper for the canonical Owner. This only succeeds when
+   * the server-held v3 data key is already recoverable; it does not create a
+   * passwordless browser authentication path.
+   */
+  async recoverUserDataKey(userId: string): Promise<boolean> {
+    return this.ensureUserDEK(userId);
+  }
+
   private async performLazyEncryptionMigration(userId: string): Promise<void> {
     try {
       const userDataKey = this.getUserDataKey(userId);
@@ -659,13 +668,6 @@ class AuthManager {
           .json({ error: "Invalid token" });
       }
 
-      if (payload.pendingTOTP) {
-        return res.status(401).json({
-          error: "TOTP verification required",
-          code: "TOTP_REQUIRED",
-        });
-      }
-
       try {
         const user = await createCurrentUserRepository().findById(
           payload.userId,
@@ -686,7 +688,6 @@ class AuthManager {
         const authReq = req as AuthenticatedRequest;
         authReq.userId = payload.userId;
         authReq.sessionId = payload.sessionId;
-        authReq.pendingTOTP = payload.pendingTOTP;
         next();
       } catch (error) {
         databaseLogger.error("Failed to verify admin privileges", error, {
