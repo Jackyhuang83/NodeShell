@@ -5,9 +5,7 @@ import { pluginEvents, TOPICS } from "../../plugins/events.js";
 import {
   createCurrentCredentialRepository,
   createCurrentHostFolderRepository,
-  createCurrentFolderAccessRepository,
   createCurrentRecentActivityRepository,
-  createCurrentRbacAccessRepository,
   createCurrentSshCredentialUsageRepository,
 } from "../repositories/factory.js";
 import { isNonEmptyString } from "./host-normalizers.js";
@@ -89,11 +87,6 @@ export function registerHostFolderRoutes(
             oldName,
             newName,
           );
-        await createCurrentFolderAccessRepository().renameFolder(
-          userId,
-          oldName,
-          newName,
-        );
         // Subfolders change parents with a rename, so their chains do too.
         void recompute({ userIds: [userId] }).catch(() => {});
 
@@ -427,9 +420,6 @@ export function registerHostFolderRoutes(
             hostIds,
           );
 
-          await createCurrentRbacAccessRepository().deleteHostAccessForHosts(
-            hostIds,
-          );
         }
 
         await hostFolderRepository.deleteHostsAndFolderRecords(

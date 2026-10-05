@@ -18,13 +18,9 @@ import {
 } from "../../utils/audit-logger.js";
 import {
   createCurrentCredentialRepository,
-  createCurrentUserRepository,
-  createCurrentCredentialAccessRepository,
-  createCurrentRoleRepository,
   createCurrentHostResolutionRepository,
   createCurrentHostRepository,
 } from "../repositories/factory.js";
-import { parseSharedSource } from "./host-normalizers.js";
 
 /** Built-in password and key, plus any type a plugin offers for credentials. */
 function getCredentialTypes(): string[] {
@@ -279,11 +275,7 @@ router.get(
     try {
       const credentials =
         await createCurrentCredentialRepository().listDecryptedByUserId(userId);
-      const own = credentials.map((cred) => formatCredentialOutput(cred));
-
-      // Credentials shared with this user, read from their own snapshots.
-      const shared = await listSharedCredentialsForUser(userId);
-      res.json([...own, ...shared]);
+      res.json(credentials.map((cred) => formatCredentialOutput(cred)));
     } catch (err) {
       authLogger.error("Failed to fetch credentials", err);
       res.status(500).json({ error: "Failed to fetch credentials" });
@@ -378,14 +370,11 @@ router.get(
     }
 
     try {
-      const credentialRepository = createCurrentCredentialRepository();
-      const ownCredential = await credentialRepository.findDecryptedByIdForUser(
-        userId,
-        parseInt(id),
-      );
       const credential =
-        ownCredential ??
-        (await findSharedCredentialForUser(parseInt(id), userId));
+        await createCurrentCredentialRepository().findDecryptedByIdForUser(
+          userId,
+          parseInt(id),
+        );
 
       if (!credential) {
         return res.status(404).json({ error: "Credential not found" });
@@ -627,21 +616,14 @@ router.put(
     });
 
     try {
-      // A recipient holding "manage" edits the owner's row on the owner's
-      // behalf; the row stays encrypted under the owner's key and every
-      // recipient's snapshot is rebuilt below.
-      const editableOwnerId = await resolveEditableCredentialOwner(
-        credentialId,
-        userId,
-      );
-      const existingCredential = editableOwnerId
-        ? await createCurrentCredentialRepository().findDecryptedByIdForUser(
-            editableOwnerId,
-            credentialId,
-          )
-        : null;
+      const editableOwnerId = userId;
+      const existingCredential =
+        await createCurrentCredentialRepository().findDecryptedByIdForUser(
+          userId,
+          credentialId,
+        );
 
-      if (!existingCredential || !editableOwnerId) {
+      if (!existingCredential) {
         return res.status(404).json({ error: "Credential not found" });
       }
 
@@ -720,19 +702,6 @@ router.put(
           editableOwnerId,
           credentialId,
         ));
-
-      const { SharedHostSecretsManager } =
-        await import("../../utils/shared-host-secrets-manager.js");
-      await SharedHostSecretsManager.getInstance().resyncHostsForCredential(
-        credentialId,
-        editableOwnerId,
-      );
-      const { SharedCredentialSecretsManager } =
-        await import("../../utils/shared-credential-secrets-manager.js");
-      await SharedCredentialSecretsManager.getInstance().resyncCredential(
-        credentialId,
-        editableOwnerId,
-      );
 
       authLogger.success("SSH credential updated", {
         operation: "credential_update_success",
@@ -984,78 +953,6 @@ router.get(
   },
 );
 
-/** The owner id if the caller may edit this credential (owner or "manage"), else null. */
-async function resolveEditableCredentialOwner(
-  credentialId: number,
-  userId: string,
-): Promise<string | null> {
-  const row = await createCurrentCredentialRepository().findById(credentialId);
-  if (!row) return null;
-  if (row.userId === userId) return userId;
-  const roleIds = await createCurrentRoleRepository().listUserRoleIds(userId);
-  const grant = await createCurrentCredentialAccessRepository().findActiveGrant(
-    credentialId,
-    userId,
-    roleIds,
-  );
-  return grant?.permissionLevel === "manage" ? row.userId : null;
-}
-
-async function findSharedCredentialForUser(
-  credentialId: number,
-  userId: string,
-): Promise<Record<string, unknown> | null> {
-  const shared = (await listSharedCredentialsForUser(userId)).find(
-    (cred) => cred.id === credentialId,
-  );
-  return shared ?? null;
-}
-
-/** Shared credentials shaped like the caller's own, plus who shared them. */
-async function listSharedCredentialsForUser(
-  userId: string,
-): Promise<Record<string, unknown>[]> {
-  const roleIds = await createCurrentRoleRepository().listUserRoleIds(userId);
-  const grants =
-    await createCurrentCredentialAccessRepository().listSharedWithUser(
-      userId,
-      roleIds,
-    );
-  if (grants.length === 0) return [];
-  const credentialRepository = createCurrentCredentialRepository();
-  const userRepository = createCurrentUserRepository();
-  const { findUsableCredential } =
-    await import("../../hosts/usable-credential.js");
-  const results: Record<string, unknown>[] = [];
-  for (const grant of grants) {
-    const row = await credentialRepository.findById(grant.credentialId);
-    if (!row) continue;
-    let secrets: Record<string, unknown> | null = null;
-    try {
-      secrets = (await findUsableCredential(
-        grant.credentialId,
-        userId,
-      )) as Record<string, unknown> | null;
-    } catch {
-      secrets = null;
-    }
-    const owner = await userRepository.findById(grant.ownerId);
-    results.push({
-      ...formatCredentialOutput({
-        ...row,
-        username: secrets?.username ?? row.username,
-        publicKey: secrets?.publicKey ?? null,
-        certPublicKey: secrets?.certPublicKey ?? null,
-      }),
-      isShared: true,
-      ownerUsername: owner?.username ?? null,
-      permissionLevel: grant.permissionLevel,
-      sharedExpiresAt: grant.expiresAt,
-    });
-  }
-  return results;
-}
-
 function formatCredentialOutput(
   credential: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -1082,19 +979,6 @@ function formatCredentialOutput(
     lastUsed: credential.lastUsed,
     createdAt: credential.createdAt,
     updatedAt: credential.updatedAt,
-    ...sharedCopyFields(credential.sharedSource),
-  };
-}
-
-/** A read-only copy of a credential shared with a linked desktop's account. */
-function sharedCopyFields(value: unknown): Record<string, unknown> {
-  const shared = parseSharedSource(value);
-  if (!shared) return {};
-  return {
-    isShared: true,
-    sharedCopy: true,
-    ownerUsername: shared.owner || null,
-    permissionLevel: shared.permissionLevel === "manage" ? "manage" : "use",
   };
 }
 

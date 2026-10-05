@@ -2,14 +2,8 @@ import { getErrorMessage } from "../utils/error-message.js";
 import { parseSshOptions } from "./ssh-options.js";
 import { findUsableCredential } from "./usable-credential.js";
 import { resolveExternalSecretRefs } from "./external-secrets.js";
-import {
-  createCurrentHostResolutionRepository,
-  createCurrentUserRepository,
-} from "../database/repositories/factory.js";
-import type { HostResolutionHostRecord } from "../database/repositories/host-resolution-repository.js";
-import { logAudit } from "../utils/audit-logger.js";
+import { createCurrentHostResolutionRepository } from "../database/repositories/factory.js";
 import { logger } from "../utils/logger.js";
-import { resolveRecipientSharedHostAuthentication } from "../utils/shared-host-auth-resolver.js";
 import {
   pickResolvedPassword,
   pickResolvedUsername,
@@ -63,42 +57,11 @@ export async function resolveHostById(
   if (!access.hasAccess) return null;
 
   const repository = createCurrentHostResolutionRepository();
-
-  // Decrypt under the owner's DEK: shared hosts carry owner-encrypted fields
-  // Owner-encrypted inline authentication fields cannot be opened by another user.
-  const ownerId = (await repository.findHostOwnerId(hostId)) ?? userId;
-  const resolvedHost = await repository.findHostById(hostId, ownerId);
+  const resolvedHost = await repository.findHostById(hostId, userId);
   if (!resolvedHost) return null;
 
   const host = resolvedHost as Record<string, unknown>;
 
-  // Admin bypass resolves like the owner would; every such access is audited.
-  const ownerEquivalent = userId === ownerId || access.isAdminBypass === true;
-
-  if (access.isAdminBypass && userId !== ownerId) {
-    try {
-      const admin = await createCurrentUserRepository().findById(userId);
-      void logAudit({
-        userId,
-        username: admin?.username ?? "unknown",
-        action: "admin_connect_host",
-        resourceType: "host",
-        resourceId: String(hostId),
-        resourceName: (host.name as string) || (host.ip as string) || "",
-        details: JSON.stringify({ ownerId }),
-        success: true,
-      });
-    } catch {
-      // never block resolution on audit bookkeeping
-    }
-  }
-
-  if (!ownerEquivalent) {
-    // Owner-only operational secrets are never shared.
-    host.sudoPassword = null;
-  }
-
-  // Parse JSON fields
   if (typeof host.jumpHosts === "string" && host.jumpHosts) {
     try {
       host.jumpHosts = JSON.parse(host.jumpHosts as string);
@@ -106,6 +69,7 @@ export async function resolveHostById(
       host.jumpHosts = [];
     }
   }
+
   if (typeof host.terminalConfig === "string" && host.terminalConfig) {
     try {
       host.terminalConfig = JSON.parse(host.terminalConfig as string);
@@ -113,26 +77,26 @@ export async function resolveHostById(
       host.terminalConfig = undefined;
     }
   }
+
   if (
     host.terminalConfig &&
     typeof host.terminalConfig === "object" &&
     !Array.isArray(host.terminalConfig)
   ) {
-    // 2.8 editors kept the sudo password inside terminal_config. It is only
-    // ever handed out as sudoPassword, and only to the owner.
     const { sudoPassword: legacySudo, ...rest } = host.terminalConfig as Record<
       string,
       unknown
     >;
-    if (ownerEquivalent && !host.sudoPassword && legacySudo) {
+    if (!host.sudoPassword && legacySudo) {
       host.sudoPassword = legacySudo;
     }
     host.terminalConfig = rest;
   }
-  // A row the boot copy has not reached yet still has them in terminal_config.
+
   host.sshOptions = parseSshOptions(
     host.sshOptions != null ? host.sshOptions : host.terminalConfig,
   );
+
   if (typeof host.portKnockSequence === "string" && host.portKnockSequence) {
     try {
       host.portKnockSequence = JSON.parse(host.portKnockSequence as string);
@@ -141,170 +105,74 @@ export async function resolveHostById(
     }
   }
 
-  let sharedAuthResolution: SharedAuthResolution | undefined;
-  if (!ownerEquivalent) {
-    sharedAuthResolution = await resolveRecipientSshAuth(host, hostId, userId);
-    if (!sharedAuthResolution) return null;
-  } else {
-    let effectiveCredentialId = host.credentialId as number | null | undefined;
-    if (
-      !effectiveCredentialId &&
-      host.authType === "credential" &&
-      host.folder
-    ) {
-      try {
-        effectiveCredentialId = await repository.findFolderCredentialId(
-          ownerId,
-          host.folder as string,
-        );
-      } catch (e) {
-        sshLogger.warn("Failed to resolve folder credential for host", {
-          operation: "host_resolver_folder_credential",
-          hostId,
-          error: getErrorMessage(e, "Unknown"),
-        });
-      }
+  let effectiveCredentialId = host.credentialId as number | null | undefined;
+  if (!effectiveCredentialId && host.authType === "credential" && host.folder) {
+    try {
+      effectiveCredentialId = await repository.findFolderCredentialId(
+        userId,
+        host.folder as string,
+      );
+    } catch (error) {
+      sshLogger.warn("Failed to resolve folder credential for host", {
+        operation: "host_resolver_folder_credential",
+        hostId,
+        error: getErrorMessage(error, "Unknown"),
+      });
     }
+  }
 
-    if (effectiveCredentialId) {
-      try {
-        const cred = (await findUsableCredential(
-          effectiveCredentialId,
-          ownerId,
-        )) as Record<string, unknown> | null;
+  if (effectiveCredentialId) {
+    try {
+      const credential = (await findUsableCredential(
+        effectiveCredentialId,
+        userId,
+      )) as Record<string, unknown> | null;
 
-        if (cred) {
-          host.password = pickResolvedPassword(host.password, cred.password);
-          // Prefer the normalised private key; fall back to raw key field
-          host.key = (cred.privateKey || cred.key) as string | null;
-          host.keyPassword = cred.keyPassword;
-          host.keyType = cred.keyType;
-          // CA-signed certificate for cert-based auth
-          (host as Record<string, unknown>).certPublicKey =
-            cred.certPublicKey || null;
-          host.username = pickResolvedUsername(
-            host.username,
-            cred.username,
-            host.overrideCredentialUsername,
-          );
-          host.authType = host.key
-            ? "key"
-            : host.password
-              ? "password"
-              : "none";
-        }
-      } catch (e) {
-        sshLogger.warn("Failed to resolve credential for host", {
-          operation: "host_resolver_credential",
-          hostId,
-          error: getErrorMessage(e, "Unknown"),
-        });
+      if (credential) {
+        host.password = pickResolvedPassword(host.password, credential.password);
+        host.key = (credential.privateKey || credential.key) as string | null;
+        host.keyPassword = credential.keyPassword;
+        host.keyType = credential.keyType;
+        host.certPublicKey = credential.certPublicKey || null;
+        host.username = pickResolvedUsername(
+          host.username,
+          credential.username,
+          host.overrideCredentialUsername,
+        );
+        host.authType = host.key
+          ? "key"
+          : host.password
+            ? "password"
+            : "none";
       }
+    } catch (error) {
+      sshLogger.warn("Failed to resolve credential for host", {
+        operation: "host_resolver_credential",
+        hostId,
+        error: getErrorMessage(error, "Unknown"),
+      });
     }
   }
 
   host.username = await expandExternalUsername(
     host.username as string | undefined,
-    ownerEquivalent ? ownerId : userId,
+    userId,
   );
 
-  // "op://..." references become real secrets here, once, for everyone
-  // downstream. They resolve in the context of whoever owns the secret
-  // fields: the owner for their own host, the recipient for an override.
-  await resolveExternalSecretRefs(
-    host as Record<string, unknown>,
-    sharedAuthResolution === "recipient-override" ? userId : ownerId,
-  );
+  await resolveExternalSecretRefs(host, userId);
 
-  // Keyboard-interactive handlers run synchronously mid-handshake and can
-  // only read their host settings from here.
   try {
     const { loadHostPluginSettings } =
       await import("../database/routes/host-plugin-settings.js");
     const settings = (await loadHostPluginSettings([hostId])).get(hostId);
     if (settings) host.pluginSettings = settings;
-  } catch (e) {
+  } catch (error) {
     sshLogger.warn("Failed to load plugin settings for host", {
       operation: "host_resolver_plugin_settings",
       hostId,
-      error: getErrorMessage(e, "Unknown"),
+      error: getErrorMessage(error, "Unknown"),
     });
   }
 
   return host as unknown as SSHHost;
-}
-
-/**
- * Resolve SSH auth for a shared (non-owner) requester without exposing the
- * owner's password, key, or credential reference. A recipient-owned override
- * fully replaces the host auth. An owner-enabled shared snapshot is the
- * fallback; otherwise only secret-less auth types pass.
- */
-type SharedAuthResolution =
-  "recipient-override" | "shared-snapshot" | "shared-agent" | "secretless";
-
-async function resolveRecipientSshAuth(
-  host: Record<string, unknown>,
-  hostId: number,
-  userId: string,
-): Promise<SharedAuthResolution | null> {
-  const ownerAuthHost = { ...host } as HostResolutionHostRecord;
-
-  // The host row is decrypted under its owner's DEK so connection settings are
-  // available. Remove owner SSH auth before resolving anything for a recipient.
-  host.password = null;
-  host.key = null;
-  host.keyPassword = null;
-  host.keyType = null;
-  host.certPublicKey = null;
-  host.credentialId = null;
-
-  try {
-    const resolution = await resolveRecipientSharedHostAuthentication(
-      ownerAuthHost,
-      hostId,
-      userId,
-      "ssh",
-    );
-
-    if (resolution.source === "personal-override") {
-      const credential = resolution.credential;
-      host.password = credential.password;
-      host.key = credential.privateKey || credential.key;
-      host.keyPassword = credential.keyPassword;
-      host.keyType = credential.keyType;
-      host.certPublicKey = credential.certPublicKey || null;
-      host.username = credential.username || host.username;
-      host.authType = host.key ? "key" : host.password ? "password" : "none";
-      return "recipient-override";
-    }
-
-    if (resolution.source === "owner-shared") {
-      if (resolution.authType === "agent") {
-        return "shared-agent";
-      }
-      const sharedAuth = resolution.secret;
-      if (sharedAuth) {
-        host.password = sharedAuth.password || null;
-        host.key = sharedAuth.key || null;
-        host.keyPassword = sharedAuth.keyPassword || null;
-        host.keyType = sharedAuth.keyType || null;
-        host.username = pickResolvedUsername(
-          host.username,
-          sharedAuth.username,
-          host.overrideCredentialUsername,
-        );
-        host.authType = host.key ? "key" : host.password ? "password" : "none";
-        return "shared-snapshot";
-      }
-    }
-
-    if (resolution.source === "secretless") {
-      return "secretless";
-    }
-  } catch {
-    // A missing/deleted override or snapshot behaves like unavailable auth.
-  }
-
-  return null;
 }
