@@ -12,22 +12,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * (`sessions` had lost `ON DELETE CASCADE`).
  *
  * They are gone now. What has to stay true is that the bootstrap alone
- * produces every one of those tables, from an empty database and from a
- * database that predates them.
+ * still produces every table that remains part of the v0.1 owner-only
+ * runtime, from an empty database and from a database that predates them.
  */
 describe("bootstrap creates the tables the removed probes covered", () => {
   let dataDir: string;
 
   // Exactly the tables whose unreachable re-creation was deleted.
-  const TABLES = [
-    "sessions",
-    "trusted_devices",
-    "host_access",
-    "roles",
-    "user_roles",
-    "audit_logs",
-    "api_keys",
-  ];
+  const TABLES = ["sessions", "trusted_devices", "audit_logs"];
 
   beforeEach(() => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "termix-bootstrap-"));
