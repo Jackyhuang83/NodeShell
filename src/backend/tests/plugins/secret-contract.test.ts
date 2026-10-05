@@ -59,6 +59,7 @@ const {
 } = await import("../../plugins/secret-registry.js");
 const { pluginEvents } = await import("../../plugins/events.js");
 const { createFixturePlugin } = await import("./fixture-plugin.js");
+const { runAsActor } = await import("../../plugins/actor.js");
 
 const PROVIDER_ID = "ssh-terminal";
 const CONSUMER_ID = "docker";
@@ -128,24 +129,23 @@ function consumerFixture(
 ): Fixture {
   return createFixturePlugin({
     id: CONSUMER_ID,
-    capabilities: ["kv:own", "users:impersonate"],
+    capabilities: ["kv:own"],
     backendSource: CONSUMER_SOURCE,
     manifestOverrides: { category: "Infrastructure", requiresSecret },
   });
 }
 
 function borrow(userId = "user-1"): Promise<string | null> {
-  const fn = (globalThis as Record<string, unknown>).__borrow as (
-    id: string,
-  ) => Promise<string | null>;
-  return fn(userId);
+  const fn = (globalThis as Record<string, unknown>).__borrow as () => Promise<
+    string | null
+  >;
+  return runAsActor(userId, "request", () => fn());
 }
 
 function borrowUndeclared(userId = "user-1"): Promise<string | null> {
-  const fn = (globalThis as Record<string, unknown>).__borrowUndeclared as (
-    id: string,
-  ) => Promise<string | null>;
-  return fn(userId);
+  const fn = (globalThis as Record<string, unknown>)
+    .__borrowUndeclared as () => Promise<string | null>;
+  return runAsActor(userId, "request", () => fn());
 }
 
 describe("cross-plugin secret references", () => {
