@@ -42,8 +42,8 @@ vi.mock("../../../database/repositories/factory.js", () => ({
   createCurrentUserRepository: () => ({
     listAll: async () => state.users,
     countAll: async () => state.users.length,
-    findByUsername: async (username: string) =>
-      state.users.find((user) => user.username === username) ?? null,
+    findOwner: async () =>
+      state.users.find((user) => user.isAdmin) ?? null,
     createFirstLocalUser: async () => {
       throw new Error("not used by these tests");
     },
@@ -87,7 +87,7 @@ describe("internal admin boundary", () => {
       request(app()).get("/internal/admin/status"),
     ).set("X-Real-IP", "203.0.113.10");
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(404);
     expect(response.body.error).toMatch(/local/i);
   });
 
