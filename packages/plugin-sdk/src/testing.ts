@@ -28,13 +28,6 @@ import type {
   PluginWebSocketOptions,
 } from "./backend.js";
 
-/** The bits of an express Response the fake completeRedirectLogin uses. */
-interface FakeResponse {
-  status: (code: number) => FakeResponse;
-  json: (body: unknown) => unknown;
-  redirect: (url: string) => unknown;
-}
-
 /** A ctx.ws registration as the test doubles record it. */
 export interface FakeWsRoute {
   path: string;
@@ -46,7 +39,6 @@ export interface FakeWsRoute {
   options?: PluginWebSocketOptions;
 }
 import type {
-  PluginLoginRequest,
   PluginSshAuthProvider,
   PluginSshConnectOptions,
   PluginSshHost,
@@ -206,12 +198,6 @@ export interface FakeAuthRegistrations {
     string,
     (userId: string, reference: string) => Promise<string>
   >;
-  /** Identities handed to ctx.auth.completeRedirectLogin, in order. */
-  completedLogins: Array<{
-    methodId: string;
-    identity: PluginVerifiedIdentity;
-  }>;
-
 }
 
 export interface FakePluginContext {
@@ -984,40 +970,7 @@ export function createFakeContext(
       registerKeyboardInteractiveHandler: (handler) => {
         auth.keyboardInteractiveHandlers.push(handler);
       },
-      registerLoginMethod: (method) => {
-        auth.loginMethods.push(method);
-      },
-      registerSecondFactor: (factor) => {
-        auth.secondFactors.push(factor);
-      },
-      recordEnrollment: async (userId, factorId) => {
-        if (options.refuseEnrollment) {
-          throw new LoginMethodError(options.refuseEnrollment, 409);
-        }
-        auth.enrollments.add(`${userId}:${factorId}`);
-      },
-      removeEnrollment: async (userId, factorId) => {
-        auth.enrollments.delete(`${userId}:${factorId}`);
-      },
-      revokeSessions: async (match) => {
-        if (!match.sub && !match.sid) return 0;
-        auth.revokedSessions.push(match);
-        return 1;
-      },
-      loginRateLimit: {
-        isLocked: async (ip, key) => {
-          const failures = auth.loginFailures.get(`${ip}|${key}`) ?? 0;
-          return failures >= (options.loginAttemptLimit ?? 5)
-            ? { locked: true, remainingTime: 60 }
-            : { locked: false };
-        },
-        recordFailure: async (ip, key) => {
-          const id = `${ip}|${key}`;
-          auth.loginFailures.set(id, (auth.loginFailures.get(id) ?? 0) + 1);
-        },
-      },
-      countLinkedUsers: async (provider) =>
-        options.linkedUsers?.[provider] ?? 0,
+
     },
 
 
@@ -1576,40 +1529,7 @@ export function createMockCtx(
         require("auth:provide");
         ctx.auth.registerKeyboardInteractiveHandler(handler);
       },
-      registerLoginMethod: (method) => {
-        require("auth:provide");
-        ctx.auth.registerLoginMethod(method);
-      },
-      registerSecondFactor: (factor) => {
-        require("auth:provide");
-        ctx.auth.registerSecondFactor(factor);
-      },
-      recordEnrollment: async (userId, factorId) => {
-        require("auth:provide");
-        return ctx.auth.recordEnrollment(userId, factorId);
-      },
-      removeEnrollment: async (userId, factorId) => {
-        require("auth:provide");
-        return ctx.auth.removeEnrollment(userId, factorId);
-      },
-      revokeSessions: async (match) => {
-        require("auth:provide");
-        return ctx.auth.revokeSessions(match);
-      },
-      loginRateLimit: {
-        isLocked: async (ip, key) => {
-          require("auth:provide");
-          return ctx.auth.loginRateLimit.isLocked(ip, key);
-        },
-        recordFailure: async (ip, key) => {
-          require("auth:provide");
-          return ctx.auth.loginRateLimit.recordFailure(ip, key);
-        },
-      },
-      countLinkedUsers: async (provider) => {
-        require("auth:provide");
-        return ctx.auth.countLinkedUsers(provider);
-      },
+
     },
 
 
