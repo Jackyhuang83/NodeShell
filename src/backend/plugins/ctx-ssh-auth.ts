@@ -336,14 +336,11 @@ export function createPluginSsh({ manifest, bag, audit }: Deps): PluginSsh {
       );
     },
 
-    resolveHost: async (hostId, options) => {
+    resolveHost: async (hostId) => {
       await checkSsh(true);
       const userId = actingUser();
-      const { resolveHostById, resolveHostBySyncId } =
-        await import("../hosts/host-resolver.js");
-      const resolved = options?.syncId
-        ? await resolveHostBySyncId(options.syncId, userId)
-        : await resolveHostById(hostId, userId);
+      const { resolveHostById } = await import("../hosts/host-resolver.js");
+      const resolved = await resolveHostById(hostId, userId);
       await audit("ssh_resolve_host", describeHost(hostId), {
         success: !!resolved,
         errorMessage: resolved ? undefined : "Host not found",
