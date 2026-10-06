@@ -1,8 +1,7 @@
 /**
  * The services this plugin provides and consumes.
  *
- * Optional service contracts used by SSH Terminal. Tmux integration and
- * recording are isolated so the terminal itself remains usable without them.
+ * Optional service contracts used by SSH Terminal.
  */
 
 export interface CommandHistoryEntry {
@@ -38,28 +37,3 @@ export interface TmuxSessionsV1 {
   waitForSession: (client: unknown, name: string) => Promise<string>;
 }
 
-export interface RecordingSink {
-  /** Appends one batch; the first batch starts with the asciicast header. */
-  append: (chunk: string) => Promise<void>;
-  /** Writes or updates the recording row. */
-  persist: (summary: {
-    endedAt: number;
-    durationSeconds: number;
-    terminatedByOwner: boolean;
-    terminationReason: string | null;
-  }) => Promise<void>;
-  /** Nothing was recorded; drop whatever was set up. */
-  discard: () => void;
-}
-
-export interface RecordingsWriterV1 {
-  /** Null when recording is off for this user or host. */
-  open: (meta: {
-    sessionId: string;
-    hostId: number;
-    userId: string;
-    protocol: "ssh";
-    format: "asciicast";
-    startedAt: number;
-  }) => Promise<RecordingSink | null>;
-}
