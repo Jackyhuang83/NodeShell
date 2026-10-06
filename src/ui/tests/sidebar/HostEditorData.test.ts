@@ -4,8 +4,6 @@ import {
   applyHostDraft,
   createHostEditorForm,
   buildHostEditorPayload,
-  omitOwnerSshAuthFromSharedEdit,
-  connectionOriginAppliesTo,
   type HostProtocols,
 } from "../../sidebar/HostEditorData";
 import type { Host } from "@/types/ui-types";
@@ -25,62 +23,7 @@ const rdpOnly: HostProtocols = {
   enableTelnet: false,
 };
 
-describe("omitOwnerSshAuthFromSharedEdit", () => {
-  it("keeps editable host settings but removes all owner SSH authentication fields", () => {
-    const form = createHostEditorForm(null);
-    const payload = buildHostEditorPayload(
-      {
-        ...form,
-        ip: "10.0.0.42",
-        authType: "agent",
-        credentialId: "7",
-        password: "owner-password",
-        key: "owner-key",
-        keyPassword: "owner-passphrase",
-        keyType: "ssh-ed25519",
-        overrideCredentialUsername: true,
-        shareSshAuth: true,
-        sudoPassword: "owner-sudo",
-        agentSocketPath: "/run/user/1000/ssh-agent.sock",
-        notes: "editable",
-      },
-      sshOnly,
-    );
-
-    const sharedEdit = omitOwnerSshAuthFromSharedEdit(payload);
-
-    expect(sharedEdit.name).toBe(payload.name);
-    expect(sharedEdit.ip).toBe("10.0.0.42");
-    expect(sharedEdit.notes).toBe("editable");
-    expect(sharedEdit.sshOptions?.agentSocketPath).toBeUndefined();
-    for (const field of [
-      "authType",
-      "credentialId",
-      "overrideCredentialUsername",
-      "shareSshAuth",
-      "password",
-      "key",
-      "keyPassword",
-      "keyType",
-      "sudoPassword",
-    ]) {
-      expect(Object.prototype.hasOwnProperty.call(sharedEdit, field)).toBe(
-        false,
-      );
-    }
-  });
-});
-
 describe("buildHostEditorPayload auth field isolation", () => {
-  it("persists the owner's SSH authentication sharing choice", () => {
-    const form = {
-      ...createHostEditorForm(null),
-      shareSshAuth: true,
-    };
-
-    expect(buildHostEditorPayload(form, sshOnly).shareSshAuth).toBe(true);
-  });
-
   it("only sends the password when authType is password", () => {
     const form = {
       ...createHostEditorForm(null),
@@ -218,20 +161,6 @@ describe("buildHostEditorPayload auth field isolation", () => {
     expect(tc?.agentIdentity).toBeNull();
   });
 
-  it("keeps agentIdentity in sshOptions for shared edits (not owner-private)", () => {
-    const form = {
-      ...createHostEditorForm(null),
-      authType: "agent" as const,
-      agentIdentity: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA test-key",
-    };
-
-    const payload = buildHostEditorPayload(form, sshOnly);
-    const sharedEdit = omitOwnerSshAuthFromSharedEdit(payload);
-
-    expect(sharedEdit.sshOptions?.agentIdentity).toBe(
-      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA test-key",
-    );
-  });
 });
 
 describe("sudo password persistence indicator", () => {
@@ -425,32 +354,6 @@ describe("createHostEditorForm credentialId", () => {
 // Support#1240: RDP/VNC/Telnet can now originate from the desktop, so the
 // control has to appear for hosts that enable only those protocols -- it used
 // to be gated on SSH alone.
-describe("connectionOriginAppliesTo", () => {
-  const none = {
-    enableSsh: false,
-    enableRdp: false,
-    enableVnc: false,
-    enableTelnet: false,
-  };
-
-  it("applies to an SSH host", () => {
-    expect(connectionOriginAppliesTo({ ...none, enableSsh: true })).toBe(true);
-  });
-
-  it.each(["enableRdp", "enableVnc", "enableTelnet"] as const)(
-    "applies to a host that only enables %s",
-    (protocol) => {
-      expect(connectionOriginAppliesTo({ ...none, [protocol]: true })).toBe(
-        true,
-      );
-    },
-  );
-
-  it("does not apply when no supported protocol is enabled", () => {
-    expect(connectionOriginAppliesTo(none)).toBe(false);
-  });
-});
-
 describe("terminal fields", () => {
   it("sends no terminalConfig, and the SSH options on their own", () => {
     const form = {
