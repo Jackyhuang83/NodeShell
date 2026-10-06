@@ -8,7 +8,6 @@ import {
   Pencil,
   Pin,
   Trash2,
-  Share2,
   Upload,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -63,7 +62,6 @@ export function CredentialItem({
   onEdit,
   onClone,
   onDelete,
-  onShare,
 }: {
   cred: Credential;
   usedByCount?: number;
@@ -96,7 +94,6 @@ export function CredentialItem({
   onEdit: () => void;
   onClone: () => void;
   onDelete: () => void;
-  onShare?: () => void;
 }) {
   const { t } = useTranslation();
   const reorderEdge = isReorderHovered ? reorderHoverEdge : null;
@@ -151,11 +148,7 @@ export function CredentialItem({
     </>
   ) : null;
 
-  // A recipient sees only what their grant allows: "manage" may edit and
-  // re-share, "use" may only use. Cloning and deleting stay with the owner.
-  const canEdit = !cred.isShared || cred.permissionLevel === "manage";
-  const canShare =
-    !!onShare && (!cred.isShared || cred.permissionLevel === "manage");
+  const canEdit = true;
   const managementButtons = (
     <>
       {canEdit && (
@@ -170,20 +163,7 @@ export function CredentialItem({
           <Pencil className="size-3.5" />
         </button>
       )}
-      {canShare && (
-        <button
-          title={t("credentials.shareCredentialAction")}
-          onClick={(e) => {
-            e.stopPropagation();
-            onShare?.();
-          }}
-          className={trayButtonClass}
-        >
-          <Share2 className="size-3.5" />
-        </button>
-      )}
-      {!cred.isShared && (
-        <>
+      <>
           <button
             title={t("credentials.cloneCredentialAction")}
             onClick={(e) => {
@@ -204,8 +184,7 @@ export function CredentialItem({
           >
             <Trash2 className="size-3.5" />
           </button>
-        </>
-      )}
+      </>
     </>
   );
 
@@ -281,16 +260,7 @@ export function CredentialItem({
             className={`${tokens.nameTextSize} font-semibold truncate text-foreground leading-none tracking-tight`}
           >
             {cred.name}
-            {cred.isShared && (
-              <span
-                className="ml-1 inline-flex items-center gap-0.5 text-[9px] uppercase text-accent-brand/80"
-                title={t("credentials.sharedBy", {
-                  owner: cred.ownerUsername ?? "",
-                })}
-              >
-                <Share2 className="size-2.5" />
-                {t("credentials.sharedBadge")}
-              </span>
+
             )}
           </span>
           <span
