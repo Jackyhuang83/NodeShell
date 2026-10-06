@@ -302,10 +302,6 @@ export class TerminalSessionManager {
     session.ownerWs = null;
     session.lastDetachedAt = Date.now();
 
-    // Persist log immediately when the user detaches so it appears right away,
-    // regardless of whether the session is later reattached or times out.
-    this.maybePersistLog(session);
-
     const timeoutMs = this.getTimeoutMs();
 
     session.detachTimeout = setTimeout(() => {
