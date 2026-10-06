@@ -10,19 +10,11 @@ interface AuthenticatedRequest extends Request {
   dataKey?: Buffer;
 }
 
-// Kept temporarily as a type compatibility surface while the remaining
-// multi-user records are removed. NodeShell v0.1 never grants shared access.
-const SHARE_PERMISSION_LEVELS = ["connect", "view", "edit", "manage"] as const;
-type SharePermissionLevel = (typeof SHARE_PERMISSION_LEVELS)[number];
-export type HostAction = SharePermissionLevel | "delete";
+export type HostAction = "connect" | "view" | "edit" | "manage" | "delete";
 
 interface HostAccessInfo {
   hasAccess: boolean;
   isOwner: boolean;
-  isShared: boolean;
-  isAdminBypass?: boolean;
-  permissionLevel?: SharePermissionLevel;
-  expiresAt?: string | null;
 }
 
 interface PermissionCheckResult {
@@ -66,7 +58,7 @@ class PermissionManager {
   ): Promise<HostAccessInfo> {
     try {
       if (!(await this.isAdmin(userId))) {
-        return { hasAccess: false, isOwner: false, isShared: false };
+        return { hasAccess: false, isOwner: false };
       }
 
       const owned =
@@ -78,7 +70,6 @@ class PermissionManager {
       return {
         hasAccess: owned,
         isOwner: owned,
-        isShared: false,
       };
     } catch (error) {
       databaseLogger.error("Failed to check host ownership", error, {
@@ -86,7 +77,7 @@ class PermissionManager {
         userId,
         hostId,
       });
-      return { hasAccess: false, isOwner: false, isShared: false };
+      return { hasAccess: false, isOwner: false };
     }
   }
 
@@ -220,10 +211,9 @@ class PermissionManager {
   }
 }
 
-export { PermissionManager, SHARE_PERMISSION_LEVELS };
+export { PermissionManager };
 export type {
   AuthenticatedRequest,
   HostAccessInfo,
   PermissionCheckResult,
-  SharePermissionLevel,
 };
