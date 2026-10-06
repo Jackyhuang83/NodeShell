@@ -77,7 +77,6 @@ export function SidebarTree({
   children,
   onOpenTab,
   onEditHost,
-  onShareHost,
   query: externalQuery = "",
   selectionMode,
   onToggleSelectionMode,
@@ -102,7 +101,6 @@ export function SidebarTree({
     },
   ) => void;
   onEditHost: (host: Host) => void;
-  onShareHost?: (host: Host) => void;
   query?: string;
   selectionMode: boolean;
   onToggleSelectionMode: () => void;
@@ -1033,7 +1031,6 @@ export function SidebarTree({
                       flat
                       onOpenTab={onOpenTab}
                       onEditHost={onEditHost}
-                      onShareHost={onShareHost}
                       onDeleteHost={handleDeleteHost}
                       onDuplicateHost={handleDuplicateHost}
                       query={query}
