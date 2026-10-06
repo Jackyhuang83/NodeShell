@@ -111,7 +111,6 @@ export function activate(app: TermixApp): void {
     order: 20,
     tabType: "files",
     copyUrlView: "file-manager",
-    quickConnect: true,
     when: (host) =>
       !!host.enableSsh &&
       fileManagerHostSetting(host, "enableFileManager", true),
