@@ -800,12 +800,6 @@ export function HostEditor({
                             type="button"
                             role="radio"
                             aria-checked={authMethod === m}
-                            disabled={lockAuthReferences}
-                            title={
-                              lockAuthReferences
-                                ? t("hosts.sharing.ownerOnlyControl")
-                                : undefined
-                            }
                             onClick={() => {
                               setField("authType", m as HostAuthType);
                             }}
@@ -815,11 +809,6 @@ export function HostEditor({
                           </button>
                         ))}
                       </div>
-                      {lockAuthReferences && (
-                        <p className="text-[10px] text-muted-foreground/60">
-                          {t("hosts.sharing.ownerOnlyControl")}
-                        </p>
-                      )}
                       {missingAuthNotice && (
                         <p className="text-[10px] text-destructive">
                           {missingAuthNotice}
@@ -1078,12 +1067,6 @@ export function HostEditor({
                             <div className="flex items-center gap-2">
                               <Select2
                                 value={form.credentialId}
-                                disabled={lockAuthReferences}
-                                title={
-                                  lockAuthReferences
-                                    ? t("hosts.sharing.ownerOnlyControl")
-                                    : undefined
-                                }
                                 onChange={(e) => {
                                   const newId = e.target.value;
                                   setField("credentialId", newId);
@@ -1335,8 +1318,7 @@ export function HostEditor({
           >
             {t("hosts.editorCancel")}
           </Button>
-          {!readOnly && (
-            <Button
+          <Button
               variant="outline"
               className="border-accent-brand/40 text-accent-brand hover:bg-accent-brand/10 hover:text-accent-brand px-8"
               onClick={handleSave}
@@ -1350,7 +1332,6 @@ export function HostEditor({
                     ? t("hosts.editorUpdate")
                     : t("hosts.editorAdd")}
             </Button>
-          )}
         </div>
 
         {showQuickCredentialDialog && (
