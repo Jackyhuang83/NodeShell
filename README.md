@@ -33,6 +33,33 @@ The normal workflow is deliberately simple:
 Add host -> choose saved credential -> SSH / Files / Local Forward
 ```
 
+## Quick install
+
+On a fresh Debian or Ubuntu VPS, run as root:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Jackyhuang83/NodeShell/main/nodeshell.sh)
+```
+
+After the first run, open the same menu with:
+
+```bash
+nodeshell
+```
+
+The menu provides installation, updates, Owner management, runtime status,
+logs, Cloudflare Tunnel setup, and uninstall.
+
+Installation keeps the WebUI bound to `127.0.0.1:8080`. The installer creates
+the four external secrets as `root:root 0600`, builds the image locally from
+the audited `main` branch, starts the container, and can create the first
+Owner interactively.
+
+For Cloudflare Tunnel, first create a remotely-managed tunnel in Cloudflare and
+set its Public Hostname service to `http://localhost:8080`. The installer
+stores the Tunnel token in a root-only file and runs `cloudflared` with
+token-file support. Cloudflare Access is recommended in front of the hostname.
+
 ## Security baseline
 
 NodeShell v0.1 deliberately uses a smaller trust boundary than upstream:
@@ -63,9 +90,11 @@ NodeShell v0.1 deliberately uses a smaller trust boundary than upstream:
 No passwords, SSH private keys, setup tokens, API keys, or service tokens belong
 in this repository.
 
-## First secure initialization
+## Manual secure initialization
 
-NodeShell does not expose browser registration or browser password recovery.
+The menu installer above is the recommended path. For manual installation,
+NodeShell still does not expose browser registration or browser password
+recovery.
 
 Create the four installation secrets on the NodeShell server. They remain
 `root:root` and mode `0600` on the host:
@@ -79,9 +108,10 @@ for name in jwt_secret database_key encryption_key internal_auth_token; do
 done
 ```
 
-Start NodeShell:
+Build the current audited source and start NodeShell:
 
 ```bash
+docker build -f docker/Dockerfile -t ghcr.io/jackyhuang83/nodeshell:latest .
 docker compose -f docker/docker-compose.yml up -d
 ```
 
