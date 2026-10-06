@@ -34,13 +34,9 @@ function toSshHost(host: PluginHostRecord): SSHHost {
     notes: host.notes,
     connectionType: host.connectionType,
     enableSsh: host.enableSsh,
-    syncId: host.syncId,
     createdAt: "",
     updatedAt: "",
-    connectionOrigin: host.connectionOrigin,
     instanceId: host.instanceId,
-    isShared: host.isShared,
-    permissionLevel: host.permissionLevel,
     pluginSettings: host.pluginSettings,
   };
 }
