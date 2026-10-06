@@ -984,7 +984,6 @@ const migrateSchema = () => {
     { column: "connection_type", sql: "ALTER TABLE ssh_data ADD COLUMN connection_type TEXT NOT NULL DEFAULT 'ssh'" },
     { column: "credential_id", sql: "ALTER TABLE ssh_data ADD COLUMN credential_id INTEGER" },
     { column: "override_credential_username", sql: "ALTER TABLE ssh_data ADD COLUMN override_credential_username INTEGER" },
-    { column: "share_ssh_auth", sql: "ALTER TABLE ssh_data ADD COLUMN share_ssh_auth INTEGER NOT NULL DEFAULT 0" },
     { column: "jump_hosts", sql: "ALTER TABLE ssh_data ADD COLUMN jump_hosts TEXT" },
     { column: "quick_actions", sql: "ALTER TABLE ssh_data ADD COLUMN quick_actions TEXT" },
     { column: "host_key_fingerprint", sql: "ALTER TABLE ssh_data ADD COLUMN host_key_fingerprint TEXT" },
@@ -996,7 +995,6 @@ const migrateSchema = () => {
     { column: "port_knock_sequence", sql: "ALTER TABLE ssh_data ADD COLUMN port_knock_sequence TEXT" },
     { column: "enable_ssh", sql: "ALTER TABLE ssh_data ADD COLUMN enable_ssh INTEGER NOT NULL DEFAULT 1" },
     { column: "ssh_port", sql: "ALTER TABLE ssh_data ADD COLUMN ssh_port INTEGER DEFAULT 22" },
-    { column: "connection_origin", sql: "ALTER TABLE ssh_data ADD COLUMN connection_origin TEXT" },
     { column: "parent_host_id", sql: "ALTER TABLE ssh_data ADD COLUMN parent_host_id INTEGER REFERENCES ssh_data(id) ON DELETE SET NULL" },
   ];
 
@@ -1166,22 +1164,7 @@ const migrateSchema = () => {
   // --- alerts end ---
 
 
-  // --- sync begin ---
-  // Stable per-row identity used to match rows across two independently-
-  // seeded databases (the embedded desktop backend and a connected remote
-  // server) during sync. Local autoincrement ids collide across instances,
-  // so a randomly-generated id is the join key instead. SQLite refuses a
-  // non-constant DEFAULT (e.g. randomblob()) on ALTER TABLE ADD COLUMN for
-  // tables with existing constraints ("Cannot add a column with
-  // non-constant default"), so the column is added as plain nullable TEXT;
-  // repositories set syncId explicitly on insert going forward, and
-  // existing rows are backfilled by the UPDATE loop below.
-  addColumnIfNotExists("ssh_data", "sync_id", "TEXT");
-  addColumnIfNotExists("ssh_credentials", "sync_id", "TEXT");
-  addColumnIfNotExists("ssh_folders", "sync_id", "TEXT");
-
-  // Plugin runtime: lastError reports why a plugin is blocked or failed, and
-  // grants record whether a capability came from an admin or from bundling.
+  // Plugin runtime columns introduced after the original schema.
   addColumnIfNotExists("plugins", "last_error", "TEXT");
   addColumnIfNotExists(
     "plugin_permission_grants",
@@ -1189,66 +1172,27 @@ const migrateSchema = () => {
     "TEXT NOT NULL DEFAULT 'admin'",
   );
   relaxPluginGrantGrantedBy();
-
-  const syncIdTables = ["ssh_data", "ssh_credentials", "ssh_folders"];
-
-  for (const table of syncIdTables) {
-    try {
-      const result = sqlite
-        .prepare(
-          `UPDATE ${table} SET sync_id = lower(hex(randomblob(16))) WHERE sync_id IS NULL`,
-        )
-        .run();
-      if (result.changes > 0) {
-        databaseLogger.info(
-          `Backfilled sync_id for ${result.changes} row(s) in ${table}`,
-          { operation: "sync_id_backfill", table },
-        );
-      }
-      sqlite.exec(
-        `CREATE UNIQUE INDEX IF NOT EXISTS idx_${table}_sync_id ON ${table}(sync_id)`,
-      );
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      databaseLogger.warn(
-        `Failed to backfill sync_id for ${table}: ${message}`,
-        {
-          operation: "sync_id_backfill",
-          table,
-        },
-      );
-    }
-  }
-
-  addColumnIfNotExists(
-    "ssh_data",
-    "local_only",
-    "INTEGER NOT NULL DEFAULT 0",
-  );
-  addColumnIfNotExists("ssh_data", "shared_source", "TEXT");
   addColumnIfNotExists("ssh_data", "ssh_options", "TEXT");
-  addColumnIfNotExists("ssh_credentials", "shared_source", "TEXT");
-  addColumnIfNotExists(
-    "ssh_folders",
-    "local_only",
-    "INTEGER NOT NULL DEFAULT 0",
-  );
 
+  // Old desktop-sync tables and indexes are inert in NodeShell v0.1. Remove
+  // the active indexing/table overhead while leaving legacy row columns alone
+  // so upgrades never depend on SQLite DROP COLUMN support.
   try {
     sqlite.exec(`
+      DROP INDEX IF EXISTS idx_ssh_data_sync_id;
+      DROP INDEX IF EXISTS idx_ssh_credentials_sync_id;
+      DROP INDEX IF EXISTS idx_ssh_folders_sync_id;
       DROP TABLE IF EXISTS sync_tombstones;
       DROP TABLE IF EXISTS sync_conflicts;
       DROP TABLE IF EXISTS sync_records;
       DROP TABLE IF EXISTS sync_link;
     `);
   } catch (dropError) {
-    databaseLogger.warn("Failed to remove legacy desktop sync tables", {
+    databaseLogger.warn("Failed to remove legacy desktop sync storage", {
       operation: "schema_migration",
       error: dropError,
     });
   }
-
-
 
   // Audit trails and session recordings used to be deleted along with the user
   // they referenced, which defeats the point of keeping them.
