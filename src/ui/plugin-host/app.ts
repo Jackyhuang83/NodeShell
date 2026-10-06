@@ -82,7 +82,6 @@ export function createPluginApp(
   pluginId: string,
   manifest: PluginManifest,
   contributes: PluginContributions | null,
-  options: { guest?: boolean } = {},
 ): PluginAppHandle {
   const bag: Disposer[] = [];
   let disposed = false;
@@ -133,7 +132,6 @@ export function createPluginApp(
   const app: TermixApp = {
     pluginId,
     manifest,
-    guest: !!options.guest,
 
     registerRailItem(item) {
       requireDeclared("panel", item.id, "rail item");
