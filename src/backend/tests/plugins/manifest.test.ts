@@ -585,8 +585,8 @@ describe("tabs and host capabilities", () => {
   });
 });
 
-describe("panels, dashboard cards and guest pages", () => {
-  it("accepts declared panels, cards and the guest flag", () => {
+describe("panels and dashboard cards", () => {
+  it("accepts declared panels and cards", () => {
     expect(
       validateManifest(
         base({
@@ -595,7 +595,6 @@ describe("panels, dashboard cards and guest pages", () => {
             dashboardCards: [
               { id: "sample-card", titleKey: "cards.sample", icon: "Box" },
             ],
-            guest: true,
           },
         }),
       ),
@@ -618,30 +617,15 @@ describe("panels, dashboard cards and guest pages", () => {
     expect(errors).toMatch(/dashboardCards\[0\]\.titleKey/);
   });
 
-  it("accepts guest views on a guest plugin and refuses them otherwise", () => {
-    expect(
-      validateManifest(
-        base({ contributes: { guest: true, guestViews: ["shared"] } }),
-      ),
-    ).toEqual([]);
-    const errors = validateManifest(
-      base({ contributes: { guestViews: ["Shared View"] } }),
-    ).join();
-    expect(errors).toMatch(/contributes\.guestViews entries must be/);
-    expect(errors).toMatch(/needs "contributes\.guest"/);
-  });
-
-  it("rejects an unknown field inside a view and a non-boolean guest", () => {
+  it("rejects an unknown field inside a view", () => {
     const errors = validateManifest(
       base({
         contributes: {
           panels: [{ id: "p", titleKey: "a", width: 3 }],
-          guest: "yes",
         },
       }),
     ).join();
     expect(errors).toMatch(/Unknown field "width"/);
-    expect(errors).toMatch(/contributes\.guest" must be a boolean/);
   });
 });
 
