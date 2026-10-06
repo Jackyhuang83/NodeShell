@@ -437,7 +437,6 @@ export function CredentialSidebarTree({
                       onEdit={() => onEditCredential(item)}
                       onClone={() => onCloneCredential(item)}
                       onDelete={() => onDeleteCredential(item)}
-                      onShare={() => onShareCredential?.(item)}
                     />
                   )}
                 </div>
