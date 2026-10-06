@@ -57,11 +57,7 @@
       {
         "name": "use",
         "titleKey": "permissions.use.title",
-        "descriptionKey": "permissions.use.description",
-        "defaultRoles": [
-          "admin",
-          "user"
-        ]
+        "descriptionKey": "permissions.use.description"
       }
     ],
     "settings": {
