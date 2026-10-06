@@ -50,11 +50,7 @@
       {
         "name": "sessions",
         "titleKey": "permissions.sessions.title",
-        "descriptionKey": "permissions.sessions.description",
-        "defaultRoles": [
-          "admin",
-          "user"
-        ]
+        "descriptionKey": "permissions.sessions.description"
       }
     ],
     "settings": {
