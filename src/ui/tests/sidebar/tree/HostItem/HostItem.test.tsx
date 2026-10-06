@@ -82,7 +82,6 @@ function renderHostItem(
       host={baseHost}
       onOpenTab={noop}
       onEditHost={noop}
-      onShareHost={noop}
       onDelete={noop}
       onDuplicate={noop}
       density={density}
@@ -124,7 +123,6 @@ describe("HostItem density parity", () => {
           host={baseHost}
           onOpenTab={noop}
           onEditHost={noop}
-          onShareHost={noop}
           onDelete={noop}
           onDuplicate={noop}
           isMenuOpen={menuOpen}
@@ -142,15 +140,13 @@ describe("HostItem density parity", () => {
     expect(screen.getAllByText("hosts.editHostAction").length).toBeGreaterThan(
       0,
     );
-    expect(screen.getAllByText("hosts.shareHost").length).toBeGreaterThan(0);
   });
 
   it.each(["comfortable", "compact"] as const)(
-    "exposes edit, share, and more-options actions in %s density",
+    "exposes edit and more-options actions in %s density",
     (density) => {
       renderHostItem(density);
       expect(screen.getByTitle("hosts.editHostAction")).toBeTruthy();
-      expect(screen.getByTitle("hosts.shareHost")).toBeTruthy();
       expect(screen.getByTitle("hosts.moreOptions")).toBeTruthy();
     },
   );
