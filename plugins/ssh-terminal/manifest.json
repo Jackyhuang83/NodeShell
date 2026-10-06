@@ -24,16 +24,6 @@
     "events:core",
     "ui:surface"
   ],
-  "provides": [
-    {
-      "service": "sessions.live",
-      "version": "1.0.0",
-      "permission": "ssh-terminal.sessions",
-      "names": [
-        "ssh"
-      ]
-    }
-  ],
   "contributes": {
     "tabs": [
       {
@@ -44,13 +34,6 @@
           "host-context-menu",
           "palette"
         ]
-      }
-    ],
-    "permissions": [
-      {
-        "name": "sessions",
-        "titleKey": "permissions.sessions.title",
-        "descriptionKey": "permissions.sessions.description"
       }
     ],
     "settings": {
