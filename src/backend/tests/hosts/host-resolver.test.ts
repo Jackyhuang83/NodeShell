@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   host: null as Record<string, unknown> | null,
-  hasAccess: true,
   credentials: new Map<string, Record<string, unknown>>(),
   folderCredentialId: null as number | null,
   pluginSettings: null as Record<string, unknown> | null,
@@ -25,18 +24,6 @@ vi.mock("../../database/repositories/factory.js", () => ({
   createCurrentRoleRepository: () => ({
     listUserRoleIds: async () => [],
   }),
-}));
-
-vi.mock("../../utils/permission-manager.js", () => ({
-  PermissionManager: {
-    getInstance: () => ({
-      canAccessHost: async () => ({
-        hasAccess: state.hasAccess,
-        isOwner: state.hasAccess,
-        isShared: false,
-      }),
-    }),
-  },
 }));
 
 vi.mock("../../utils/shared-credential-secrets-manager.js", () => ({
@@ -92,18 +79,12 @@ function baseHost(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   state.host = baseHost();
-  state.hasAccess = true;
   state.credentials.clear();
   state.folderCredentialId = null;
   state.pluginSettings = null;
 });
 
 describe("resolveHostById in the single-owner model", () => {
-  it("returns null when access is denied", async () => {
-    state.hasAccess = false;
-    expect(await resolveHostById(42, "owner")).toBeNull();
-  });
-
   it("returns null when the requested row does not belong to the Owner", async () => {
     expect(await resolveHostById(42, "stranger")).toBeNull();
   });
