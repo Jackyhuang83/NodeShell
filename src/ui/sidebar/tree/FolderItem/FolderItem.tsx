@@ -359,7 +359,6 @@ export function FolderItem({
                 host={child}
                 onOpenTab={(t, options) => onOpenTab(child, t, options)}
                 onEditHost={onEditHost ? () => onEditHost(child) : undefined}
-                onShareHost={onShareHost ? () => onShareHost(child) : undefined}
                 onDelete={() => onDeleteHost(child)}
                 onDuplicate={() => onDuplicateHost(child)}
                 query={query}
