@@ -2,19 +2,11 @@ import { randomUUID } from "crypto";
 import { type Client, type ClientChannel } from "ssh2";
 import { WebSocket } from "ws";
 import type { TerminalLogger } from "./helpers.js";
-import type { RecordingSink, RecordingsWriterV1 } from "./services.js";
 
 const MAX_BUFFER_BYTES = 512 * 1024;
 export const DEFAULT_TIMEOUT_MINUTES = 30;
 const HEALTH_CHECK_INTERVAL_MS = 60_000;
 const MAX_SESSIONS_PER_USER = 10;
-// Coalesces recording writes: a chatty SSH stream can emit dozens of "data"
-// events per second, and appending to disk on every single one saturates the
-// libuv threadpool (default size 4), starving unrelated fs/DNS/crypto work
-// and stalling the WS ping/pong health check enough to look like connection
-// drops. Batch pending lines and flush on a short trailing edge instead.
-const RECORDING_FLUSH_INTERVAL_MS = 300;
-
 export interface TerminalSession {
   id: string;
   userId: string;
@@ -38,30 +30,13 @@ export interface TerminalSession {
 
   outputBuffer: string[];
   outputBufferBytes: number;
-  /** Output listeners from the sessions.live service. */
-  dataListeners: Set<(data: string) => void>;
-  /** Resolves once the recordings service answered; null when off. */
-  recordingSink: Promise<RecordingSink | null> | null;
-  recordingHeader: string | null;
-  recordingBytes: number;
-  recordingWriteChain: Promise<void>;
-  recordingPersistChain: Promise<void>;
-  pendingRecordingData: string;
-  recordingFlushTimer: NodeJS.Timeout | null;
   tmuxSessionName: string | null;
-  sessionLoggingEnabled: boolean;
-  sessionStartedAt: number;
-  lastPersistedBytes: number;
-  terminatedByOwner: boolean;
-  terminationReason: string | null;
 }
 
 export interface SessionManagerDeps {
   log: TerminalLogger;
   /** Minutes a detached session is kept; read on every detach. */
   getTimeoutMinutes: () => number;
-  /** The recordings.writer service, when a plugin provides it. */
-  getRecordings: () => RecordingsWriterV1 | null;
 }
 
 export class TerminalSessionManager {
@@ -84,7 +59,6 @@ export class TerminalSessionManager {
     cols: number,
     rows: number,
     tabInstanceId?: string,
-    sessionLoggingEnabled = true,
   ): string {
     const userSessions = this.getUserSessions(userId);
     if (userSessions.length >= MAX_SESSIONS_PER_USER) {
@@ -135,40 +109,6 @@ export class TerminalSessionManager {
 
     const id = randomUUID();
     const now = Date.now();
-    let recordingSink: Promise<RecordingSink | null> | null = null;
-    let recordingHeader: string | null = null;
-    const recordings = sessionLoggingEnabled ? this.deps.getRecordings() : null;
-    if (recordings) {
-      // Events recorded before this resolves wait in pendingRecordingData.
-      recordingSink = Promise.resolve()
-        .then(() =>
-          recordings.open({
-            sessionId: id,
-            hostId,
-            userId,
-            protocol: "ssh",
-            format: "asciicast",
-            startedAt: now,
-          }),
-        )
-        .catch((err) => {
-          this.log.warn("Could not start a session recording", {
-            operation: "session_recording_open_error",
-            sessionId: id,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          return null;
-        });
-    }
-    if (recordingSink) {
-      recordingHeader = `${JSON.stringify({
-        version: 2,
-        width: cols,
-        height: rows,
-        timestamp: Math.floor(now / 1000),
-        env: { TERM: "xterm-256color", SHELL: "/bin/sh" },
-      })}\n`;
-    }
     const session: TerminalSession = {
       id,
       userId,
@@ -187,20 +127,7 @@ export class TerminalSessionManager {
       detachTimeout: null,
       outputBuffer: [],
       outputBufferBytes: 0,
-      dataListeners: new Set(),
-      recordingSink,
-      recordingHeader,
-      recordingBytes: 0,
-      recordingWriteChain: Promise.resolve(),
-      recordingPersistChain: Promise.resolve(),
-      pendingRecordingData: "",
-      recordingFlushTimer: null,
       tmuxSessionName: null,
-      sessionLoggingEnabled: !!recordingSink,
-      sessionStartedAt: now,
-      lastPersistedBytes: 0,
-      terminatedByOwner: false,
-      terminationReason: null,
     };
     this.sessions.set(id, session);
 
@@ -407,12 +334,6 @@ export class TerminalSessionManager {
       session.detachTimeout = null;
     }
 
-    this.maybePersistLog(session, true);
-    if (session.recordingSink && session.recordingBytes === 0) {
-      void session.recordingSink.then((sink) => sink?.discard());
-    }
-    session.dataListeners.clear();
-
     session.ownerWs = null;
 
     if (session.sshStream) {
@@ -456,60 +377,6 @@ export class TerminalSessionManager {
     });
   }
 
-  private maybePersistLog(session: TerminalSession, force = false): void {
-    if (!session.sessionLoggingEnabled) return;
-    if (session.recordingFlushTimer) {
-      clearTimeout(session.recordingFlushTimer);
-      session.recordingFlushTimer = null;
-      this.flushRecording(session);
-    }
-    if (session.recordingBytes === 0) return;
-    if (!force && session.recordingBytes === session.lastPersistedBytes) return;
-    session.lastPersistedBytes = session.recordingBytes;
-    session.recordingPersistChain = session.recordingPersistChain
-      .then(() => this.persistSessionLog(session))
-      .catch((err) => {
-        this.log.warn("Failed to persist session log", {
-          operation: "session_log_persist_error",
-          sessionId: session.id,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-  }
-
-  private async persistSessionLog(session: TerminalSession): Promise<void> {
-    if (!session.recordingSink) return;
-    await session.recordingWriteChain;
-    const sink = await session.recordingSink;
-    if (!sink) return;
-    const endedAt = Date.now();
-    const duration = Math.floor((endedAt - session.sessionStartedAt) / 1000);
-
-    try {
-      await sink.persist({
-        endedAt,
-        durationSeconds: duration,
-        terminatedByOwner: session.terminatedByOwner,
-        terminationReason: session.terminationReason,
-      });
-    } catch (err) {
-      this.log.warn("Failed to insert session recording row", {
-        operation: "session_recording_insert_error",
-        sessionId: session.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    this.log.info("Session log persisted", {
-      operation: "session_log_persisted",
-      sessionId: session.id,
-      userId: session.userId,
-      hostId: session.hostId,
-      duration,
-      bytes: session.recordingBytes,
-    });
-  }
-
   getUserSessions(userId: string): TerminalSession[] {
     const result: TerminalSession[] = [];
     for (const session of this.sessions.values()) {
@@ -535,85 +402,12 @@ export class TerminalSessionManager {
       if (removed) session.outputBufferBytes -= removed.length;
     }
 
-    for (const listener of session.dataListeners) {
-      try {
-        listener(data);
-      } catch {
-        // A listener that throws must not break the session.
-      }
-    }
-
-    this.recordSessionEvent(session, "o", data);
-  }
-
-  bufferInput(sessionId: string, data: string): void {
-    const session = this.sessions.get(sessionId);
-    if (!session) return;
-    this.recordSessionEvent(session, "i", data);
-  }
-
   resizeSession(sessionId: string, cols: number, rows: number): void {
     const session = this.sessions.get(sessionId);
     if (!session) return;
     session.cols = cols;
     session.rows = rows;
     this.broadcast(sessionId, { type: "resized", cols, rows });
-    this.bufferResize(sessionId, cols, rows);
-  }
-
-  bufferResize(sessionId: string, cols: number, rows: number): void {
-    const session = this.sessions.get(sessionId);
-    if (!session) return;
-    this.recordSessionEvent(session, "r", `${cols}x${rows}`);
-  }
-
-  private recordSessionEvent(
-    session: TerminalSession,
-    type: "i" | "o" | "r",
-    data: string,
-  ): void {
-    if (!session.sessionLoggingEnabled || !session.recordingSink || !data)
-      return;
-    const elapsed = (Date.now() - session.sessionStartedAt) / 1000;
-    const line = `${JSON.stringify([elapsed, type, data])}\n`;
-    session.recordingBytes += Buffer.byteLength(line);
-    session.pendingRecordingData += line;
-
-    if (!session.recordingFlushTimer) {
-      session.recordingFlushTimer = setTimeout(() => {
-        session.recordingFlushTimer = null;
-        this.flushRecording(session);
-      }, RECORDING_FLUSH_INTERVAL_MS);
-    }
-  }
-
-  /**
-   * Coalesces buffered recording lines into one write, chained so they land
-   * in order. Never one write per chunk: that starved the libuv threadpool
-   * (issue #1049).
-   */
-  private flushRecording(session: TerminalSession): void {
-    const pendingSink = session.recordingSink;
-    if (!pendingSink || !session.pendingRecordingData) return;
-    const chunk = session.pendingRecordingData;
-    session.pendingRecordingData = "";
-    const firstWrite = session.recordingBytes === Buffer.byteLength(chunk);
-
-    session.recordingWriteChain = session.recordingWriteChain
-      .then(async () => {
-        const sink = await pendingSink;
-        if (!sink) return;
-        await sink.append(
-          firstWrite ? `${session.recordingHeader}${chunk}` : chunk,
-        );
-      })
-      .catch((err) => {
-        this.log.warn("Failed to write session recording", {
-          operation: "session_recording_write_error",
-          sessionId: session.id,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
   }
 
   flushBuffer(session: TerminalSession): string | null {
