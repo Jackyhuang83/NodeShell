@@ -1,0 +1,37 @@
+name: NodeShell CI
+
+on:
+  push:
+    branches: [security-baseline, phase1b-hardening, v0.1-slim, main]
+  pull_request:
+    branches: [security-baseline, main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.15.0"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Shell syntax
+        run: sh -n docker/entrypoint.sh docker/nodeshell
+      - name: Docker configuration
+        run: |
+          docker compose -f docker/docker-compose.yml config >/dev/null
+          docker build --check -f docker/Dockerfile .
+      - name: Type check
+        run: npm run type-check
+      - name: Build
+        run: npm run build
+      - name: Verify admin CLI artifact
+        run: test -f dist/backend/backend/cli/nodeshell-admin.js
+      - name: Test
+        run: npm run test

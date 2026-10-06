@@ -1,0 +1,67 @@
+import { afterEach, describe, expect, it } from "vitest";
+import express from "express";
+import {
+  createMockCtx,
+  createTestDb,
+  type TestDb,
+} from "@termix/plugin-sdk/testing";
+import { PluginCapabilityError } from "@termix/plugin-sdk/backend";
+import { activate } from "../../src/backend/index.js";
+import { hostImportNormalizer } from "../../src/backend/host-import.js";
+import { manifest, pluginDir, startServer, type TestServer } from "./helpers";
+
+let db: TestDb | null = null;
+let server: TestServer | null = null;
+
+afterEach(async () => {
+  db?.close();
+  db = null;
+  await server?.close();
+  server = null;
+});
+
+describe("ssh-terminal activate", () => {
+  it("serves the terminal socket", async () => {
+    server = await startServer();
+    expect(server.mock.wsRoutes).toMatchObject([
+      { path: "/terminal", raw: false },
+    ]);
+  });
+
+  it("offers a host import normalizer", async () => {
+    server = await startServer();
+    expect(
+      server.mock.ctx.registry.consume("ssh-terminal.hostImportNormalizer"),
+    ).toBe(hostImportNormalizer);
+  });
+
+  it.each(["db:own", "network:serve"])(
+    "fails closed without %s",
+    async (capability) => {
+      db = await createTestDb(pluginDir);
+      const mock = createMockCtx({
+        pluginId: manifest.id,
+        manifest,
+        capabilities: manifest.capabilities.filter((c) => c !== capability),
+        db: db.database,
+        router: () => express.Router(),
+      });
+      await expect(activate(mock.ctx)).rejects.toBeInstanceOf(
+        PluginCapabilityError,
+      );
+      for (const dispose of [...mock.disposals].reverse()) await dispose();
+    },
+  );
+});
+
+describe("host import", () => {
+  it("carries the terminal switches of an imported host", () => {
+    expect(hostImportNormalizer({ name: "web" })).toBeNull();
+    expect(
+      hostImportNormalizer({
+        enableTerminal: false,
+        enableCommandHistory: true,
+      }),
+    ).toEqual({ enableTerminal: false, enableCommandHistory: true });
+  });
+});

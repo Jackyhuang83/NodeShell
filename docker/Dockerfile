@@ -1,0 +1,121 @@
+# Stage 0: every plugin's package.json and manifest.json and nothing else.
+# npm ci needs each workspace package.json in place or it silently skips it,
+# and a glob COPY flattens paths, so the tree is trimmed here instead. The
+# deps layer below stays cached until one of these files changes.
+FROM node:26-slim AS workspace-manifests
+WORKDIR /src
+COPY plugins ./plugins
+RUN find plugins -mindepth 2 -maxdepth 2 ! -name package.json ! -name manifest.json -exec rm -rf {} +
+
+# Stage 1: Install dependencies
+FROM node:26-slim AS deps
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
+
+COPY package*.json ./
+COPY packages/plugin-sdk/package.json ./packages/plugin-sdk/package.json
+COPY --from=workspace-manifests /src/plugins ./plugins
+COPY .npmrc ./
+COPY vendor ./vendor
+
+COPY scripts/patch-ssh2-agent.cjs ./scripts/
+
+RUN npm ci --ignore-scripts && \
+    node scripts/patch-ssh2-agent.cjs && \
+    npm cache clean --force
+
+# Stage 2: Build frontend
+FROM deps AS frontend-builder
+WORKDIR /app
+
+COPY . .
+
+RUN find public/fonts -name "*.ttf" ! -name "*Regular.ttf" ! -name "*Bold.ttf" ! -name "*Italic.ttf" -delete
+
+RUN npm cache clean --force && \
+    NODE_OPTIONS="--max-old-space-size=3072" npm run build
+
+# Stage 3: Build backend
+FROM deps AS backend-builder
+WORKDIR /app
+
+COPY . .
+
+RUN rm -rf node_modules/better-sqlite3/prebuilds && \
+    npm run build-release --prefix node_modules/better-sqlite3 && \
+    test -f node_modules/better-sqlite3/build/Release/better_sqlite3.node
+
+RUN npm run build:backend
+
+# Stage 4: Production dependencies only
+FROM node:26-slim AS production-deps
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
+
+COPY package*.json ./
+# The plugin SDK is a workspace package core imports at runtime, so npm ci
+# has to see it to link it and install its dependencies.
+COPY packages/plugin-sdk/package.json ./packages/plugin-sdk/package.json
+COPY .npmrc ./
+COPY vendor ./vendor
+
+COPY scripts/patch-ssh2-agent.cjs scripts/install-native-plugin-deps.cjs ./scripts/
+# Plugin manifests only, for their nativeDependencies. Outside plugins/ so npm
+# ci does not treat them as workspaces: everything else a plugin uses is
+# already inside its bundle.
+COPY --from=workspace-manifests /src/plugins ./plugin-manifests
+
+RUN npm ci --omit=dev --ignore-scripts && \
+    node scripts/install-native-plugin-deps.cjs plugin-manifests && \
+    rm -rf plugin-manifests && \
+    node scripts/patch-ssh2-agent.cjs && \
+    rm -rf node_modules/better-sqlite3/prebuilds && \
+    npm run build-release --prefix node_modules/better-sqlite3 && \
+    test -f node_modules/better-sqlite3/build/Release/better_sqlite3.node && \
+    npm rebuild bcryptjs ssh2 && \
+    npm cache clean --force
+
+# Stage 5: Final optimized image
+FROM node:26-slim
+WORKDIR /app
+
+ENV DATA_DIR=/app/data \
+    PORT=8080 \
+    NODE_ENV=production
+
+RUN apt-get update && apt-get install -y nginx gettext-base openssl ca-certificates gosu wget && \
+    update-ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    mkdir -p /app/data /app/uploads /app/nginx /tmp/nginx && \
+    chown -R node:node /app /tmp/nginx && \
+    chmod 755 /app/data /app/uploads /app/nginx /tmp/nginx
+
+COPY docker/nginx.conf /app/nginx/nginx.conf.template
+COPY docker/nginx-https.conf /app/nginx/nginx-https.conf.template
+
+COPY --chown=node:node --from=frontend-builder /app/dist /app/html
+
+COPY --chown=node:node --from=production-deps /app/node_modules /app/node_modules
+COPY --chown=node:node --from=backend-builder /app/dist/backend ./dist/backend
+# Bundled first-party plugins, resolved as dist/plugins by
+# getBundledPluginsDir().
+COPY --chown=node:node --from=backend-builder /app/dist/plugins ./dist/plugins
+# Target of node_modules/@termix/plugin-sdk, which core and the plugins import.
+COPY --chown=node:node --from=backend-builder /app/packages/plugin-sdk/package.json ./packages/plugin-sdk/package.json
+COPY --chown=node:node --from=backend-builder /app/packages/plugin-sdk/dist ./packages/plugin-sdk/dist
+COPY --chown=node:node package.json ./
+
+VOLUME ["/app/data"]
+
+EXPOSE ${PORT}
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD wget -q -O /dev/null http://localhost:30001/health || exit 1
+
+COPY docker/entrypoint.sh /entrypoint.sh
+COPY docker/nodeshell /usr/local/bin/nodeshell
+RUN chmod +x /entrypoint.sh /usr/local/bin/nodeshell
+
+CMD ["/entrypoint.sh"]

@@ -1,0 +1,243 @@
+import { describe, expect, it } from "vitest";
+import {
+  defaultUiPreferences,
+  hasUiOverrides,
+  PRESETS,
+  resolveArea,
+  resolvePluginArea,
+  sanitizeUiOverrides,
+  sanitizeUiPreferences,
+  UI_PREFERENCES_VERSION,
+} from "@/types/ui-preferences";
+
+describe("defaultUiPreferences", () => {
+  it("starts every user on balanced with no overrides", () => {
+    const defaults = defaultUiPreferences();
+    expect(defaults.preset).toBe("balanced");
+    expect(defaults.overrides).toEqual({});
+    expect(defaults.onboarding).toEqual({
+      completedVersion: 0,
+      completedAt: null,
+      skipped: false,
+    });
+  });
+});
+
+describe("sanitizeUiPreferences", () => {
+  it("returns defaults for non-object input", () => {
+    expect(sanitizeUiPreferences(null)).toEqual(defaultUiPreferences());
+    expect(sanitizeUiPreferences(undefined)).toEqual(defaultUiPreferences());
+    expect(sanitizeUiPreferences("nope")).toEqual(defaultUiPreferences());
+  });
+
+  it("round-trips a fully valid preferences object", () => {
+    const valid = {
+      version: UI_PREFERENCES_VERSION,
+      preset: "simple" as const,
+      overrides: { hostList: { density: "compact" as const, showTags: true } },
+      onboarding: {
+        completedVersion: 1,
+        completedAt: "2026-01-01T00:00:00.000Z",
+        skipped: false,
+      },
+    };
+    expect(sanitizeUiPreferences(valid)).toEqual(valid);
+  });
+
+  it("falls back to the default preset for an unknown value", () => {
+    expect(sanitizeUiPreferences({ preset: "ultra" }).preset).toBe("balanced");
+  });
+
+  it("always stamps the current version regardless of input", () => {
+    expect(sanitizeUiPreferences({ version: 999 }).version).toBe(
+      UI_PREFERENCES_VERSION,
+    );
+  });
+
+  it("ignores a malformed onboarding block", () => {
+    expect(sanitizeUiPreferences({ onboarding: "done" }).onboarding).toEqual({
+      completedVersion: 0,
+      completedAt: null,
+      skipped: false,
+    });
+  });
+});
+
+describe("sanitizeUiOverrides", () => {
+  it("drops unknown areas and unknown keys", () => {
+    const result = sanitizeUiOverrides({
+      notAnArea: { density: "compact" },
+      hostList: { density: "compact", notAKnob: 42 },
+    });
+    expect(result).toEqual({ hostList: { density: "compact" } });
+  });
+
+  it("drops invalid values but keeps the valid siblings", () => {
+    const result = sanitizeUiOverrides({
+      hostList: {
+        density: "enormous",
+        showTags: "yes",
+        showResourceBars: true,
+      },
+    });
+    expect(result).toEqual({ hostList: { showResourceBars: true } });
+  });
+
+  it("prunes areas that end up empty so override checks stay honest", () => {
+    const result = sanitizeUiOverrides({
+      hostList: { density: "enormous" },
+      terminal: {},
+    });
+    expect(result).toEqual({});
+    expect(
+      hasUiOverrides({ ...defaultUiPreferences(), overrides: result }),
+    ).toBe(false);
+  });
+
+  it("drops the retired homepage area", () => {
+    expect(sanitizeUiOverrides({ homepage: { enabledWidgets: null } })).toEqual(
+      {},
+    );
+  });
+
+  it("filters non-strings out of string arrays instead of rejecting them", () => {
+    const result = sanitizeUiOverrides({
+      rail: { hiddenTabs: ["serial", 7, null, "history"] },
+    });
+    expect(result.rail?.hiddenTabs).toEqual(["serial", "history"]);
+  });
+});
+
+describe("resolveArea", () => {
+  it("returns preset values when there are no overrides", () => {
+    const prefs = { ...defaultUiPreferences(), preset: "simple" as const };
+    expect(resolveArea(prefs, "hostList")).toEqual(PRESETS.simple.hostList);
+  });
+
+  it("layers overrides on top of the preset", () => {
+    const prefs = {
+      ...defaultUiPreferences(),
+      preset: "simple" as const,
+      overrides: { hostList: { showTags: true } },
+    };
+    const resolved = resolveArea(prefs, "hostList");
+    expect(resolved.showTags).toBe(true);
+    expect(resolved.trayTrigger).toBe(PRESETS.simple.hostList.trayTrigger);
+  });
+
+  it("re-bases custom on balanced", () => {
+    const prefs = {
+      ...defaultUiPreferences(),
+      preset: "custom" as const,
+      overrides: { hostList: { density: "compact" as const } },
+    };
+    const resolved = resolveArea(prefs, "hostList");
+    expect(resolved.density).toBe("compact");
+    expect(resolved.trayTrigger).toBe(PRESETS.balanced.hostList.trayTrigger);
+  });
+});
+
+describe("PRESETS.balanced", () => {
+  // Balanced is the compatibility contract: it must equal the behavior that
+  // shipped before presets existed, or every existing user sees a changed UI.
+  it("matches the pre-preset defaults", () => {
+    expect(PRESETS.balanced.hostList).toEqual({
+      density: "comfortable",
+      showTags: true,
+      showResourceBars: true,
+      showStatusStripes: true,
+      trayTrigger: "always",
+      rowActions: "full",
+    });
+    expect(PRESETS.balanced.rail.hiddenTabs).toEqual([]);
+    expect(PRESETS.balanced.hostEditor.mode).toBe("full");
+  });
+
+  it("keeps core's basics in Simple and hides plugin rail items that do not opt in", () => {
+    expect(PRESETS.simple.rail.hiddenTabs).not.toContain("hosts");
+    expect(PRESETS.simple.rail.hiddenTabs).not.toContain("connections");
+    expect(PRESETS.simple.rail.hidePluginItems).toBe(true);
+    expect(PRESETS.balanced.rail.hidePluginItems).toBeFalsy();
+  });
+
+  it("leaves the wide dashboard cards off by default in every preset", () => {
+    // network_graph and homepage_preview overflow the dashboard width when
+    // enabled up front. They stay in the Add card tray instead.
+    for (const preset of ["simple", "balanced", "advanced"] as const) {
+      expect(PRESETS[preset].dashboard.enabledCards).not.toContain(
+        "network_graph",
+      );
+      expect(PRESETS[preset].dashboard.enabledCards).not.toContain(
+        "homepage_preview",
+      );
+    }
+  });
+});
+
+describe("plugin areas", () => {
+  it("moves version 1 docker and host metrics overrides to their plugins", () => {
+    const upgraded = sanitizeUiPreferences({
+      version: 1,
+      preset: "balanced",
+      overrides: {
+        docker: { containerLayout: "table" },
+        hostMetrics: { columns: 2 },
+      },
+    });
+    expect(upgraded.overrides).toEqual({
+      "plugin:docker": { containerLayout: "table" },
+      "plugin:host-metrics": { columns: 2 },
+    });
+  });
+
+  it("resolves a plugin area from its presets and the user's overrides", () => {
+    const presets = {
+      simple: { columns: 1 },
+      balanced: { columns: 3 },
+      advanced: { columns: 4 },
+    };
+    const preferences = sanitizeUiPreferences({
+      preset: "advanced",
+      overrides: { "plugin:host-metrics": { columns: 2 } },
+    });
+    expect(resolvePluginArea(preferences, "host-metrics", presets)).toEqual({
+      columns: 2,
+    });
+    expect(resolvePluginArea(preferences, "docker", presets)).toEqual({
+      columns: 4,
+    });
+  });
+
+  it("keeps only plain values in a plugin area", () => {
+    const { overrides } = sanitizeUiPreferences({
+      overrides: {
+        "plugin:docker": { ok: "card", nested: { no: 1 }, list: ["a", 2] },
+        "plugin:Bad_Id": { x: 1 },
+      },
+    });
+    expect(overrides).toEqual({ "plugin:docker": { ok: "card" } });
+  });
+});
+
+describe("areas that moved into plugins", () => {
+  it("maps version 2 terminal and file manager overrides to their plugins", () => {
+    expect(
+      sanitizeUiOverrides(
+        {
+          terminal: { toolbarDensity: "expanded" },
+          fileManager: { viewMode: "list" },
+        },
+        2,
+      ),
+    ).toEqual({
+      "plugin:ssh-terminal": { toolbarDensity: "expanded" },
+      "plugin:file-manager": { viewMode: "list" },
+    });
+  });
+
+  it("drops the old names from a current payload", () => {
+    expect(
+      sanitizeUiOverrides({ terminal: { toolbarDensity: "icon" } }),
+    ).toEqual({});
+  });
+});

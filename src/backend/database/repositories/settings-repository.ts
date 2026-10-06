@@ -1,0 +1,120 @@
+import { eq, like } from "drizzle-orm";
+import { settings } from "../db/schema.js";
+import type { DatabaseContext } from "./database-context.js";
+import { forgetCachedSetting, updateCachedSetting } from "./settings-cache.js";
+import { deleteReturning } from "./returning.js";
+
+export class SettingsRepository {
+  constructor(
+    private readonly context: DatabaseContext,
+    private readonly onWrite?: () => void | Promise<void>,
+  ) {}
+
+  async get(key: string): Promise<string | null> {
+    const rows = await this.context.drizzle
+      .select({ value: settings.value })
+      .from(settings)
+      .where(eq(settings.key, key))
+      .limit(1);
+
+    return rows[0]?.value ?? null;
+  }
+
+  async listAll(): Promise<Array<{ key: string; value: string }>> {
+    return this.context.drizzle
+      .select({ key: settings.key, value: settings.value })
+      .from(settings);
+  }
+
+  async getBoolean(key: string, fallback = false): Promise<boolean> {
+    const value = await this.get(key);
+    if (value === null) return fallback;
+    return value === "true" || value === "1";
+  }
+
+  async set(key: string, value: string): Promise<void> {
+    const existing = await this.get(key);
+    if (existing === null) {
+      await this.context.drizzle.insert(settings).values({ key, value });
+      // Kept in step here so the synchronous readers cannot observe a stale
+      // value after a write in the same process.
+      updateCachedSetting(key, value);
+      await this.afterWrite();
+      return;
+    }
+
+    await this.context.drizzle
+      .update(settings)
+      .set({ value })
+      .where(eq(settings.key, key));
+    updateCachedSetting(key, value);
+    await this.afterWrite();
+  }
+
+  async setMany(entries: Array<{ key: string; value: string }>): Promise<void> {
+    if (this.context.dialect !== "sqlite") {
+      await this.context.drizzle.transaction(async (tx) => {
+        for (const { key, value } of entries) {
+          const existing = await tx
+            .select({ value: settings.value })
+            .from(settings)
+            .where(eq(settings.key, key))
+            .limit(1);
+          if (existing[0] === undefined) {
+            await tx.insert(settings).values({ key, value });
+          } else {
+            await tx
+              .update(settings)
+              .set({ value })
+              .where(eq(settings.key, key));
+          }
+        }
+      });
+    } else {
+      this.context.drizzle.transaction((tx) => {
+        for (const { key, value } of entries) {
+          const existing = tx
+            .select({ value: settings.value })
+            .from(settings)
+            .where(eq(settings.key, key))
+            .limit(1)
+            .all();
+          if (existing[0] === undefined) {
+            tx.insert(settings).values({ key, value }).run();
+          } else {
+            tx.update(settings)
+              .set({ value })
+              .where(eq(settings.key, key))
+              .run();
+          }
+        }
+      });
+    }
+    for (const { key, value } of entries) updateCachedSetting(key, value);
+    await this.afterWrite();
+  }
+  async upsert(key: string, value: string): Promise<void> {
+    await this.set(key, value);
+  }
+
+  async delete(key: string): Promise<void> {
+    await this.context.drizzle.delete(settings).where(eq(settings.key, key));
+    forgetCachedSetting(key);
+    await this.afterWrite();
+  }
+
+  async deleteLike(pattern: string): Promise<number> {
+    const rows = await deleteReturning(
+      this.context,
+      settings,
+      like(settings.key, pattern),
+    );
+    for (const row of rows) forgetCachedSetting(row.key);
+    await this.afterWrite();
+    return rows.length;
+  }
+
+  private async afterWrite(): Promise<void> {
+    await this.onWrite?.();
+  }
+}

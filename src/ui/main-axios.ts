@@ -1,0 +1,917 @@
+import { getErrorMessage } from "./lib/error-message.js";
+import axios, {
+  AxiosError,
+  type AxiosInstance,
+  type AxiosResponse,
+  type InternalAxiosRequestConfig,
+} from "axios";
+import { toast } from "sonner";
+import i18n from "i18next";
+import { getBasePath } from "@/lib/base-path";
+import { clearTermixSessionStorage } from "@/shell/TabContext";
+import type { SSHHost } from "@/types/index";
+
+import {
+  apiLogger,
+  authLogger,
+  sshLogger,
+  fileLogger,
+  dashboardLogger,
+  type LogContext,
+} from "@/lib/frontend-logger";
+import { dbHealthMonitor } from "@/lib/db-health-monitor";
+import { getDeviceId } from "@/lib/device-id";
+
+export type ServerStatus = {
+  status: "online" | "reachable" | "offline";
+  lastChecked: string;
+  reason?: "host_key_changed";
+};
+
+export type SSHHostWithStatus = SSHHost & {
+  status: "online" | "reachable" | "offline" | "unknown";
+};
+
+export interface AuthResponse {
+  success?: boolean;
+  is_admin?: boolean;
+  username?: string;
+  userId?: string;
+  is_external?: boolean;
+  /** 2.8 name for is_external. */
+  is_oidc?: boolean;
+  totp_enabled?: boolean;
+  requires_totp?: boolean;
+  temp_token?: string;
+  rememberMe?: boolean;
+  token?: string;
+}
+
+export interface UserInfo {
+  /** Any second factor, kept under its 2.8 name for older clients. */
+  totp_enabled: boolean;
+  /** Admin user list only. */
+  second_factor_enabled?: boolean;
+  userId: string;
+  username: string;
+  is_admin: boolean;
+  /** Signs in through an external login such as SSO or LDAP. */
+  is_external?: boolean;
+  /** 2.8 name for is_external. */
+  is_oidc: boolean;
+  is_dual_auth?: boolean;
+  password_hash?: string;
+  data_unlocked?: boolean;
+  show_donation_modal?: boolean;
+}
+
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+
+function getLoggerForService(serviceName: string) {
+  if (serviceName.includes("SSH") || serviceName.includes("ssh")) {
+    return sshLogger;
+  } else if (serviceName.includes("FILE") || serviceName.includes("file")) {
+    return fileLogger;
+  } else if (serviceName.includes("AUTH") || serviceName.includes("auth")) {
+    return authLogger;
+  } else if (
+    serviceName.includes("DASHBOARD") ||
+    serviceName.includes("dashboard")
+  ) {
+    return dashboardLogger;
+  } else {
+    return apiLogger;
+  }
+}
+
+export function setCookie(
+  name: string,
+  value: string,
+  days = 7,
+): void {
+  const expires = new Date(Date.now() + days * 864e5).toUTCString();
+  document.cookie =
+    `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/; SameSite=Strict`;
+}
+
+export function getCookie(name: string): string | undefined {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  const encoded = parts.length === 2 ? parts.pop()?.split(";").shift() : undefined;
+  return encoded ? decodeURIComponent(encoded) : undefined;
+}
+
+let userWasAuthenticated = false;
+let latestAuthSuccessAt = 0;
+let authInvalidationHandled = false;
+
+export function markUserAuthenticated(): void {
+  userWasAuthenticated = true;
+  authInvalidationHandled = false;
+  latestAuthSuccessAt =
+    typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+function clearClientAuthState(): void {
+  clearTermixSessionStorage();
+  try {
+    localStorage.removeItem("jwt");
+    localStorage.removeItem("nodeshell_auth");
+    localStorage.removeItem("termix_auth");
+  } catch {
+    // localStorage may be unavailable in restricted contexts.
+  }
+
+  if (typeof window !== "undefined") {
+    const secure = window.location.protocol === "https:";
+    document.cookie = secure
+      ? "jwt=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; Secure; SameSite=Strict"
+      : "jwt=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; SameSite=Strict";
+  }
+}
+
+export function isCurrentAuthInvalidationError(error: unknown): boolean {
+  const authError = error as {
+    __staleAuthInvalidation?: boolean;
+  };
+
+  if (authError.__staleAuthInvalidation) {
+    return false;
+  }
+
+  const axiosError = error as AxiosError;
+  const apiError = error as ApiError;
+  const responseData = axiosError.response?.data as
+    Record<string, unknown> | undefined;
+  const errorCode = responseData?.code || apiError.code;
+  const errorMessage = responseData?.error || apiError.message;
+  const status = axiosError.response?.status || apiError.status;
+  const isMissingAuthenticationToken =
+    errorMessage === "Missing authentication token";
+
+  return (
+    status === 401 &&
+    (errorCode === "SESSION_EXPIRED" ||
+      errorCode === "SESSION_NOT_FOUND" ||
+      (errorCode === "AUTH_REQUIRED" && userWasAuthenticated) ||
+      errorMessage === "Invalid token" ||
+      (errorMessage === "Authentication required" && userWasAuthenticated) ||
+      (isMissingAuthenticationToken && userWasAuthenticated))
+  );
+}
+
+function createApiInstance(
+  baseURL: string,
+  serviceName: string = "API",
+): AxiosInstance {
+  const instance = axios.create({
+    baseURL,
+    headers: { "Content-Type": "application/json" },
+    timeout: 30000,
+    withCredentials: true,
+  });
+
+  instance.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+    const startTime = performance.now();
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    const configWithMetadata = config as AxiosRequestConfigExtended;
+    configWithMetadata.startTime = startTime;
+    configWithMetadata.requestId = requestId;
+
+    const method = config.method?.toUpperCase() || "UNKNOWN";
+    const url = config.url || "UNKNOWN";
+    const fullUrl = `${config.baseURL}${url}`;
+
+    const context: LogContext = {
+      requestId,
+      method,
+      url: fullUrl,
+      operation: "request_start",
+    };
+
+    const logger = getLoggerForService(serviceName);
+
+    const isDevMode = process.env.NODE_ENV === "development";
+
+    if (isDevMode) {
+      logger.requestStart(method, fullUrl, context);
+    }
+
+    const unsafeMethod = ["POST", "PUT", "PATCH", "DELETE"].includes(method);
+    if (unsafeMethod) {
+      const csrfToken = getCookie("nodeshell_csrf");
+      if (csrfToken) {
+        if (config.headers.set) {
+          config.headers.set("X-NodeShell-CSRF", csrfToken);
+        } else {
+          config.headers["X-NodeShell-CSRF"] = csrfToken;
+        }
+      }
+    }
+
+    const deviceId = getDeviceId();
+    if (deviceId) {
+      if (config.headers.set) {
+        config.headers.set("X-NodeShell-Device-ID", deviceId);
+      } else {
+        config.headers["X-NodeShell-Device-ID"] = deviceId;
+      }
+    }
+
+    return config;
+  });
+
+  instance.interceptors.response.use(
+    (response: AxiosResponse) => {
+      const endTime = performance.now();
+      const responseConfig = response.config as AxiosRequestConfigExtended;
+      const startTime = responseConfig.startTime;
+      const requestId = responseConfig.requestId;
+      const responseTime = Math.round(endTime - (startTime || endTime));
+
+      const method = response.config.method?.toUpperCase() || "UNKNOWN";
+      const url = response.config.url || "UNKNOWN";
+      const fullUrl = `${response.config.baseURL}${url}`;
+
+      const context: LogContext = {
+        requestId,
+        method,
+        url: fullUrl,
+        status: response.status,
+        statusText: response.statusText,
+        responseTime,
+        operation: "request_success",
+      };
+
+      const logger = getLoggerForService(serviceName);
+
+      if (process.env.NODE_ENV === "development") {
+        logger.requestSuccess(
+          method,
+          fullUrl,
+          response.status,
+          responseTime,
+          context,
+        );
+      }
+
+      if (responseTime > 3000) {
+        logger.warn(`🐌 Slow request: ${responseTime}ms`, context);
+      }
+
+      dbHealthMonitor.reportDatabaseSuccess();
+
+      return response;
+    },
+    (error: AxiosErrorExtended) => {
+      const endTime = performance.now();
+      const startTime = error.config?.startTime;
+      const requestId = error.config?.requestId;
+      const responseTime = startTime
+        ? Math.round(endTime - startTime)
+        : undefined;
+
+      const method = error.config?.method?.toUpperCase() || "UNKNOWN";
+      const url = error.config?.url || "UNKNOWN";
+      const fullUrl = error.config ? `${error.config.baseURL}${url}` : url;
+      const status = error.response?.status;
+      const message =
+        (error.response?.data as { error?: string })?.error ||
+        (error as Error).message ||
+        "Unknown error";
+      const errorCode =
+        (error.response?.data as { code?: string })?.code || error.code;
+
+      const context: LogContext = {
+        requestId,
+        method,
+        url: fullUrl,
+        status,
+        responseTime,
+        errorCode,
+        errorMessage: message,
+        operation: "request_error",
+      };
+
+      const logger = getLoggerForService(serviceName);
+      // A caller can mark a request as a silent retry (see progressive /status
+      // retry) so we don't spam error logs / health events on each attempt.
+      const isSilentRetry = !!error.config?.__silentRetry;
+
+      if (process.env.NODE_ENV === "development" && !isSilentRetry) {
+        if (status === 401) {
+          logger.authError(method, fullUrl, context);
+        } else if (status === 0 || !status) {
+          logger.networkError(method, fullUrl, message, context);
+        } else {
+          logger.requestError(
+            method,
+            fullUrl,
+            status || 0,
+            message,
+            responseTime,
+            context,
+          );
+        }
+      }
+
+      if (status === 401) {
+        const errorCode = (error.response?.data as Record<string, unknown>)
+          ?.code;
+        const errorMessage = (error.response?.data as Record<string, unknown>)
+          ?.error;
+        const isSessionExpired = errorCode === "SESSION_EXPIRED";
+        const isSessionNotFound = errorCode === "SESSION_NOT_FOUND";
+        const isMissingAuthenticationToken =
+          errorMessage === "Missing authentication token";
+        const isInvalidToken =
+          errorCode === "AUTH_REQUIRED" ||
+          errorMessage === "Invalid token" ||
+          errorMessage === "Authentication required" ||
+          (isMissingAuthenticationToken && userWasAuthenticated);
+
+        if (isSessionExpired || isSessionNotFound || isInvalidToken) {
+          const requestStartedAt =
+            typeof error.config?.startTime === "number"
+              ? error.config.startTime
+              : 0;
+          const isStaleAuthInvalidation =
+            latestAuthSuccessAt > 0 &&
+            requestStartedAt > 0 &&
+            requestStartedAt < latestAuthSuccessAt;
+
+          if (isStaleAuthInvalidation) {
+            (
+              error as { __staleAuthInvalidation?: boolean }
+            ).__staleAuthInvalidation = true;
+            return Promise.reject(error);
+          }
+
+          if (!authInvalidationHandled) {
+            authInvalidationHandled = true;
+            clearClientAuthState();
+
+            if (typeof window !== "undefined") {
+              console.warn("Session expired - please log in again");
+              toast.warning(i18n.t("errors.sessionExpiredLogin"));
+              window.dispatchEvent(new Event("termix:logout"));
+            }
+
+            dbHealthMonitor.reportSessionExpired();
+          }
+
+          userWasAuthenticated = false;
+        }
+      } else if (!isSilentRetry) {
+        dbHealthMonitor.reportDatabaseError(error);
+      }
+
+      return Promise.reject(error);
+    },
+  );
+
+  return instance;
+}
+
+// ============================================================================
+// API INSTANCES
+// ============================================================================
+
+function isDev(): boolean {
+  return (
+    process.env.NODE_ENV === "development" &&
+    (window.location.port === "3000" ||
+      window.location.port === "5173" ||
+      window.location.port === "" ||
+      window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1")
+  );
+}
+
+const apiHost =
+  import.meta.env.VITE_API_HOST ||
+  (typeof window !== "undefined" ? window.location.hostname : "localhost");
+
+interface AxiosRequestConfigExtended extends InternalAxiosRequestConfig {
+  startTime?: number;
+  requestId?: string;
+  __silentRetry?: boolean;
+}
+
+interface AxiosErrorExtended extends AxiosError {
+  config?: AxiosRequestConfigExtended;
+}
+
+/** A URL on the main backend, resolved for web, dev proxy and Electron. */
+export function getBackendUrl(path: string): string {
+  return getApiUrl(path, 30001);
+}
+
+function getApiUrl(path: string, defaultPort: number): string {
+  if (isDev()) {
+    if (!import.meta.env.VITE_API_HOST) {
+      return `/__termix_api/${defaultPort}${path}`;
+    }
+    const protocol = window.location.protocol === "https:" ? "https" : "http";
+    const sslPort = protocol === "https" ? 8443 : defaultPort;
+    return `${protocol}://${apiHost}:${sslPort}${path}`;
+  }
+  return getBasePath() + path;
+}
+
+function initializeApiInstances() {
+  // Host Management API (port 30001) - SSH and plugin protocols
+  hostApi = createApiInstance(getApiUrl("/host", 30001), "HOST");
+  sshHostApi = hostApi;
+
+  // Authentication API (port 30001)
+  authApi = createApiInstance(getApiUrl("", 30001), "AUTH");
+
+  // RBAC API (port 30001)
+  rbacApi = createApiInstance(getApiUrl("", 30001), "RBAC");
+}
+
+// Host Management API (port 30001) - SSH and plugin protocols
+export let hostApi: AxiosInstance;
+// Backward compatibility
+export let sshHostApi: AxiosInstance;
+
+// Authentication API (port 30001)
+export let authApi: AxiosInstance;
+
+// RBAC API (port 30001)
+export let rbacApi: AxiosInstance;
+
+// Pre-initialize with default values to avoid undefined errors during early mounting
+initializeApiInstances();
+
+let _resolveAppReady!: () => void;
+export const appReadyPromise: Promise<void> = new Promise((resolve) => {
+  _resolveAppReady = resolve;
+});
+
+function initializeApp() {
+  initializeApiInstances();
+  _resolveAppReady();
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initializeApp);
+} else {
+  initializeApp();
+}
+
+// ============================================================================
+// ERROR HANDLING
+// ============================================================================
+
+class ApiError extends Error {
+  constructor(
+    message: string,
+    public status?: number,
+    public code?: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+export function handleApiError(error: unknown, operation: string): never {
+  const context: LogContext = {
+    operation: "error_handling",
+    errorOperation: operation,
+  };
+
+  if (axios.isAxiosError(error)) {
+    const status = error.response?.status;
+    const message =
+      error.response?.data?.message ||
+      error.response?.data?.error ||
+      error.message;
+    const code = error.response?.data?.code || error.response?.data?.error;
+    const url = error.config?.url;
+    const method = error.config?.method?.toUpperCase();
+
+    const errorContext: LogContext = {
+      ...context,
+      method,
+      url,
+      status,
+      errorCode: code,
+      errorMessage: message,
+    };
+
+    if (status === 401) {
+      authLogger.warn(
+        `Auth failed: ${method} ${url} - ${message}`,
+        errorContext,
+      );
+
+      const isLoginEndpoint = url?.includes("/users/login");
+      const errorMessage = isLoginEndpoint
+        ? message
+        : "Authentication required. Please log in again.";
+
+      throw new ApiError(errorMessage, 401, code || "AUTH_REQUIRED");
+    } else if (status === 403) {
+      authLogger.warn(`Access denied: ${method} ${url}`, errorContext);
+      const apiError = new ApiError(
+        code === "TOTP_REQUIRED"
+          ? message
+          : "Access denied. You do not have permission to perform this action.",
+        403,
+        code || "ACCESS_DENIED",
+      );
+      (apiError as ApiError & { response?: unknown }).response = error.response;
+      throw apiError;
+    } else if (status === 404) {
+      apiLogger.warn(`Not found: ${method} ${url}`, errorContext);
+      throw new ApiError(
+        "Resource not found. The requested item may have been deleted.",
+        404,
+        "NOT_FOUND",
+      );
+    } else if (status === 409) {
+      apiLogger.warn(`Conflict: ${method} ${url}`, errorContext);
+      throw new ApiError(
+        "Conflict. The resource already exists or is in use.",
+        409,
+        "CONFLICT",
+      );
+    } else if (status === 422) {
+      apiLogger.warn(
+        `Validation error: ${method} ${url} - ${message}`,
+        errorContext,
+      );
+      throw new ApiError(
+        "Validation error. Please check your input and try again.",
+        422,
+        "VALIDATION_ERROR",
+      );
+    } else if (status && status >= 500) {
+      apiLogger.error(
+        `Server error: ${method} ${url} - ${message}`,
+        error,
+        errorContext,
+      );
+      throw new ApiError(
+        "Server error occurred. Please try again later.",
+        status,
+        "SERVER_ERROR",
+      );
+    } else if (status === 0) {
+      if (url.includes("no-server-configured")) {
+        apiLogger.error(
+          `No server configured: ${method} ${url}`,
+          error,
+          errorContext,
+        );
+        throw new ApiError(
+          "No server configured. Please configure a Termix server first.",
+          0,
+          "NO_SERVER_CONFIGURED",
+        );
+      }
+      apiLogger.error(
+        `Network error: ${method} ${url} - ${message}`,
+        error,
+        errorContext,
+      );
+      throw new ApiError(
+        "Network error. Please check your connection and try again.",
+        0,
+        "NETWORK_ERROR",
+      );
+    } else {
+      apiLogger.error(
+        `Request failed: ${method} ${url} - ${message}`,
+        error,
+        errorContext,
+      );
+      throw new ApiError(message || `Failed to ${operation}`, status, code);
+    }
+  }
+
+  if (error instanceof ApiError) {
+    throw error;
+  }
+
+  const errorMessage = getErrorMessage(error);
+  apiLogger.error(
+    `Unexpected error during ${operation}: ${errorMessage}`,
+    error,
+    context,
+  );
+  throw new ApiError(
+    `Unexpected error during ${operation}: ${errorMessage}`,
+    undefined,
+    "UNKNOWN_ERROR",
+  );
+}
+
+// ============================================================================
+
+export {
+  getSSHHosts,
+  createSSHHost,
+  updateSSHHost,
+  bulkImportSSHHosts,
+  importSSHConfigHosts,
+  bulkUpdateSSHHosts,
+  reorderSSHHosts,
+  deleteSSHHost,
+  getSSHHostById,
+  exportSSHHostWithCredentials,
+  exportAllSSHHosts,
+} from "@/api/ssh-host-management-api";
+
+export {
+  getAllServerStatuses,
+  getServerStatusById,
+  refreshServerPolling,
+  getStatusCheckSettings,
+  updateStatusCheckSettings,
+} from "@/api/host-status-api";
+
+export {
+  getHostSidebarPreferences,
+  saveHostSidebarPreferences,
+} from "@/api/host-sidebar-preferences-api";
+
+export {
+  getCredentialSidebarPreferences,
+  saveCredentialSidebarPreferences,
+} from "@/api/credential-sidebar-preferences-api";
+
+export { getUiPreferences, saveUiPreferences } from "@/api/ui-preferences-api";
+
+export {
+  getLogLevel,
+  updateLogLevel,
+  getSessionTimeout,
+  updateSessionTimeout,
+} from "@/api/settings-api";
+
+export {
+  getUptime,
+  getRecentActivity,
+  resetRecentActivity,
+  type RecentActivityItem,
+} from "@/api/dashboard-api";
+
+// ============================================================================
+// AUTHENTICATION
+// ============================================================================
+
+export async function registerUser(
+  username: string,
+  password: string,
+  setupToken?: string,
+): Promise<Record<string, unknown>> {
+  try {
+    const response = await authApi.post("/users/create", {
+      username,
+      password,
+      ...(setupToken ? { setupToken } : {}),
+    });
+    return response.data;
+  } catch (error) {
+    handleApiError(error, "register user");
+  }
+}
+
+
+export async function loginUser(
+  username: string,
+  password: string,
+  rememberMe: boolean = false,
+): Promise<AuthResponse> {
+  try {
+    const response = await authApi.post("/users/login", {
+      username,
+      password,
+      rememberMe,
+    });
+
+    if (response.data.token) {
+      localStorage.setItem("jwt", response.data.token);
+    }
+
+    if (response.data.success && !response.data.requires_totp) {
+      markUserAuthenticated();
+    }
+
+    return {
+      success: response.data.success,
+      is_admin: response.data.is_admin,
+      username: response.data.username,
+      requires_totp: response.data.requires_totp,
+      temp_token: response.data.temp_token,
+      rememberMe: response.data.rememberMe,
+      is_external: response.data.is_external ?? response.data.is_oidc,
+      is_oidc: response.data.is_oidc,
+      totp_enabled: response.data.totp_enabled,
+      token: response.data.token,
+    };
+  } catch (error) {
+    throw handleApiError(error, "login user");
+  }
+}
+
+
+export async function logoutUser(): Promise<{
+  success: boolean;
+  message: string;
+}> {
+  try {
+    const response = await authApi.post("/users/logout");
+    clearClientAuthState();
+    userWasAuthenticated = false;
+    authInvalidationHandled = false;
+    return response.data;
+  } catch (error) {
+    clearClientAuthState();
+    userWasAuthenticated = false;
+    authInvalidationHandled = false;
+    handleApiError(error, "logout user");
+  }
+}
+
+export async function getUserInfo(): Promise<UserInfo> {
+  try {
+    const response = await authApi.get("/users/me");
+    markUserAuthenticated();
+    return response.data;
+  } catch (error) {
+    handleApiError(error, "fetch user info");
+  }
+}
+
+export async function dismissDonationModal(): Promise<void> {
+  try {
+    await authApi.post("/users/me/dismiss-donation-modal");
+  } catch (error) {
+    handleApiError(error, "dismiss donation modal");
+  }
+}
+
+
+export async function unlockUserData(
+  password: string,
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const response = await authApi.post("/users/unlock-data", { password });
+    return response.data;
+  } catch (error) {
+    handleApiError(error, "unlock user data");
+  }
+}
+
+export async function getRegistrationAllowed(): Promise<{ allowed: boolean }> {
+  try {
+    const response = await authApi.get("/users/registration-allowed");
+    return response.data;
+  } catch (error) {
+    handleApiError(error, "check registration status");
+  }
+}
+
+export async function getPasswordLoginAllowed(): Promise<{
+  allowed: boolean;
+  /** Turned off by an admin but kept on because nothing else can sign in. */
+  forced?: boolean;
+}> {
+  try {
+    const response = await authApi.get("/users/password-login-allowed");
+    return response.data;
+  } catch (error) {
+    handleApiError(error, "check password login status");
+  }
+}
+
+export async function getSetupRequired(): Promise<{ setup_required: boolean }> {
+  try {
+    const response = await authApi.get("/users/setup-required");
+    return response.data;
+  } catch (error) {
+    handleApiError(error, "check setup status");
+  }
+}
+
+
+export async function changePassword(oldPassword: string, newPassword: string) {
+  try {
+    const response = await authApi.post("/users/change-password", {
+      oldPassword,
+      newPassword,
+    });
+    return response.data;
+  } catch (error) {
+    handleApiError(error, "change password");
+  }
+}
+
+// ============================================================================
+export async function getSessions(): Promise<{
+  sessions: {
+    id: string;
+    userId: string;
+    username?: string;
+    deviceType: string;
+    deviceInfo: string;
+    createdAt: string;
+    expiresAt: string;
+    lastActiveAt: string;
+    isRevoked?: boolean;
+    isCurrentSession?: boolean;
+  }[];
+}> {
+  try {
+    const response = await authApi.get("/users/sessions");
+    return response.data;
+  } catch (error) {
+    handleApiError(error, "fetch sessions");
+  }
+}
+
+export async function revokeSession(
+  sessionId: string,
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const response = await authApi.delete(`/users/sessions/${sessionId}`);
+    return response.data;
+  } catch (error) {
+    handleApiError(error, "revoke session");
+  }
+}
+
+// ============================================================================
+// ADMIN USER DATA MANAGEMENT
+// ============================================================================
+
+export {
+  getReleasesRSS,
+  getVersionInfo,
+  releaseUrlFrom,
+  getDatabaseHealth,
+} from "@/api/system-status-api";
+
+// SSH CREDENTIALS MANAGEMENT
+// ============================================================================
+
+export {
+  getCredentials,
+  getCredentialDetails,
+  createCredential,
+  updateCredential,
+  duplicateCredential,
+  deleteCredential,
+  getCredentialHosts,
+  getCredentialFolders,
+  getSSHHostWithCredentials,
+  getHostPassword,
+  applyCredentialToHost,
+  removeCredentialFromHost,
+  migrateHostToCredential,
+  getFoldersWithStats,
+  renameFolder,
+  getSSHFolders,
+  updateFolderMetadata,
+  reorderFolders,
+  deleteAllHostsInFolder,
+  renameCredentialFolder,
+  reorderCredentials,
+  detectKeyType,
+  detectPublicKeyType,
+  validateKeyPair,
+  generatePublicKeyFromPrivate,
+  generateKeyPair,
+  deployCredentialToHost,
+} from "@/api/credentials-api";
+
+// ============================================================================
+export { logActivity } from "@/api/dashboard-api";
+
+// ============================================================================
+
+
+export {
+  getOpenTabs,
+  syncOpenTabs,
+  deleteOpenTab,
+  patchOpenTab,
+  addOpenTab,
+  getActiveSessions,
+  getUserPreferences,
+  saveUserPreferences,
+  type OpenTabRecord,
+  type OpenTabSyncPayload,
+  type OpenTabUpsertPayload,
+  type ActiveSessionInfo,
+  type UserPreferences,
+} from "@/api/open-tabs-api";

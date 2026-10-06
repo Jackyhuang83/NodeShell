@@ -1,0 +1,125 @@
+import path from "path";
+import fs from "fs";
+import tailwindcss from "@tailwindcss/vite";
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import svgr from "vite-plugin-svgr";
+import { termixPluginHost } from "./scripts/vite-plugin-termix-plugins.mjs";
+
+const sslCertPath = path.join(process.cwd(), "ssl/termix.crt");
+const sslKeyPath = path.join(process.cwd(), "ssl/termix.key");
+
+const hasSSL = fs.existsSync(sslCertPath) && fs.existsSync(sslKeyPath);
+const useHTTPS = process.env.VITE_HTTPS === "true" && hasSSL;
+// Everything rides the main backend on 30001, plugins included (under
+// /plugin-api and /plugin-ws).
+const apiProxyPorts = [30001];
+const apiProxy = Object.fromEntries(
+  apiProxyPorts.map((port) => [
+    `/__termix_api/${port}`,
+    {
+      target: `http://127.0.0.1:${port}`,
+      changeOrigin: true,
+      ws: true,
+      rewrite: (requestPath: string) =>
+        requestPath.replace(new RegExp(`^/__termix_api/${port}`), ""),
+    },
+  ]),
+);
+const packageJson = JSON.parse(
+  fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
+) as { version?: string };
+
+const manualChunkGroups: Record<string, string[]> = {
+  "react-vendor": ["react", "react-dom"],
+  "ui-vendor": [
+    "@radix-ui/react-dialog",
+    "@radix-ui/react-dropdown-menu",
+    "@radix-ui/react-select",
+    "@radix-ui/react-tabs",
+    "@radix-ui/react-switch",
+    "@radix-ui/react-tooltip",
+    "@radix-ui/react-scroll-area",
+    "@radix-ui/react-separator",
+    "lucide-react",
+    "clsx",
+    "tailwind-merge",
+    "class-variance-authority",
+  ],
+  codemirror: [
+    "@uiw/react-codemirror",
+    "@codemirror/view",
+    "@codemirror/state",
+    "@codemirror/language",
+    "@codemirror/theme-one-dark",
+  ],
+};
+
+function getManualChunk(id: string): string | undefined {
+  if (!id.includes("node_modules")) return undefined;
+
+  const normalizedId = id.replaceAll("\\", "/");
+
+  for (const [chunkName, packages] of Object.entries(manualChunkGroups)) {
+    if (
+      packages.some((packageName) =>
+        normalizedId.includes(`/node_modules/${packageName}/`),
+      )
+    ) {
+      return chunkName;
+    }
+  }
+
+  return undefined;
+}
+
+// The SDK's browser entries resolve to source, so the shell and workspace
+// plugins share one instance in dev and nobody waits on a stale SDK build.
+const sdkFrontendEntry = path.resolve(
+  __dirname,
+  "./packages/plugin-sdk/src/frontend.ts",
+);
+const sdkUiEntry = path.resolve(__dirname, "./src/ui/plugin-host/sdk-ui.ts");
+
+export default defineConfig({
+  plugins: [
+    react(),
+    tailwindcss(),
+    svgr(),
+    termixPluginHost({ repoRoot: __dirname, sdkFrontendEntry, sdkUiEntry }),
+  ],
+  define: {
+    "import.meta.env.VITE_APP_VERSION": JSON.stringify(
+      packageJson.version || "0.0.0",
+    ),
+  },
+  resolve: {
+    alias: {
+      "@termix/plugin-sdk/frontend": sdkFrontendEntry,
+      "@termix/plugin-sdk/ui": sdkUiEntry,
+      "@/types": path.resolve(__dirname, "./src/types"),
+      "@": path.resolve(__dirname, "./src/ui"),
+    },
+  },
+  base: process.env.VITE_BASE_PATH || "./",
+  build: {
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: getManualChunk,
+      },
+    },
+    chunkSizeWarningLimit: 1000,
+  },
+  server: {
+    https: useHTTPS
+      ? {
+          cert: fs.readFileSync(sslCertPath),
+          key: fs.readFileSync(sslKeyPath),
+        }
+      : false,
+    port: 5173,
+    host: "localhost",
+    proxy: apiProxy,
+  },
+});

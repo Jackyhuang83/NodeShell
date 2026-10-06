@@ -1,0 +1,382 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { TestSqliteDatabase } from "./test-support.js";
+import { DataCrypto } from "../../../utils/data-crypto.js";
+import { HostResolutionRepository } from "../../../database/repositories/host-resolution-repository.js";
+
+vi.mock("../../../utils/data-crypto.js", () => ({
+  DataCrypto: {
+    getUserDataKey: vi.fn(),
+    decryptRecord: vi.fn((_tableName, record) => record),
+  },
+}));
+
+describe("HostResolutionRepository", () => {
+  let adapter: TestSqliteDatabase | null = null;
+
+  afterEach(async () => {
+    vi.mocked(DataCrypto.getUserDataKey).mockReset();
+    vi.mocked(DataCrypto.decryptRecord).mockClear();
+    if (adapter) {
+      await adapter.close();
+      adapter = null;
+    }
+  });
+
+  async function createRepository(
+    onWrite?: () => void | Promise<void>,
+  ): Promise<HostResolutionRepository> {
+    adapter = new TestSqliteDatabase();
+    const context = await adapter.connect();
+    await adapter.exec(`
+      INSERT INTO users (id, username, password_hash)
+      VALUES ('user-1', 'alice', 'hash'), ('user-2', 'bob', 'hash');
+      INSERT INTO ssh_credentials (
+        id, user_id, name, auth_type, username, password, private_key, key_password
+      )
+      VALUES
+        (7, 'user-1', 'owner', 'password', 'root', 'secret', NULL, NULL),
+        (8, 'user-2', 'override', 'key', 'alice', NULL, 'private', 'pass');
+      INSERT INTO ssh_data (
+        id, user_id, name, ip, port, username, auth_type, credential_id,
+        tunnel_connections
+      )
+      VALUES
+        (1, 'user-1', 'web', '10.0.0.1', 22, 'root', 'password', 7, '[{"autoStart":true}]'),
+        (2, 'user-1', 'db', '10.0.0.2', 22, 'admin', 'none', NULL, NULL),
+        (3, 'user-2', 'other', '10.0.0.3', 22, 'root', 'none', NULL, '[{"autoStart":false}]');
+      INSERT INTO ssh_folders (user_id, name, credential_id)
+      VALUES
+        ('user-1', 'switches', 7),
+        ('user-1', 'switches / floor1', NULL),
+        ('user-1', 'no-cred', NULL);
+    `);
+
+    return new HostResolutionRepository(context, onWrite);
+  }
+
+  it("loads host and credential rows through the decryption boundary", async () => {
+    vi.mocked(DataCrypto.getUserDataKey).mockReturnValue(
+      Buffer.from("user-key"),
+    );
+    const repository = await createRepository();
+
+    await expect(repository.findHostById(1, "user-1")).resolves.toMatchObject({
+      id: 1,
+      userId: "user-1",
+      name: "web",
+      credentialId: 7,
+    });
+    await expect(
+      repository.findHostByIdForUser(1, "user-1"),
+    ).resolves.toMatchObject({
+      id: 1,
+      userId: "user-1",
+      name: "web",
+      credentialId: 7,
+    });
+    await expect(
+      repository.findHostByIdForUser(3, "user-1"),
+    ).resolves.toBeNull();
+    await expect(
+      repository.findCredentialByIdForUser(7, "user-1"),
+    ).resolves.toMatchObject({
+      id: 7,
+      userId: "user-1",
+      username: "root",
+      password: "secret",
+    });
+    await expect(
+      repository.findCredentialByIdForOwnerDecryptedAs(7, "user-1", "user-2"),
+    ).resolves.toMatchObject({
+      id: 7,
+      userId: "user-1",
+      username: "root",
+      password: "secret",
+    });
+    expect(DataCrypto.decryptRecord).toHaveBeenCalledWith(
+      "ssh_data",
+      expect.objectContaining({ id: 1 }),
+      "user-1",
+      Buffer.from("user-key"),
+    );
+    expect(DataCrypto.decryptRecord).toHaveBeenCalledWith(
+      "ssh_credentials",
+      expect.objectContaining({ id: 7 }),
+      "user-1",
+      Buffer.from("user-key"),
+    );
+    expect(DataCrypto.decryptRecord).toHaveBeenCalledWith(
+      "ssh_credentials",
+      expect.objectContaining({ id: 7 }),
+      "user-2",
+      Buffer.from("user-key"),
+    );
+  });
+
+  it("lists user-owned hosts through the decryption boundary", async () => {
+    vi.mocked(DataCrypto.getUserDataKey).mockReturnValue(
+      Buffer.from("user-key"),
+    );
+    const repository = await createRepository();
+
+    const rows = await repository.findHostsByUserId("user-1");
+
+    expect(rows.map((row) => row.id)).toEqual([1, 2]);
+    expect(DataCrypto.decryptRecord).toHaveBeenCalledWith(
+      "ssh_data",
+      expect.objectContaining({ id: 1 }),
+      "user-1",
+      Buffer.from("user-key"),
+    );
+    expect(DataCrypto.decryptRecord).toHaveBeenCalledWith(
+      "ssh_data",
+      expect.objectContaining({ id: 2 }),
+      "user-1",
+      Buffer.from("user-key"),
+    );
+  });
+
+  it("loads host owner metadata without decrypting host data", async () => {
+    const repository = await createRepository();
+
+    await expect(repository.findHostOwnerId(1)).resolves.toBe("user-1");
+    await expect(repository.findHostOwnerId(999)).resolves.toBeNull();
+    await expect(repository.isHostOwnedByUser(1, "user-1")).resolves.toBe(true);
+    await expect(repository.isHostOwnedByUser(1, "user-2")).resolves.toBe(
+      false,
+    );
+    expect(DataCrypto.decryptRecord).not.toHaveBeenCalled();
+  });
+
+  it("loads host update state without decrypting host data", async () => {
+    const repository = await createRepository();
+
+    await expect(repository.findHostUpdateState(1)).resolves.toEqual({
+      userId: "user-1",
+      credentialId: 7,
+      authType: "password",
+      parentHostId: null,
+      folder: null,
+    });
+    await expect(repository.findHostUpdateState(999)).resolves.toBeNull();
+    expect(DataCrypto.decryptRecord).not.toHaveBeenCalled();
+  });
+
+  it("lists hosts using a credential through the decryption boundary", async () => {
+    vi.mocked(DataCrypto.getUserDataKey).mockReturnValue(
+      Buffer.from("user-key"),
+    );
+    const repository = await createRepository();
+
+    const rows = await repository.listHostsUsingCredentialForUser("user-1", 7);
+
+    expect(rows.map((row) => row.id)).toEqual([1]);
+    expect(DataCrypto.decryptRecord).toHaveBeenCalledWith(
+      "ssh_data",
+      expect.objectContaining({ id: 1 }),
+      "user-1",
+      Buffer.from("user-key"),
+    );
+  });
+
+  it("lists all hosts through each owner decryption boundary", async () => {
+    vi.mocked(DataCrypto.getUserDataKey).mockImplementation((userId) =>
+      Buffer.from(`${userId}-key`),
+    );
+    const repository = await createRepository();
+
+    const rows = await repository.listAllHosts();
+
+    expect(rows.map((row) => row.id)).toEqual([1, 2, 3]);
+    expect(DataCrypto.decryptRecord).toHaveBeenCalledWith(
+      "ssh_data",
+      expect.objectContaining({ id: 1 }),
+      "user-1",
+      Buffer.from("user-1-key"),
+    );
+    expect(DataCrypto.decryptRecord).toHaveBeenCalledWith(
+      "ssh_data",
+      expect.objectContaining({ id: 3 }),
+      "user-2",
+      Buffer.from("user-2-key"),
+    );
+  });
+
+  it("skips owner-scoped host list rows when that user's data is locked", async () => {
+    vi.mocked(DataCrypto.getUserDataKey).mockImplementation((userId) =>
+      userId === "user-1" ? Buffer.from("user-1-key") : null,
+    );
+    const repository = await createRepository();
+
+    const rows = await repository.listAllHosts();
+
+    expect(rows.map((row) => row.id)).toEqual([1, 2]);
+    expect(DataCrypto.decryptRecord).not.toHaveBeenCalledWith(
+      "ssh_data",
+      expect.objectContaining({ id: 3 }),
+      expect.any(String),
+      expect.any(Buffer),
+    );
+  });
+
+  it("loads host key verification metadata without decrypting credentials", async () => {
+    const repository = await createRepository();
+
+    const row = await repository.findHostKeyVerificationData(1);
+
+    expect(row).toMatchObject({
+      hostKeyFingerprint: null,
+      hostKeyType: null,
+      hostKeyAlgorithm: "sha256",
+      hostKeyChangedCount: 0,
+      name: "web",
+    });
+    expect(DataCrypto.decryptRecord).not.toHaveBeenCalled();
+  });
+
+  it("stores and updates host key verification metadata through the write boundary", async () => {
+    const onWrite = vi.fn();
+    const repository = await createRepository(onWrite);
+
+    await repository.storeHostKey(
+      1,
+      "fingerprint-1",
+      "ssh-rsa",
+      "sha256",
+      "t1",
+    );
+    await expect(
+      repository.findHostKeyVerificationData(1),
+    ).resolves.toMatchObject({
+      hostKeyFingerprint: "fingerprint-1",
+      hostKeyType: "ssh-rsa",
+      hostKeyAlgorithm: "sha256",
+      hostKeyChangedCount: 0,
+    });
+
+    await repository.touchHostKeyLastVerified(1, "t2");
+    await repository.updateHostKey(
+      1,
+      "fingerprint-2",
+      "ssh-ed25519",
+      "sha256",
+      0,
+      "t3",
+    );
+
+    await expect(
+      repository.findHostKeyVerificationData(1),
+    ).resolves.toMatchObject({
+      hostKeyFingerprint: "fingerprint-2",
+      hostKeyType: "ssh-ed25519",
+      hostKeyAlgorithm: "sha256",
+      hostKeyChangedCount: 1,
+    });
+    expect(onWrite).toHaveBeenCalledTimes(3);
+  });
+
+  it("returns null when user data is locked", async () => {
+    vi.mocked(DataCrypto.getUserDataKey).mockReturnValue(null);
+    const repository = await createRepository();
+
+    await expect(repository.findHostById(1, "user-1")).resolves.toBeNull();
+    await expect(
+      repository.findHostByIdForUser(1, "user-1"),
+    ).resolves.toBeNull();
+    await expect(repository.findHostsByUserId("user-1")).resolves.toEqual([]);
+    await expect(
+      repository.listHostsUsingCredentialForUser("user-1", 7),
+    ).resolves.toEqual([]);
+    await expect(
+      repository.findCredentialByIdForUser(7, "user-1"),
+    ).resolves.toBeNull();
+  });
+
+  it("resolves a folder's assigned credential, walking up to parent folders", async () => {
+    const repository = await createRepository();
+
+    await expect(
+      repository.findFolderCredentialId("user-1", "switches"),
+    ).resolves.toBe(7);
+    await expect(
+      repository.findFolderCredentialId("user-1", "switches / floor1"),
+    ).resolves.toBe(7);
+    await expect(
+      repository.findFolderCredentialId("user-1", "no-cred"),
+    ).resolves.toBeNull();
+    await expect(
+      repository.findFolderCredentialId("user-1", "unknown"),
+    ).resolves.toBeNull();
+    await expect(
+      repository.findFolderCredentialId("user-1", ""),
+    ).resolves.toBeNull();
+  });
+
+  describe("listCredentialsByIdsForUser", () => {
+    it("returns the owner's credentials keyed by id", async () => {
+      const repository = await createRepository();
+      vi.mocked(DataCrypto.getUserDataKey).mockReturnValue(
+        Buffer.from("key") as never,
+      );
+
+      const byId = await repository.listCredentialsByIdsForUser([7], "user-1");
+
+      expect(byId.get(7)).toMatchObject({ id: 7, username: "root" });
+      expect(DataCrypto.decryptRecord).toHaveBeenCalledWith(
+        "ssh_credentials",
+        expect.objectContaining({ id: 7 }),
+        "user-1",
+        expect.anything(),
+      );
+    });
+
+    it("excludes credentials belonging to another user", async () => {
+      const repository = await createRepository();
+      vi.mocked(DataCrypto.getUserDataKey).mockReturnValue(
+        Buffer.from("key") as never,
+      );
+
+      const byId = await repository.listCredentialsByIdsForUser(
+        [7, 8],
+        "user-1",
+      );
+
+      expect(byId.has(7)).toBe(true);
+      // 8 belongs to user-2 and must not leak into user-1's result.
+      expect(byId.has(8)).toBe(false);
+    });
+
+    it("issues no query and decrypts nothing for an empty id list", async () => {
+      const repository = await createRepository();
+
+      const byId = await repository.listCredentialsByIdsForUser([], "user-1");
+
+      expect(byId.size).toBe(0);
+      expect(DataCrypto.decryptRecord).not.toHaveBeenCalled();
+    });
+
+    it("de-duplicates repeated ids so shared credentials decrypt once", async () => {
+      const repository = await createRepository();
+      vi.mocked(DataCrypto.getUserDataKey).mockReturnValue(
+        Buffer.from("key") as never,
+      );
+
+      const byId = await repository.listCredentialsByIdsForUser(
+        [7, 7, 7],
+        "user-1",
+      );
+
+      expect(byId.size).toBe(1);
+      expect(DataCrypto.decryptRecord).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns nothing when the user's data key is unavailable", async () => {
+      const repository = await createRepository();
+      vi.mocked(DataCrypto.getUserDataKey).mockReturnValue(null as never);
+
+      const byId = await repository.listCredentialsByIdsForUser([7], "user-1");
+
+      expect(byId.size).toBe(0);
+    });
+  });
+});

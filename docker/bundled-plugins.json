@@ -1,0 +1,16 @@
+{
+  "plugins": [
+    {
+      "id": "file-manager",
+      "source": "workspace"
+    },
+    {
+      "id": "ssh-terminal",
+      "source": "workspace"
+    },
+    {
+      "id": "tunnels",
+      "source": "workspace"
+    }
+  ]
+}

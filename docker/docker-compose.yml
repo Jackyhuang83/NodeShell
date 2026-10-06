@@ -1,0 +1,20 @@
+services:
+  nodeshell:
+    image: ghcr.io/jackyhuang83/nodeshell:latest
+    container_name: nodeshell
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - nodeshell-data:/app/data
+      - /etc/nodeshell/secrets:/run/secrets/nodeshell:ro
+    environment:
+      PORT: "8080"
+      TERMIX_REQUIRE_EXTERNAL_SECRETS: "true"
+      JWT_SECRET_FILE: "/run/secrets/nodeshell/jwt_secret"
+      DATABASE_KEY_FILE: "/run/secrets/nodeshell/database_key"
+      ENCRYPTION_KEY_FILE: "/run/secrets/nodeshell/encryption_key"
+      INTERNAL_AUTH_TOKEN_FILE: "/run/secrets/nodeshell/internal_auth_token"
+volumes:
+  nodeshell-data:
+    driver: local

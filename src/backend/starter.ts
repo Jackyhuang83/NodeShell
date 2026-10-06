@@ -1,0 +1,248 @@
+import { getErrorMessage } from "./utils/error-message.js";
+import dotenv from "dotenv";
+import { promises as fs, readFileSync } from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import { AutoSSLSetup } from "./tls/self-signed.js";
+import { DatabaseSaveTrigger } from "./utils/database-save-trigger.js";
+import { SystemCrypto } from "./utils/system-crypto.js";
+import {
+  systemLogger,
+  versionLogger,
+  setGlobalLogLevel,
+} from "./utils/logger.js";
+
+/**
+ * host:port from DATABASE_URL for the startup log. Parsed rather than printed
+ * so the password the URL also carries never reaches the logs.
+ */
+function describeDatabaseHost(): string {
+  const raw = process.env.DATABASE_URL?.trim();
+  if (!raw) return "unknown";
+
+  try {
+    const { host } = new URL(raw);
+    return host || "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+(async () => {
+  const initStartTime = Date.now();
+  try {
+    dotenv.config({ quiet: true });
+
+    const dataDir = process.env.DATA_DIR || "./db/data";
+    const envPath = path.join(dataDir, ".env");
+    try {
+      await fs.access(envPath);
+      const persistentConfig = dotenv.config({ path: envPath, quiet: true });
+      if (persistentConfig.parsed) {
+        Object.assign(process.env, persistentConfig.parsed);
+      }
+    } catch {
+      // expected - env file may not exist
+    }
+
+    systemLogger.info("NodeShell backend initialization started", {
+      operation: "backend_init_start",
+      nodeEnv: process.env.NODE_ENV || "production",
+      port: process.env.PORT || 4090,
+    });
+
+    let version = process.env.VERSION || "unknown";
+    if (version === "unknown") {
+      const candidates = [
+        path.join(process.cwd(), "package.json"),
+        path.join(
+          path.dirname(fileURLToPath(import.meta.url)),
+          "../../../package.json",
+        ),
+      ];
+      for (const packageJsonPath of candidates) {
+        try {
+          const packageJson = JSON.parse(
+            readFileSync(packageJsonPath, "utf-8"),
+          );
+          if (packageJson.version) {
+            version = packageJson.version;
+            break;
+          }
+        } catch {
+          // try the next location
+        }
+      }
+    }
+    process.env.VERSION = version;
+
+    versionLogger.info(`NodeShell Backend starting - Version: ${version}`, {
+      operation: "startup",
+      version: version,
+    });
+
+    const systemCrypto = SystemCrypto.getInstance();
+    await systemCrypto.initializeJWTSecret();
+    await systemCrypto.initializeDatabaseKey();
+    await systemCrypto.initializeEncryptionKey();
+    await systemCrypto.initializeInternalAuthToken();
+
+    const { needsExplicitPersist, resolveDatabaseDialect } =
+      await import("./database/db/dialect.js");
+    const databaseDialect = resolveDatabaseDialect();
+
+    const { backupBeforeUpgrade } = await import("./boot.js");
+    await backupBeforeUpgrade({ dataDir, version });
+
+    await AutoSSLSetup.initialize();
+    systemLogger.success("SSL setup completed", {
+      operation: "backend_init_ssl",
+      sslEnabled: process.env.ENABLE_SSL === "true",
+    });
+
+    const dbModule = await import("./database/db/index.js");
+    await dbModule.initializeDatabase();
+    // Naming the engine makes a misconfiguration obvious: without it, a bad
+    // DATABASE_DIALECT silently falls back to SQLite and looks like data loss.
+    systemLogger.success(`Database initialized (${databaseDialect})`, {
+      operation: "backend_init_db",
+      dialect: databaseDialect,
+      // Host only, never the credentials the URL also carries.
+      ...(needsExplicitPersist(databaseDialect)
+        ? {}
+        : { host: describeDatabaseHost() }),
+    });
+
+    const { runCoreBootMigrations } = await import("./boot.js");
+    await runCoreBootMigrations();
+
+    const { hostStatusService } =
+      await import("./hosts/status/host-status-service.js");
+    hostStatusService.start();
+
+
+    const { serverReady } = await import("./database/database.js");
+    await serverReady;
+
+    // Bundled plugins own their HTTP/WS routes and lifecycle. Keeping plugin
+    // servers out of core startup means disabling a plugin removes its routes.
+
+    // Initialize log level from database settings
+    const { getCurrentSettingValue } =
+      await import("./database/repositories/factory.js");
+    const logLevel = getCurrentSettingValue("log_level");
+    if (logLevel) {
+      setGlobalLogLevel(logLevel);
+      systemLogger.info(`Log level set to: ${logLevel}`, {
+        operation: "log_level_init",
+      });
+    }
+
+    // Last, so a plugin's activate() sees a fully wired server. A plugin that
+    // fails to load must not stop the backend, so this never rejects.
+    try {
+      const { initializePlugins } = await import("./plugins/index.js");
+      const loaded = await initializePlugins();
+      if (loaded.length > 0) {
+        systemLogger.info(`Loaded ${loaded.length} plugin(s)`, {
+          operation: "plugin_init",
+        });
+      }
+
+      const { runPluginDataMigrations } =
+        await import("./upgrade/boot-migrations.js");
+      await runPluginDataMigrations();
+    } catch (error) {
+      systemLogger.warn("Plugin runtime failed to initialize", {
+        operation: "plugin_init",
+        error: getErrorMessage(error),
+      });
+    }
+
+    systemLogger.success("NodeShell backend started successfully", {
+      operation: "backend_init_complete",
+      port: process.env.PORT || 4090,
+      ssl: process.env.ENABLE_SSL === "true",
+      duration: Date.now() - initStartTime,
+    });
+
+
+    const gracefulShutdown = async (signal: string) => {
+      systemLogger.info(`Received ${signal}, initiating graceful shutdown...`, {
+        operation: "shutdown",
+      });
+
+      // Terminate plugin workers before the database goes away, so a plugin
+      // mid-write cannot outlive it.
+      try {
+        const { shutdownPlugins } = await import("./plugins/index.js");
+        await shutdownPlugins();
+      } catch {
+        // Nothing to stop.
+      }
+
+      // Only SQLite has anything to flush. On a client-server engine the writes
+      // committed as they happened, so there is no file to save and claiming
+      // otherwise in the log would be untrue.
+      if (needsExplicitPersist(databaseDialect)) {
+        try {
+          await DatabaseSaveTrigger.forceSave("shutdown_explicit_save");
+          systemLogger.info("Database saved to disk before exit", {
+            operation: "shutdown_db_saved",
+          });
+        } catch (error) {
+          systemLogger.error("Failed to save database during shutdown", error, {
+            operation: "shutdown_db_save_failed",
+          });
+        }
+      }
+      process.exit(0);
+    };
+
+    process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+    process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+
+    process.on("message", (msg: { type?: string }) => {
+      if (msg?.type === "shutdown") {
+        gracefulShutdown("IPC shutdown");
+      }
+    });
+
+    // A single bad request must not take the server down. Exit only on errors
+    // that leave the process genuinely unusable; log and keep serving
+    // otherwise, since these are almost always scoped to one connection.
+    const isFatalError = (error: unknown): boolean => {
+      const code = (error as NodeJS.ErrnoException)?.code;
+      if (code === "ERR_WORKER_OUT_OF_MEMORY") return true;
+      if (error instanceof RangeError) {
+        return /call stack|heap out of memory/i.test(error.message);
+      }
+      return false;
+    };
+
+    process.on("uncaughtException", (error) => {
+      systemLogger.error("Uncaught exception occurred", error, {
+        operation: "error_handling",
+        fatal: isFatalError(error),
+      });
+      if (isFatalError(error)) {
+        process.exit(1);
+      }
+    });
+
+    process.on("unhandledRejection", (reason) => {
+      systemLogger.error("Unhandled promise rejection", reason, {
+        operation: "error_handling",
+        fatal: isFatalError(reason),
+      });
+      if (isFatalError(reason)) {
+        process.exit(1);
+      }
+    });
+  } catch (error) {
+    systemLogger.error("Failed to initialize backend services", error, {
+      operation: "startup_failed",
+    });
+    process.exit(1);
+  }
+})();
