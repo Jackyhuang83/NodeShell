@@ -192,7 +192,7 @@ export function registerHostFolderRoutes(
     requireDataAccess,
     async (req: Request, res: Response) => {
       const userId = (req as AuthenticatedRequest).userId;
-      const { name, color, icon, credentialId, localOnly } = req.body;
+      const { name, color, icon, credentialId } = req.body;
 
       if (!isNonEmptyString(userId) || !name) {
         return res.status(400).json({ error: "Folder name is required" });
@@ -233,13 +233,6 @@ export function registerHostFolderRoutes(
             icon,
             normalizedCredentialId,
           );
-        if (typeof localOnly === "boolean") {
-          await createCurrentHostFolderRepository().setLocalOnly(
-            userId,
-            name,
-            localOnly,
-          );
-        }
         if (normalizedCredentialId !== undefined) {
           await setFolderCredentialDefault(
             userId,
