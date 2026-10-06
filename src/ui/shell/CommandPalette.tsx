@@ -512,11 +512,6 @@ export function CommandPalette({
                               <span className="text-sm font-semibold truncate">
                                 {host.name}
                               </span>
-                              {host.isShared && (
-                                <span className="text-[9px] px-1 py-px border border-accent-brand/30 bg-accent-brand/10 text-accent-brand shrink-0 leading-none uppercase tracking-wider">
-                                  {t("hosts.sharing.sharedBadge")}
-                                </span>
-                              )}
                               {host.online && (
                                 <span className="size-1.5 rounded-full bg-accent-brand animate-pulse shrink-0" />
                               )}
