@@ -148,11 +148,9 @@ export function CredentialItem({
     </>
   ) : null;
 
-  const canEdit = true;
   const managementButtons = (
     <>
-      {canEdit && (
-        <button
+      <button
           title={t("credentials.editCredentialAction")}
           onClick={(e) => {
             e.stopPropagation();
@@ -162,9 +160,7 @@ export function CredentialItem({
         >
           <Pencil className="size-3.5" />
         </button>
-      )}
-      <>
-          <button
+      <button
             title={t("credentials.cloneCredentialAction")}
             onClick={(e) => {
               e.stopPropagation();
@@ -184,7 +180,6 @@ export function CredentialItem({
           >
             <Trash2 className="size-3.5" />
           </button>
-      </>
     </>
   );
 
@@ -260,8 +255,6 @@ export function CredentialItem({
             className={`${tokens.nameTextSize} font-semibold truncate text-foreground leading-none tracking-tight`}
           >
             {cred.name}
-
-            )}
           </span>
           <span
             className={`text-[9px] px-1 py-px font-bold border leading-none shrink-0 ${isKey ? "border-accent-brand/30 text-accent-brand" : "border-border/60 text-muted-foreground/60"}`}
