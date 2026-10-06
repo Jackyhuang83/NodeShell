@@ -50,69 +50,6 @@ const requireManagePlugins = permissionManager.requirePermission(
 
 /**
  * @openapi
- * /plugins/public:
- *   get:
- *     summary: List the plugin frontends anonymous guest pages need
- *     description: >
- *       No auth. A shared-session or collab guest link has no session, yet its
- *       page still draws surfaces a plugin provides (a remote desktop stream).
- *       Returns only enabled plugins whose manifest sets contributes.guest,
- *       with the fields the browser loader needs and nothing operational,
- *       plus the ?view= names each serves to guests (contributes.guestViews).
- *     tags:
- *       - Plugins
- *     responses:
- *       200:
- *         description: Guest-capable plugins.
- */
-router.get("/public", async (_req: Request, res: Response) => {
-  try {
-    const records = await createCurrentPluginRepository().listAll();
-    const { loader } = getPluginRuntime();
-    const plugins = records.flatMap((record) => {
-      if (record.state !== "enabled") return [];
-      const loaded = loader.get(record.id);
-      let manifest: {
-        contributes?: { guest?: boolean; guestViews?: string[] };
-        dependencies?: Record<string, string>;
-        optionalDependencies?: Record<string, string>;
-      };
-      try {
-        manifest = JSON.parse(record.manifestJson);
-      } catch {
-        return [];
-      }
-      if (manifest?.contributes?.guest !== true) return [];
-      return [
-        {
-          id: record.id,
-          name: record.name,
-          version: record.version,
-          enabled: true,
-          state: loaded?.state ?? record.state,
-          contributes: {
-            guest: true,
-            guestViews: manifest.contributes.guestViews ?? [],
-          },
-          dependencies: manifest.dependencies ?? {},
-          optionalDependencies: manifest.optionalDependencies ?? {},
-          ...describePluginFrontend(loaded),
-        },
-      ];
-    });
-    res.json(plugins);
-  } catch (error) {
-    databaseLogger.error(
-      "Failed to list guest plugins",
-      error instanceof Error ? error : new Error(String(error)),
-      { operation: "plugin_list_public" },
-    );
-    res.status(500).json({ error: "Failed to list plugins" });
-  }
-});
-
-/**
- * @openapi
  * /plugins:
  *   get:
  *     summary: List installed plugins and their runtime state
