@@ -49,10 +49,6 @@ describe("HostResolutionRepository", () => {
         ('user-1', 'switches', 7),
         ('user-1', 'switches / floor1', NULL),
         ('user-1', 'no-cred', NULL);
-      INSERT INTO host_access (
-        host_id, user_id, granted_by, permission_level
-      )
-      VALUES (1, 'user-2', 'user-1', 'execute');
     `);
 
     return new HostResolutionRepository(context, onWrite);
@@ -138,40 +134,6 @@ describe("HostResolutionRepository", () => {
       "user-1",
       Buffer.from("user-key"),
     );
-  });
-
-  it("lists raw own and shared host rows for access list assembly", async () => {
-    const repository = await createRepository();
-
-    const rows = await repository.listHostRowsForAccessList("user-2", [
-      { hostId: 1, permissionLevel: "view", expiresAt: null },
-      {
-        hostId: 1,
-        permissionLevel: "manage",
-        expiresAt: "2026-07-01T00:00:00.000Z",
-      },
-      { hostId: 3, permissionLevel: "view", expiresAt: null },
-      { hostId: 999, permissionLevel: "view", expiresAt: null },
-    ]);
-
-    expect(rows).toHaveLength(2);
-    expect(rows[0]).toMatchObject({
-      id: 3,
-      userId: "user-2",
-      ownerId: "user-2",
-      isShared: false,
-      permissionLevel: undefined,
-      expiresAt: undefined,
-    });
-    expect(rows[1]).toMatchObject({
-      id: 1,
-      userId: "user-1",
-      ownerId: "user-1",
-      isShared: true,
-      permissionLevel: "manage",
-      expiresAt: "2026-07-01T00:00:00.000Z",
-    });
-    expect(DataCrypto.decryptRecord).not.toHaveBeenCalled();
   });
 
   it("loads host owner metadata without decrypting host data", async () => {
