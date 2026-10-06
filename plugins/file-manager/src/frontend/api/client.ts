@@ -56,37 +56,10 @@ export function fileManagerApi(): FileManagerClient {
   return app().api as unknown as FileManagerClient;
 }
 
-// A live SSH session (keyed by sessionId) remembers which backend holds it,
-// so every later call for that session reaches the same server.
-const sessionOrigins = new Map<string, "local" | "remote">();
-
-export function setSessionOrigin(
-  sessionId: string,
-  origin: "local" | "remote",
-): void {
-  sessionOrigins.set(sessionId, origin);
-}
-
-export function clearSessionOrigin(sessionId: string): void {
-  sessionOrigins.delete(sessionId);
-}
-
-export function getSessionOrigin(sessionId: string): "local" | "remote" {
-  return sessionOrigins.get(sessionId) === "remote" ? "remote" : "local";
-}
-
 export function getFileManagerApiForSession(
-  sessionId: string,
+  _sessionId: string,
 ): FileManagerClient {
-  return app().apiFor(
-    getSessionOrigin(sessionId),
-  ) as unknown as FileManagerClient;
-}
-
-export function fileManagerApiFor(
-  origin: "local" | "remote" | undefined,
-): FileManagerClient {
-  return app().apiFor(origin ?? "local") as unknown as FileManagerClient;
+  return fileManagerApi();
 }
 
 class ApiError extends Error {
