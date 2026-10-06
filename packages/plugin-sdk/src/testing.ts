@@ -1832,8 +1832,6 @@ export interface RenderWithAppOptions {
   ready?: boolean;
   /** Stands in for app.api and usePluginApi(), e.g. a stub of the routes. */
   api?: import("./frontend.js").PluginApiClient;
-  /** What app.desktop.remoteServerUrl() answers. Read on every call. */
-  remoteServerUrl?: () => string | null | Promise<string | null>;
 }
 
 /** A call a plugin made on the shell, recorded instead of performed. */
