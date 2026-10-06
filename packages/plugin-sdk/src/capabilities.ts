@@ -43,7 +43,6 @@ export const CAPABILITY_CATALOG: readonly CapabilityInfo[] = [
 
   entry("ssh:connect", "high"),
   entry("process:spawn", "high"),
-  entry("users:write", "high"),
   entry("db:core-refs", "high"),
   entry("auth:provide", "high"),
   entry("notify:hub", "high"),
@@ -54,7 +53,6 @@ export const CAPABILITY_CATALOG: readonly CapabilityInfo[] = [
   entry("network:outbound", "medium"),
   entry("network:serve", "medium"),
   entry("network:broadcast", "medium"),
-  entry("users:read", "medium"),
   entry("events:core", "medium"),
   entry("notify:send", "medium"),
   entry("audit:read", "medium"),
