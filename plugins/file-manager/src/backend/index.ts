@@ -21,7 +21,6 @@ import {
   hostAddressMismatch,
   HostAddressMismatchError,
   HostNotOnThisServerError,
-  resolveServerHostId,
   type ConnectionStage,
   type FileLogger,
   type LogEntry,
@@ -80,32 +79,30 @@ function hasSocks5Config(host: PluginSshHost): boolean {
  */
 function assertResolvedHost(
   clientIp: unknown,
-  hostSyncId: string | null | undefined,
   resolvedHost: { ip?: string } | null | undefined,
   hostId: number,
   userId: string,
 ): void {
-  if (hostSyncId) {
-    if (resolvedHost) return;
+  if (!resolvedHost) {
     fileLogger.error(
-      "Refusing SFTP connection: host is not known to this server",
+      "Refusing SFTP connection: saved host was not found",
       undefined,
-      { operation: "file_manager_host_sync_id_unknown", hostId, userId },
+      { operation: "file_manager_host_not_found", hostId, userId },
     );
     throw new HostNotOnThisServerError();
   }
 
-  if (!hostAddressMismatch(clientIp, resolvedHost?.ip)) return;
+  if (!hostAddressMismatch(clientIp, resolvedHost.ip)) return;
 
   fileLogger.error(
-    "Refusing SFTP connection: host id resolves to a different address here",
+    "Refusing SFTP connection: saved host address does not match request",
     undefined,
     {
       operation: "file_manager_host_id_mismatch",
       hostId,
       userId,
       clientIp,
-      resolvedIp: resolvedHost?.ip,
+      resolvedIp: resolvedHost.ip,
     },
   );
   throw new HostAddressMismatchError();
@@ -493,7 +490,6 @@ export async function activate(ctx: PluginContext) {
     const {
       sessionId,
       hostId,
-      syncId: hostSyncId,
       ip,
       port,
       username,
@@ -604,10 +600,8 @@ export async function activate(ctx: PluginContext) {
     let resolvedSocks5ProxyChain = socks5ProxyChain;
 
     const resolveFrom = async () => {
-      const resolvedHost = (await ctx.ssh.resolveHost(hostId, {
-        syncId: hostSyncId,
-      })) as LooseHost | null;
-      assertResolvedHost(ip, hostSyncId, resolvedHost, hostId, userId);
+      const resolvedHost = (await ctx.ssh.resolveHost(hostId)) as LooseHost | null;
+      assertResolvedHost(ip, resolvedHost, hostId, userId);
       if (!resolvedHost) return;
       resolvedIp = resolvedHost.ip;
       resolvedPort = resolvedHost.port;
@@ -692,14 +686,7 @@ export async function activate(ctx: PluginContext) {
       }
     }
 
-    let serverHostId = hostId;
-    if (hostSyncId && userId) {
-      const resolvedHost = await ctx.ssh.resolveHost(hostId, {
-        syncId: hostSyncId,
-      });
-      assertResolvedHost(ip, hostSyncId, resolvedHost, hostId, userId);
-      serverHostId = resolveServerHostId(hostId, resolvedHost) ?? hostId;
-    }
+    const serverHostId = hostId;
 
     const effectiveAuthType =
       resolvedCredentials.authType ||
