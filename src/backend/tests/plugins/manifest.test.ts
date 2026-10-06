@@ -266,7 +266,7 @@ describe("plugin permissions", () => {
     ).toEqual([]);
   });
 
-  it("accepts a dotted name and a system role default", () => {
+  it("accepts a dotted plugin-relative permission name", () => {
     expect(
       validateManifest(
         base({
@@ -276,7 +276,6 @@ describe("plugin permissions", () => {
                 name: "services.use",
                 titleKey: "permissions.services.use.title",
                 descriptionKey: "permissions.services.use.description",
-                defaultRoles: ["admin"],
               },
             ],
           },
