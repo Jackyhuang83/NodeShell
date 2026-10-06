@@ -744,12 +744,6 @@ export interface TermixAppInfo {
  * disabled.
  */
 export interface TermixApp extends TermixAppInfo {
-  /**
-   * True on anonymous guest pages (a shared-session link). Only plugins with
-   * contributes.guest run there, and they should register just what a guest
-   * sees: there is no user, so API calls needing a login will fail.
-   */
-  readonly guest: boolean;
   registerRailItem: (item: RailItemContribution) => Disposer;
   registerPanel: (
     id: string,
