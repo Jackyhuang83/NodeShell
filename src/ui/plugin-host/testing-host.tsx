@@ -183,9 +183,7 @@ export async function renderPlugin(
     pluginId,
     (options.api as Parameters<typeof setPluginApiForTesting>[1]) ?? null,
   );
-  const handle = createPluginApp(pluginId, manifest, summary.contributes, {
-    guest: options.guest,
-  });
+  const handle = createPluginApp(pluginId, manifest, summary.contributes);
   await plugin.activate(handle.app);
   setFrontendState(pluginId, "active");
   if (options.ready) notifyShellReady();
