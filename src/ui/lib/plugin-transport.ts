@@ -3,10 +3,7 @@ import { authApi } from "@/main-axios";
 import { getBasePath } from "@/lib/base-path";
 import { getDeviceId } from "@/lib/device-id";
 import { websocketAuthProtocols } from "@/lib/ws-auth";
-import type {
-  ConnectionOrigin,
-  WebSocketConnectionTarget,
-} from "@/lib/connection-origin";
+import type { WebSocketConnectionTarget } from "@/lib/connection-origin";
 
 const BACKEND_PORT = 30001;
 
@@ -62,19 +59,9 @@ export function pluginFetch(
   });
 }
 
-/** NodeShell v0.1 has one Web backend; origin selection is retained only for SDK compatibility. */
-export function pluginApiFor(
-  _pluginId: string,
-  _origin: ConnectionOrigin | undefined,
-  local: AxiosInstance,
-): AxiosInstance {
-  return local;
-}
-
 export async function pluginWsUrl(
   pluginId: string,
   path: string,
-  _options: { origin?: ConnectionOrigin } = {},
 ): Promise<WebSocketConnectionTarget> {
   const suffix = path.startsWith("/") ? path : `/${path}`;
   const route = `/plugin-ws/${pluginId}${suffix}`;
