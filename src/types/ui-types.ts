@@ -232,6 +232,8 @@ export type WorkspaceTabSnapshot = {
   /** Stable key within the saved tab list, not the live Tab.id (which is regenerated on every open). */
   slotId: string;
   type: TabType;
+  /** Saved host id in the single NodeShell database. */
+  hostId?: string | null;
   /** Denormalized snapshot for display and graceful-skip messaging if the host is later deleted. */
   hostNameSnapshot?: string | null;
   label: string;
