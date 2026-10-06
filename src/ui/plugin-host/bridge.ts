@@ -17,7 +17,7 @@ import {
 } from "@termix/plugin-sdk/frontend";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useTheme } from "@/components/theme-provider";
-import { createPluginApi, pluginApiFor } from "@/lib/plugin-transport";
+import { createPluginApi } from "@/lib/plugin-transport";
 import {
   getPluginAdminSettings,
   getPluginHostSettings,
@@ -329,13 +329,6 @@ export const pluginHostBridge: PluginHostBridge = {
   },
 
   getApi: (pluginId) => getApi(pluginId),
-  getApiFor: (pluginId, origin) =>
-    pluginApiFor(
-      pluginId,
-      origin as "local" | "remote" | undefined,
-      getApi(pluginId) as never,
-    ) as never,
-
   useTabs: () => tabsApi,
 
   invokeAction: (id, ...args) => invokeAction(id, ...args),
@@ -434,7 +427,6 @@ export const pluginHostBridge: PluginHostBridge = {
       window.dispatchEvent(new CustomEvent("termix:hosts-changed"));
     },
     getHostStatusColorScheme: () => readStatusColorScheme(),
-    getLocalAuthToken: () => null,
     listCredentials: async () => {
       const raw = await getCredentials();
       const list = Array.isArray(raw)
