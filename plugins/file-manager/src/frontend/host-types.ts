@@ -25,13 +25,9 @@ export interface SSHHost {
   notes?: string;
   connectionType?: string;
   enableSsh?: boolean;
-  syncId?: string | null;
   createdAt: string;
   updatedAt: string;
-  connectionOrigin?: "local" | "remote" | null;
   instanceId?: string;
-  isShared?: boolean;
-  permissionLevel?: "connect" | "view" | "edit" | "manage";
   /** Enabled plugins' host-scope settings, keyed by plugin id. */
   pluginSettings?: Record<string, Record<string, unknown>>;
 }
