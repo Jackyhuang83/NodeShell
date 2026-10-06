@@ -74,9 +74,7 @@ export function HostExportDialog({
   const exportableHosts = useMemo(
     () =>
       hosts.filter(
-        (h) =>
-          !isFolder(h as unknown as Parameters<typeof isFolder>[0]) &&
-          !h.isShared,
+        (h) => !isFolder(h as unknown as Parameters<typeof isFolder>[0]),
       ),
     [hosts],
   );
