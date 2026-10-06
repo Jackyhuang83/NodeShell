@@ -22,7 +22,9 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
       - name: Shell syntax
-        run: |\n          sh -n docker/entrypoint.sh docker/nodeshell\n          bash -n nodeshell.sh
+        run: |
+          sh -n docker/entrypoint.sh docker/nodeshell
+          bash -n nodeshell.sh
       - name: Docker configuration
         run: |
           docker compose -f docker/docker-compose.yml config >/dev/null
