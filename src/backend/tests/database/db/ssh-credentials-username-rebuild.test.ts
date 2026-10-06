@@ -145,7 +145,7 @@ describe("ssh_credentials username rebuild", () => {
     expect(row.sync_id).toBe("sync-abc");
   });
 
-  it("keeps the sync_id uniqueness that DROP TABLE would otherwise discard", async () => {
+  it("removes the legacy sync_id uniqueness after rebuilding the table", async () => {
     writeDatabaseNeedingRebuild();
 
     const sqlite = await bootAndGetSqlite();
@@ -154,14 +154,12 @@ describe("ssh_credentials username rebuild", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'ssh_credentials'")
       .pluck()
       .all() as string[];
-    expect(indexes).toContain("idx_ssh_credentials_sync_id");
-
-    sqlite
-      .prepare("INSERT INTO ssh_credentials (user_id, name, auth_type, sync_id) VALUES (?, ?, ?, ?)")
-      .run("user-1", "other box", "key", "sync-xyz");
+    expect(indexes).not.toContain("idx_ssh_credentials_sync_id");
 
     expect(() =>
-      sqlite.prepare("UPDATE ssh_credentials SET sync_id = ? WHERE name = ?").run("sync-abc", "other box"),
-    ).toThrow(/UNIQUE/i);
+      sqlite
+        .prepare("INSERT INTO ssh_credentials (user_id, name, auth_type, sync_id) VALUES (?, ?, ?, ?)")
+        .run("user-1", "other box", "key", "sync-abc"),
+    ).not.toThrow();
   });
 });
