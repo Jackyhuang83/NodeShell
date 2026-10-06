@@ -19,40 +19,6 @@ export interface HostUpdateStateRecord {
   parentHostId: number | null;
   folder: string | null;
 }
-export interface HostListAccessEntry {
-  hostId: number;
-  permissionLevel: string;
-  expiresAt: string | null;
-}
-
-const HOST_PERMISSION_RANK: Record<string, number> = {
-  connect: 1,
-  view: 2,
-  edit: 3,
-  manage: 4,
-};
-
-function preferHostAccess(
-  current: HostListAccessEntry,
-  candidate: HostListAccessEntry,
-): HostListAccessEntry {
-  const currentRank = HOST_PERMISSION_RANK[current.permissionLevel] ?? 0;
-  const candidateRank = HOST_PERMISSION_RANK[candidate.permissionLevel] ?? 0;
-  if (candidateRank !== currentRank) {
-    return candidateRank > currentRank ? candidate : current;
-  }
-  if (current.expiresAt === null) return current;
-  if (candidate.expiresAt === null) return candidate;
-  return candidate.expiresAt > current.expiresAt ? candidate : current;
-}
-
-export type HostListRow = HostResolutionHostRecord & {
-  ownerId: string;
-  isShared: boolean;
-  permissionLevel?: string;
-  expiresAt?: string | null;
-};
-
 export interface HostStatusTargetRow {
   id: number;
   userId: string;
@@ -82,54 +48,17 @@ export class HostResolutionRepository {
     const rows = await this.context.drizzle
       .select()
       .from(hosts)
-      .where(eq(hosts.id, hostId))
-      .limit(1);
-
-    return this.decryptOne("ssh_data", rows[0], userId);
-  }
-
-  /**
-   * Translates a sync identity into this database's own row id.
-   *
-   * Deliberately not scoped to a user: `sync_id` is unique across the table,
-   * and a host shared with the caller belongs to someone else. Whether the
-   * caller may reach the row is decided by the permission check that follows,
-   * not here.
-   */
-  async findHostIdBySyncId(syncId: string): Promise<number | null> {
-    const rows = await this.context.drizzle
-      .select({ id: hosts.id })
-      .from(hosts)
-      .where(eq(hosts.syncId, syncId))
-      .limit(1);
-
-    return rows[0]?.id ?? null;
-  }
-
-  async findHostByIdForUser(
-    hostId: number,
-    userId: string,
-  ): Promise<HostResolutionHostRecord | null> {
-    const rows = await this.context.drizzle
-      .select()
-      .from(hosts)
       .where(and(eq(hosts.id, hostId), eq(hosts.userId, userId)))
       .limit(1);
 
     return this.decryptOne("ssh_data", rows[0], userId);
   }
 
-  async findHostIdBySyncIdForUser(
-    syncId: string,
+  async findHostByIdForUser(
+    hostId: number,
     userId: string,
-  ): Promise<number | null> {
-    const rows = await this.context.drizzle
-      .select({ id: hosts.id })
-      .from(hosts)
-      .where(and(eq(hosts.syncId, syncId), eq(hosts.userId, userId)))
-      .limit(1);
-
-    return rows[0]?.id ?? null;
+  ): Promise<HostResolutionHostRecord | null> {
+    return this.findHostById(hostId, userId);
   }
 
   async findHostUpdateState(
@@ -171,62 +100,6 @@ export class HostResolutionRepository {
       .where(eq(hosts.userId, userId));
 
     return this.decryptMany("ssh_data", rows, userId);
-  }
-
-  async listHostRowsForAccessList(
-    userId: string,
-    accessEntries: HostListAccessEntry[],
-  ): Promise<HostListRow[]> {
-    const ownHostRows = await this.context.drizzle
-      .select()
-      .from(hosts)
-      .where(eq(hosts.userId, userId));
-
-    const accessByHostId = new Map<number, HostListAccessEntry>();
-    for (const access of accessEntries) {
-      const current = accessByHostId.get(access.hostId);
-      accessByHostId.set(
-        access.hostId,
-        current ? preferHostAccess(current, access) : access,
-      );
-    }
-    const sharedHostIds = Array.from(accessByHostId.keys());
-    const sharedHostRows =
-      sharedHostIds.length > 0
-        ? await this.context.drizzle
-            .select()
-            .from(hosts)
-            .where(inArray(hosts.id, sharedHostIds))
-        : [];
-    const sharedHostsById = new Map(
-      sharedHostRows.map((host) => [host.id, host]),
-    );
-
-    return [
-      ...ownHostRows.map((host) => ({
-        ...host,
-        ownerId: host.userId,
-        isShared: false,
-        permissionLevel: undefined,
-        expiresAt: undefined,
-      })),
-      ...Array.from(accessByHostId.values()).flatMap((access) => {
-        const host = sharedHostsById.get(access.hostId);
-        if (!host || host.userId === userId) {
-          return [];
-        }
-
-        return [
-          {
-            ...host,
-            ownerId: host.userId,
-            isShared: host.userId !== userId,
-            permissionLevel: access.permissionLevel,
-            expiresAt: access.expiresAt,
-          },
-        ];
-      }),
-    ];
   }
 
   async findHostOwnerId(hostId: number): Promise<string | null> {
