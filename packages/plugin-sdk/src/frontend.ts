@@ -720,19 +720,6 @@ export interface PluginWsTarget {
   protocols?: string[];
 }
 
-/** Where the frontend runs, for a plugin that behaves differently in the desktop app. */
-export interface DesktopApi {
-  /** True inside the Termix desktop app. */
-  readonly available: boolean;
-  /**
-   * The remote server the desktop app is connected to for sync, or null
-   * outside the desktop app and while it runs standalone.
-   */
-  remoteServerUrl: () => Promise<string | null>;
-  /** Called when the desktop app connects to or leaves a remote server. */
-  onRemoteServerChange: (listener: () => void) => Disposer;
-}
-
 export interface TermixAppInfo {
   readonly pluginId: string;
   readonly manifest: PluginManifest;
@@ -824,23 +811,13 @@ export interface TermixApp extends TermixAppInfo {
   /** HTTP client for this plugin's /plugin-api/<id>/ routes. */
   api: PluginApiClient;
   /**
-   * The same client for a resolved connection origin: "remote" reaches the
-   * desktop app's connected remote server, anything else is `api`.
-   */
-  apiFor: (origin?: unknown) => PluginApiClient;
-  /**
    * A raw fetch on /plugin-api/<id>/<path> with core's auth, for a response
    * read as a stream (server-sent events), which `api` cannot do.
    */
   fetch: (path: string, init?: RequestInit) => Promise<Response>;
   /** WebSocket URL and auth subprotocols for /plugin-ws/<id>/<path>. */
-  wsUrl: (
-    path: string,
-    options?: { origin?: unknown },
-  ) => Promise<PluginWsTarget | null>;
+  wsUrl: (path: string) => Promise<PluginWsTarget | null>;
   tabs: TabsApi;
-  /** The desktop app, when the frontend runs in it. */
-  desktop: DesktopApi;
   /**
    * Fires after this plugin's settings are saved from the settings screen or
    * the host editor. Disposed automatically.
@@ -929,7 +906,6 @@ export interface PluginHostBridge {
   useTheme: () => { theme: "light" | "dark" };
   toast: ToastApi;
   getApi: (pluginId: string) => PluginApiClient;
-  getApiFor: (pluginId: string, origin: unknown) => PluginApiClient;
   useTabs: () => TabsApi;
   invokeAction: (id: string, ...args: unknown[]) => Promise<unknown>;
   useSshAuthTypes: () => { types: SshAuthTypeInfo[]; loaded: boolean };
@@ -1023,7 +999,7 @@ export interface PluginCoreApi {
     action: KeybindingAction,
     context?: KeybindingRunContext,
   ) => boolean;
-  /** A browser-side UI preference (a cookie, or the desktop app's store). */
+  /** A browser-side UI preference stored by the WebUI. */
   getClientPreference: (name: string) => string | undefined;
   /** Saves a browser-side UI preference where getClientPreference reads it. */
   setClientPreference: (name: string, value: string) => void;
@@ -1038,11 +1014,6 @@ export interface PluginCoreApi {
   notifyHostsChanged: () => void;
   /** How the user wants host status shown: the brand accent, or green/red. */
   getHostStatusColorScheme: () => "accent" | "status";
-  /**
-   * The token the desktop app's embedded backend accepts, for work the
-   * desktop main process does on the renderer's behalf. Null in a browser.
-   */
-  getLocalAuthToken: () => string | null;
 }
 
 /** A stored credential as a picker needs it. Secrets never leave core. */
@@ -1188,11 +1159,6 @@ export function getHostStatusColorScheme(): "accent" | "status" {
   return requireHost().core.getHostStatusColorScheme();
 }
 
-/** The desktop app's local backend token, or null in a browser. */
-export function getLocalAuthToken(): string | null {
-  return requireHost().core.getLocalAuthToken();
-}
-
 export function getHostPassword(
   hostId: number,
   field: "password" | "sudoPassword",
@@ -1233,15 +1199,6 @@ export function listCredentials(): Promise<PluginCredentialSummary[]> {
 export function usePluginApi(): PluginApiClient {
   const bridge = requireHost();
   return bridge.getApi(bridge.usePluginId());
-}
-
-/**
- * This plugin's client for a resolved connection origin: "remote" reaches the
- * desktop app's connected remote server, anything else is usePluginApi's.
- */
-export function usePluginApiFor(origin: unknown): PluginApiClient {
-  const bridge = requireHost();
-  return bridge.getApiFor(bridge.usePluginId(), origin);
 }
 
 /**
