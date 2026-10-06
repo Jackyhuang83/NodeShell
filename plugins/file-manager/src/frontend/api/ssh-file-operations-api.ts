@@ -4,13 +4,8 @@ import { asHttpError } from "../lib/http-error";
 import {
   handleApiError,
   getFileManagerApiForSession,
-  setSessionOrigin,
-  clearSessionOrigin,
 } from "./client";
-import {
-  createFrontendLogger,
-  resolveConnectionOrigin,
-} from "@termix/plugin-sdk/ui";
+import { createFrontendLogger } from "@termix/plugin-sdk/ui";
 import type { FileItem, SSHHost } from "../host-types";
 import { getCachedFileList } from "../lib/file-list-request-cache";
 import {
@@ -83,8 +78,6 @@ export async function connectSSH(
   sessionId: string,
   config: {
     hostId?: number;
-    /** Names the host across a sync pair; hostId only names it locally. */
-    syncId?: string | null;
     ip: string;
     port: number;
     username: string;
@@ -156,8 +149,6 @@ export async function disconnectSSH(
     return response.data;
   } catch (error) {
     handleApiError(error, "disconnect SSH");
-  } finally {
-    clearSessionOrigin(sessionId);
   }
 }
 
@@ -910,11 +901,6 @@ export async function ensureSSHSessionForHost(
   host: SSHHost,
 ): Promise<EnsureSSHSessionResult> {
   const sessionId = host.id.toString();
-  const origin = await resolveConnectionOrigin({
-    connectionOrigin: host.connectionOrigin,
-  });
-  setSessionOrigin(sessionId, origin);
-
   try {
     const status = await getSSHStatus(sessionId);
     if (status?.connected) {
@@ -927,7 +913,6 @@ export async function ensureSSHSessionForHost(
   try {
     const result = await connectSSH(sessionId, {
       hostId: host.id,
-      syncId: host.syncId ?? null,
       ip: host.ip,
       port: host.port,
       username: host.username,
