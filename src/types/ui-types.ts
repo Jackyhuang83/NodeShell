@@ -4,9 +4,7 @@ import type {
   HostTerminalConfig,
   SSHAuthType,
 } from "./index.js";
-import type { HostAuthOverrides } from "./auth-protocols.js";
 import type { DefaultOverrides } from "./host-defaults.js";
-import type { QuickConnectLogin } from "@termix/plugin-sdk/frontend";
 
 export type Host = {
   id: string;
@@ -31,7 +29,6 @@ export type Host = {
   lastAccess: string;
   tags?: string[];
   authType: SSHAuthType;
-  shareSshAuth?: boolean;
   credentialId?: string;
   overrideCredentialUsername?: boolean;
   password?: string;
@@ -45,18 +42,11 @@ export type Host = {
   keyType?: string;
   notes?: string;
   pin?: boolean;
-  /** Quick connect only: core can save this host as-is. */
-  quickConnectSavable?: boolean;
-  /** A Quick Connect host's plugin protocol login, never saved. */
-  quickConnectLogin?: QuickConnectLogin;
   sortOrder?: number | null;
 
-  /** Stable identity across a desktop/server sync pair. */
-  syncId?: string | null;
   terminalConfig?: HostTerminalConfig;
   sshOptions?: HostSshOptions;
 
-  connectionOrigin?: "local" | "remote" | null;
   /** hostid is a legacy lowercase spelling still present in stored rows. */
   jumpHosts?: { hostId: string; hostid?: string }[];
   portKnockSequence?: {
@@ -82,21 +72,7 @@ export type Host = {
   defaultOverrides?: DefaultOverrides | null;
   forceKeyboardInteractive?: boolean;
 
-  isShared?: boolean;
-  authOverrides?: HostAuthOverrides<string>;
-  permissionLevel?: SharePermissionLevel;
-  sharedExpiresAt?: string;
-  ownerUsername?: string;
-  /**
-   * A read-only copy of a host shared with the account this desktop is
-   * linked to. It arrives through sync and is managed on the server.
-   */
-  sharedCopy?: boolean;
-  /** Desktop only: kept on this device, never synced to the server. */
-  localOnly?: boolean;
 };
-
-export type SharePermissionLevel = "connect" | "view" | "edit" | "manage";
 
 export type Credential = {
   id: string;
@@ -113,10 +89,6 @@ export type Credential = {
   pin?: boolean;
   sortOrder?: number | null;
   certPublicKey?: string;
-  /** Set when someone else owns this credential and shared it with you. */
-  isShared?: boolean;
-  ownerUsername?: string | null;
-  permissionLevel?: "use" | "manage";
 };
 
 export type HostFolder = {
@@ -127,7 +99,6 @@ export type HostFolder = {
   icon?: string;
   credentialId?: number | null;
   sortOrder?: number | null;
-  localOnly?: boolean;
 };
 
 /** Core's own tab types. Plugins register theirs at runtime. */
@@ -261,8 +232,6 @@ export type WorkspaceTabSnapshot = {
   /** Stable key within the saved tab list, not the live Tab.id (which is regenerated on every open). */
   slotId: string;
   type: TabType;
-  /** Set for host-bound tab types, resolved by Host.syncId on apply. */
-  hostSyncId?: string | null;
   /** Denormalized snapshot for display and graceful-skip messaging if the host is later deleted. */
   hostNameSnapshot?: string | null;
   label: string;
