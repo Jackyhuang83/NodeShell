@@ -14,7 +14,6 @@ export {
   PLUGIN_API_VERSION,
   isApiCompatible,
   isTermixCompatible,
-  SYSTEM_ROLE_NAMES,
   RESERVED_PERMISSION_PREFIXES,
   qualifyPermission,
 } from "@termix/plugin-sdk/manifest";
@@ -28,7 +27,6 @@ export type {
   PluginActionContribution,
   PluginActionSlot,
   PluginPermissionContribution,
-  SystemRoleName,
   PluginServiceProvide,
   PluginServiceRequire,
   PluginSecretProvide,
