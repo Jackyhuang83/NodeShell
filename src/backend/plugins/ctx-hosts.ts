@@ -136,11 +136,9 @@ export function toRecord(
   pluginSettings: Record<string, unknown>,
 ): PluginHostRecord {
   const id = Number(host.id);
-  const origin = host.connectionOrigin;
   return {
     id,
     userId: String(host.userId),
-    syncId: (host.syncId as string | null) ?? null,
     name: (host.name as string | null) ?? null,
     ip: String(host.ip ?? ""),
     port: asNumber(host.port) ?? 22,
@@ -159,11 +157,9 @@ export function toRecord(
     sshPort: asNumber(host.sshPort),
     statusCheckEnabled: asFlag(host.statusCheckEnabled, true),
     statusCheckInterval: asNumber(host.statusCheckInterval),
-    connectionOrigin: origin === "local" || origin === "remote" ? origin : null,
     sshOptions: hostTerminalExport(host).sshOptions,
     pluginSettings,
     status: Number.isInteger(id) ? hostStatusService.get(id) : null,
-    localOnly: asFlag(host.localOnly, false),
     createdAt: (host.createdAt as string | null) ?? null,
     updatedAt: (host.updatedAt as string | null) ?? null,
   };
