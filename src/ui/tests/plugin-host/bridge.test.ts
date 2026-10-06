@@ -12,7 +12,9 @@ describe("toHostRecord", () => {
       parentHostId: 3,
       jumpHosts: [{ hostId: 2 }],
       pluginSettings: { docker: { enableDocker: true } },
-      authOverrides: { ssh: { required: true, ownerAuthShared: false } },
+      protocolAuth: {
+        ssh: { authType: "direct", username: "root", hasPassword: true },
+      },
       password: "secret",
       terminalConfig: { fontSize: 14 },
       enableDocker: true,
@@ -24,7 +26,9 @@ describe("toHostRecord", () => {
       parentHostId: "3",
       jumpHosts: [{ hostId: 2 }],
       pluginSettings: { docker: { enableDocker: true } },
-      authOverrides: { ssh: { required: true, ownerAuthShared: false } },
+      protocolAuth: {
+        ssh: { authType: "direct", username: "root", hasPassword: true },
+      },
     });
     const loose = record as unknown as Record<string, unknown>;
     expect(loose).not.toHaveProperty("password");
