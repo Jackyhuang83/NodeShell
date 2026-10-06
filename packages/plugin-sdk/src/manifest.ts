@@ -471,19 +471,6 @@ export const CORE_KEYBINDING_ACTIONS: readonly string[] = [
   "reconnectSession",
 ];
 
-/**
- * How a desktop linked to a server treats this plugin.
- * - "mirror": follows the server, installed and switched on or off with it.
- * - "local": each desktop decides for itself (a serial port is local).
- * - "server": only makes sense on a server, never runs on a linked desktop.
- */
-export type PluginDesktopMode = "mirror" | "local" | "server";
-export const PLUGIN_DESKTOP_MODES: readonly PluginDesktopMode[] = [
-  "mirror",
-  "local",
-  "server",
-];
-
 export interface PluginHttpContribution {
   /**
    * Old URLs something outside Termix still calls (a webhook a third party
@@ -549,8 +536,6 @@ export interface PluginManifest {
    * to locate its compiled binary.
    */
   nativeDependencies?: string[];
-  /** How a linked desktop treats this plugin. Defaults to "mirror". */
-  desktop?: PluginDesktopMode;
 }
 
 export const DEFAULT_BACKEND_ENTRY = "dist/backend.js";
@@ -585,7 +570,6 @@ const ALLOWED_TOP_LEVEL = new Set([
   "locales",
   "platforms",
   "nativeDependencies",
-  "desktop",
 ]);
 
 const ALLOWED_CONTRIBUTES = new Set([
@@ -740,14 +724,6 @@ export function validateManifest(manifest: unknown): string[] {
   validateCapabilities(m.capabilities, errors);
   validatePlatforms(m.platforms, errors);
   validateNativeDependencies(m.nativeDependencies, errors);
-  if (
-    m.desktop !== undefined &&
-    !PLUGIN_DESKTOP_MODES.includes(m.desktop as PluginDesktopMode)
-  ) {
-    errors.push(
-      `Field "desktop" must be one of: ${PLUGIN_DESKTOP_MODES.join(", ")}`,
-    );
-  }
   validateDependencyMap(m.dependencies, "dependencies", errors);
   validateDependencyMap(m.optionalDependencies, "optionalDependencies", errors);
   validateProvides(m.provides, errors);
