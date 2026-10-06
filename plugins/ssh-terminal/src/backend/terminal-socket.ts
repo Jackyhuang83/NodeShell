@@ -524,7 +524,6 @@ export function createTerminalSocket(deps: TerminalSocketDeps) {
               if (typeof data !== "string") break;
               const inputData = data;
               if (currentSessionId) {
-                sessionManager.bufferInput(currentSessionId, inputData);
               }
               const inputStream =
                 sessionManager.getSession(currentSessionId)?.sshStream ??
@@ -1440,8 +1439,6 @@ export function createTerminalSocket(deps: TerminalSocketDeps) {
 
           const hostDisplayName = `${username}@${ip}:${port}`;
           const tabInstanceId = hostConfig.instanceId;
-          // The recordings.writer provider decides per host and user.
-          const sessionLoggingEnabled = true;
           currentSessionId = sessionManager.createSession(
             userId,
             id,
@@ -1449,7 +1446,6 @@ export function createTerminalSocket(deps: TerminalSocketDeps) {
             data.cols,
             data.rows,
             tabInstanceId,
-            sessionLoggingEnabled,
           );
 
           // If createSession returned an existing live session (duplicate tabInstanceId),
