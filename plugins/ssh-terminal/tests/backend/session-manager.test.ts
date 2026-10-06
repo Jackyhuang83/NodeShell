@@ -1,29 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import {
-  TerminalSessionManager,
-  isMessageAllowedForParticipant,
-} from "../../src/backend/session-manager.js";
-import type { RecordingSink } from "../../src/backend/services.js";
-
-// A recordings.writer provider that keeps what it was given.
-const appends = vi.fn<(chunk: string) => Promise<void>>();
-const persists = vi.fn<RecordingSink["persist"]>();
-const discards = vi.fn();
-const opens = vi.fn();
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { TerminalSessionManager } from "../../src/backend/session-manager.js";
 
 const log = { info: vi.fn(), success: vi.fn(), warn: vi.fn(), error: vi.fn() };
-const sessionManager = new TerminalSessionManager({
-  log,
-  getTimeoutMinutes: () => 30,
-  getRecordings: () => ({
-    open: async (meta) => {
-      opens(meta);
-      return { append: appends, persist: persists, discard: discards };
-    },
-  }),
-});
 
-// Minimal fake WebSocket - only the surface session-manager touches.
+function manager(timeoutMinutes = 30) {
+  return new TerminalSessionManager({
+    log,
+    getTimeoutMinutes: () => timeoutMinutes,
+  });
+}
+
 function makeFakeWs(readyState = 1 /* OPEN */) {
   return {
     readyState,
@@ -32,553 +18,124 @@ function makeFakeWs(readyState = 1 /* OPEN */) {
     terminate: vi.fn(),
   } as unknown as import("ws").WebSocket;
 }
-const WS_OPEN = 1;
-const WS_CLOSED = 3;
 
-describe("TerminalSessionManager - session logging", () => {
-  beforeEach(() => {
+function connect(
+  sessionManager: TerminalSessionManager,
+  tabInstanceId = "tab-1",
+): string {
+  const id = sessionManager.createSession(
+    "owner-1",
+    1,
+    "host",
+    80,
+    24,
+    tabInstanceId,
+  );
+  sessionManager.setSSHState(
+    id,
+    { end: vi.fn() } as never,
+    { destroyed: false, end: vi.fn(), write: vi.fn() } as never,
+  );
+  return id;
+}
+
+describe("TerminalSessionManager - owner sessions", () => {
+  const managers: TerminalSessionManager[] = [];
+
+  afterEach(() => {
+    for (const item of managers.splice(0)) item.destroyAll();
+    vi.useRealTimers();
     vi.clearAllMocks();
-    appends.mockResolvedValue(undefined);
-    persists.mockResolvedValue(undefined);
   });
 
-  it("createSession stores sessionLoggingEnabled=true by default", () => {
-    const id = sessionManager.createSession("u1", 1, "host", 80, 24);
-    const session = sessionManager.getSession(id);
-    expect(session?.sessionLoggingEnabled).toBe(true);
-    sessionManager.destroySession(id);
+  it("creates and lists only the owner's sessions", () => {
+    const item = manager();
+    managers.push(item);
+    const id = item.createSession("owner-1", 1, "host", 80, 24);
+
+    expect(item.getSession(id)?.userId).toBe("owner-1");
+    expect(item.getUserSessions("owner-1").map((s) => s.id)).toEqual([id]);
+    expect(item.getUserSessions("other")).toEqual([]);
   });
 
-  it("createSession stores sessionLoggingEnabled=false when passed", () => {
-    const id = sessionManager.createSession(
-      "u1",
-      1,
-      "host",
-      80,
-      24,
-      undefined,
-      false,
-    );
-    const session = sessionManager.getSession(id);
-    expect(session?.sessionLoggingEnabled).toBe(false);
-    sessionManager.destroySession(id);
-  });
-
-  it("does not record when sessionLoggingEnabled=false", async () => {
-    const id = sessionManager.createSession(
-      "u1",
-      1,
-      "host",
-      80,
-      24,
-      undefined,
-      false,
-    );
-    sessionManager.bufferOutput(id, "some output");
-    sessionManager.destroySession(id);
-    await new Promise((r) => setTimeout(r, 20));
-    expect(opens).not.toHaveBeenCalled();
-    expect(appends).not.toHaveBeenCalled();
-  });
-
-  it("hands the recording to the recordings service in one batch, then persists it", async () => {
-    const id = sessionManager.createSession(
-      "u1",
-      1,
-      "host",
-      80,
-      24,
-      undefined,
-      true,
-    );
-    sessionManager.bufferOutput(id, "terminal output data");
-    sessionManager.bufferOutput(id, "more output");
-    sessionManager.bufferInput(id, "ls\r");
-    sessionManager.destroySession(id);
-    await new Promise((r) => setTimeout(r, 20));
-    // One write for the whole burst, never one per chunk (issue #1049).
-    expect(appends).toHaveBeenCalledOnce();
-    const chunk = appends.mock.calls[0][0];
-    expect(chunk.split("\n")[0]).toContain('"version":2');
-    expect(chunk).toContain("terminal output data");
-    expect(chunk).toContain("more output");
-    expect(persists).toHaveBeenCalledOnce();
-    expect(opens).toHaveBeenCalledWith(
-      expect.objectContaining({ hostId: 1, userId: "u1", protocol: "ssh" }),
-    );
-  });
-
-  it("does not write log file when buffer is empty", async () => {
-    const id = sessionManager.createSession(
-      "u1",
-      1,
-      "host",
-      80,
-      24,
-      undefined,
-      true,
-    );
-    sessionManager.destroySession(id);
-    await new Promise((r) => setTimeout(r, 20));
-    expect(appends).not.toHaveBeenCalled();
-    expect(discards).toHaveBeenCalledOnce();
-  });
-
-  it("records nothing when no recordings service is running", async () => {
-    const withoutRecordings = new TerminalSessionManager({
-      log,
-      getTimeoutMinutes: () => 30,
-      getRecordings: () => null,
-    });
-    const id = withoutRecordings.createSession("u1", 1, "host", 80, 24);
-    expect(withoutRecordings.getSession(id)?.sessionLoggingEnabled).toBe(false);
-    withoutRecordings.bufferOutput(id, "output");
-    withoutRecordings.destroySession(id);
-    await new Promise((r) => setTimeout(r, 20));
-    expect(appends).not.toHaveBeenCalled();
-    withoutRecordings.destroyAll();
-  });
-
-  it("bufferOutput trims old data when exceeding 512KB", () => {
-    const id = sessionManager.createSession(
-      "u1",
-      1,
-      "host",
-      80,
-      24,
-      undefined,
-      false,
-    );
-    const chunk = "x".repeat(300 * 1024);
-    sessionManager.bufferOutput(id, chunk);
-    sessionManager.bufferOutput(id, chunk);
-    const session = sessionManager.getSession(id);
-    expect(session!.outputBufferBytes).toBeLessThanOrEqual(512 * 1024);
-    sessionManager.destroySession(id);
-  });
-});
-
-describe("TerminalSessionManager - multiplayer participants", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    appends.mockResolvedValue(undefined);
-    persists.mockResolvedValue(undefined);
-  });
-
-  function createConnectedSession(): string {
-    const id = sessionManager.createSession(
-      "owner-1",
-      1,
-      "host",
-      80,
-      24,
-      undefined,
-      false,
-    );
-    // Mark connected without a real ssh2 stream - only isConnected is read
-    // by attachWs/joinAsParticipant.
-    const session = sessionManager.getSession(id)!;
-    session.isConnected = true;
-    return id;
-  }
-
-  it("sends the presenter dimensions before a participant replays output", () => {
-    const id = createConnectedSession();
-    const session = sessionManager.getSession(id)!;
-    session.cols = 132;
-    session.rows = 40;
+  it("attaches the Owner WebSocket and broadcasts only to it", () => {
+    const item = manager();
+    managers.push(item);
+    const id = connect(item);
     const ws = makeFakeWs();
-    sessionManager.joinAsParticipant(id, ws, {
-      userId: "viewer",
-      permissionLevel: "read-only",
-    });
-    expect(JSON.parse(vi.mocked(ws.send).mock.calls[0][0] as string)).toEqual({
-      type: "resized",
-      cols: 132,
-      rows: 40,
-    });
-    sessionManager.destroySession(id);
-  });
 
-  it("broadcasts later size changes and retains them for new participants", () => {
-    const id = createConnectedSession();
-    const owner = makeFakeWs();
-    const viewer = makeFakeWs();
-    sessionManager.attachWs(id, "owner-1", owner);
-    sessionManager.joinAsParticipant(id, viewer, {
-      userId: "viewer",
-      permissionLevel: "read-only",
-    });
-    sessionManager.resizeSession(id, 100, 35);
-    const message = JSON.stringify({ type: "resized", cols: 100, rows: 35 });
-    expect(owner.send).toHaveBeenCalledWith(message);
-    expect(viewer.send).toHaveBeenCalledWith(message);
-    const newcomer = makeFakeWs();
-    sessionManager.joinAsParticipant(id, newcomer, {
-      userId: null,
-      permissionLevel: "read-only",
-    });
-    expect(vi.mocked(newcomer.send).mock.calls[0][0]).toBe(message);
-    sessionManager.destroySession(id);
-  });
+    expect(item.attachWs(id, "owner-1", ws, "tab-1")).not.toBeNull();
+    item.broadcast(id, { type: "data", data: "hello" });
 
-  it("joinAsParticipant adds a participant without evicting the owner", () => {
-    const id = createConnectedSession();
-    const ownerWs = makeFakeWs();
-    sessionManager.attachWs(id, "owner-1", ownerWs);
-
-    const guestWs = makeFakeWs();
-    const session = sessionManager.joinAsParticipant(id, guestWs, {
-      userId: null,
-      permissionLevel: "read-only",
-      guestLabel: "Guest",
-    });
-
-    expect(session).not.toBeNull();
-    expect(session!.participants.size).toBe(2);
-    const ownerParticipant = sessionManager.getParticipantForWs(
-      session!,
-      ownerWs,
-    );
-    expect(ownerParticipant?.isOwner).toBe(true);
-    // The join is announced to everyone already in the session - and that is
-    // the only unsolicited message the owner receives.
-    expect(ownerWs.send).toHaveBeenCalledTimes(1);
-    const announced = JSON.parse(
-      (ownerWs.send as ReturnType<typeof vi.fn>).mock.calls[0][0] as string,
-    );
-    expect(announced.type).toBe("participants");
-    expect(announced.participants).toHaveLength(2);
-
-    sessionManager.destroySession(id);
-  });
-
-  it("keeps the roster from link guests and lists them per share", () => {
-    const id = createConnectedSession();
-    const ownerWs = makeFakeWs();
-    sessionManager.attachWs(id, "owner-1", ownerWs);
-
-    const guestWs = makeFakeWs();
-    sessionManager.joinAsParticipant(id, guestWs, {
-      userId: null,
-      permissionLevel: "read-only",
-      guestLabel: "Guest 1",
-      shareId: "share-a",
-    });
-    const memberWs = makeFakeWs();
-    sessionManager.joinAsParticipant(id, memberWs, {
-      userId: "alice",
-      permissionLevel: "read-only",
-      shareId: "share-a",
-    });
-
-    const sentTypes = (ws: ReturnType<typeof makeFakeWs>) =>
-      (ws.send as ReturnType<typeof vi.fn>).mock.calls.map(
-        (call) => JSON.parse(call[0] as string).type,
-      );
-    expect(sentTypes(guestWs)).not.toContain("participants");
-    expect(sentTypes(memberWs)).toContain("participants");
-    expect(sessionManager.listShareGuests(id, "share-a")).toEqual([
-      { label: "Guest 1" },
-    ]);
-    expect(sessionManager.listShareGuests(id, "share-b")).toEqual([]);
-
-    sessionManager.destroySession(id);
-  });
-
-  it("setRoomShareControl makes only the controller read-write and never touches the owner", () => {
-    const id = createConnectedSession();
-    const ownerWs = makeFakeWs();
-    sessionManager.attachWs(id, "owner-1", ownerWs);
-    const aliceWs = makeFakeWs();
-    const bobWs = makeFakeWs();
-    const session = sessionManager.joinAsParticipant(id, aliceWs, {
-      userId: "alice",
-      permissionLevel: "read-only",
-      shareId: "stage-share",
-    })!;
-    sessionManager.joinAsParticipant(id, bobWs, {
-      userId: "bob",
-      permissionLevel: "read-only",
-      shareId: "stage-share",
-    });
-
-    sessionManager.setRoomShareControl(id, "stage-share", "alice");
-    expect(
-      sessionManager.getParticipantForWs(session, aliceWs)?.permissionLevel,
-    ).toBe("read-write");
-    expect(
-      sessionManager.getParticipantForWs(session, bobWs)?.permissionLevel,
-    ).toBe("read-only");
-    expect(
-      sessionManager.getParticipantForWs(session, ownerWs)?.permissionLevel,
-    ).toBe("read-write");
-
-    sessionManager.setRoomShareControl(id, "stage-share", null);
-    expect(
-      sessionManager.getParticipantForWs(session, aliceWs)?.permissionLevel,
-    ).toBe("read-only");
-
-    sessionManager.destroySession(id);
-  });
-
-  it("disconnectShareParticipants revokes only the selected share participants", () => {
-    const id = createConnectedSession();
-    const ownerWs = makeFakeWs();
-    const aliceWs = makeFakeWs();
-    const guestWs = makeFakeWs();
-    sessionManager.attachWs(id, "owner-1", ownerWs);
-    const session = sessionManager.joinAsParticipant(id, aliceWs, {
-      userId: "alice",
-      permissionLevel: "read-only",
-      shareId: "stage-share",
-    })!;
-    sessionManager.joinAsParticipant(id, guestWs, {
-      userId: null,
-      permissionLevel: "read-only",
-      shareId: "stage-share",
-    });
-
-    expect(
-      sessionManager.disconnectShareParticipants(id, "stage-share", {
-        userId: "alice",
-        reason: "Removed",
-      }),
-    ).toBe(1);
-    expect(sessionManager.getParticipantForWs(session, aliceWs)).toBeNull();
-    expect(sessionManager.getParticipantForWs(session, guestWs)).not.toBeNull();
-    expect(sessionManager.getParticipantForWs(session, ownerWs)?.isOwner).toBe(
-      true,
-    );
-    expect(aliceWs.close).toHaveBeenCalledWith(1008, "Removed");
-
-    sessionManager.destroySession(id);
-  });
-
-  it("joinAsParticipant returns null for a nonexistent or unconnected session", () => {
-    expect(
-      sessionManager.joinAsParticipant("does-not-exist", makeFakeWs(), {
-        userId: null,
-        permissionLevel: "read-only",
-      }),
-    ).toBeNull();
-  });
-
-  it("broadcast sends to all OPEN participant sockets and skips CLOSED ones", () => {
-    const id = createConnectedSession();
-    const ownerWs = makeFakeWs(WS_OPEN);
-    sessionManager.attachWs(id, "owner-1", ownerWs);
-
-    const openGuestWs = makeFakeWs(WS_OPEN);
-    const closedGuestWs = makeFakeWs(WS_CLOSED);
-    sessionManager.joinAsParticipant(id, openGuestWs, {
-      userId: null,
-      permissionLevel: "read-only",
-    });
-    sessionManager.joinAsParticipant(id, closedGuestWs, {
-      userId: null,
-      permissionLevel: "read-only",
-    });
-
-    sessionManager.broadcast(id, { type: "data", data: "hello" });
-
-    expect(ownerWs.send).toHaveBeenCalledWith(
+    expect(ws.send).toHaveBeenCalledWith(
       JSON.stringify({ type: "data", data: "hello" }),
     );
-    expect(openGuestWs.send).toHaveBeenCalledWith(
-      JSON.stringify({ type: "data", data: "hello" }),
+  });
+
+  it("rejects attaching a different account", () => {
+    const item = manager();
+    managers.push(item);
+    const id = connect(item);
+
+    expect(item.attachWs(id, "other", makeFakeWs(), "tab-1")).toBeNull();
+  });
+
+  it("takes over the previous Owner socket for the same tab", () => {
+    const item = manager();
+    managers.push(item);
+    const id = connect(item);
+    const first = makeFakeWs();
+    const second = makeFakeWs();
+
+    expect(item.attachWs(id, "owner-1", first, "tab-1")).not.toBeNull();
+    expect(item.attachWs(id, "owner-1", second, "tab-1")).not.toBeNull();
+
+    expect(first.send).toHaveBeenCalledWith(
+      expect.stringContaining("sessionTakenOver"),
     );
-    expect(closedGuestWs.send).not.toHaveBeenCalled();
-
-    sessionManager.destroySession(id);
+    expect(item.getSession(id)?.ownerWs).toBe(second);
   });
 
-  it("broadcast does not throw if a socket's send throws", () => {
-    const id = createConnectedSession();
-    const throwingWs = makeFakeWs(WS_OPEN);
-    (throwingWs.send as ReturnType<typeof vi.fn>).mockImplementation(() => {
-      throw new Error("send failed");
-    });
-    sessionManager.attachWs(id, "owner-1", throwingWs);
-
-    expect(() =>
-      sessionManager.broadcast(id, { type: "data", data: "x" }),
-    ).not.toThrow();
-
-    sessionManager.destroySession(id);
-  });
-
-  it("broadcast is a no-op for a nonexistent session", () => {
-    expect(() =>
-      sessionManager.broadcast("does-not-exist", { type: "data" }),
-    ).not.toThrow();
-  });
-
-  it("owner detach arms the idle timeout (existing behavior)", () => {
+  it("detaches without destroying the live SSH session", () => {
     vi.useFakeTimers();
-    try {
-      const id = createConnectedSession();
-      const ownerWs = makeFakeWs();
-      sessionManager.attachWs(id, "owner-1", ownerWs);
+    const item = manager(30);
+    managers.push(item);
+    const id = connect(item);
+    item.attachWs(id, "owner-1", makeFakeWs(), "tab-1");
 
-      sessionManager.detachWs(id);
-      const session = sessionManager.getSession(id);
-      expect(session?.detachTimeout).not.toBeNull();
-      expect(session?.lastDetachedAt).not.toBeNull();
+    item.detachWs(id);
 
-      sessionManager.destroySession(id);
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(item.getSession(id)?.ownerWs).toBeNull();
+    expect(item.getSession(id)?.lastDetachedAt).not.toBeNull();
+    expect(item.getSession(id)?.detachTimeout).not.toBeNull();
   });
 
-  it("removeParticipant on a non-owner does not arm a timeout or destroy the session", () => {
-    const id = createConnectedSession();
-    const ownerWs = makeFakeWs();
-    sessionManager.attachWs(id, "owner-1", ownerWs);
+  it("keeps a bounded replay buffer", () => {
+    const item = manager();
+    managers.push(item);
+    const id = item.createSession("owner-1", 1, "host", 80, 24);
+    const chunk = "x".repeat(300 * 1024);
 
-    const guestWs = makeFakeWs();
-    sessionManager.joinAsParticipant(id, guestWs, {
-      userId: null,
-      permissionLevel: "read-write",
-    });
+    item.bufferOutput(id, chunk);
+    item.bufferOutput(id, chunk);
 
-    sessionManager.removeParticipant(id, guestWs);
-
-    const session = sessionManager.getSession(id);
-    expect(session).not.toBeNull();
-    expect(session?.detachTimeout).toBeNull();
-    expect(session?.participants.size).toBe(1);
-    expect(sessionManager.getParticipantForWs(session!, guestWs)).toBeNull();
-    expect(
-      JSON.parse(
-        (ownerWs.send as ReturnType<typeof vi.fn>).mock.lastCall![0] as string,
-      ),
-    ).toMatchObject({
-      type: "participants",
-      participants: [{ isOwner: true }],
-    });
-
-    sessionManager.destroySession(id);
-  });
-
-  it("removeParticipant is a no-op when the ws belongs to the owner", () => {
-    const id = createConnectedSession();
-    const ownerWs = makeFakeWs();
-    sessionManager.attachWs(id, "owner-1", ownerWs);
-
-    sessionManager.removeParticipant(id, ownerWs);
-
-    const session = sessionManager.getSession(id);
-    expect(session?.participants.size).toBe(1);
-    expect(sessionManager.getParticipantForWs(session!, ownerWs)?.isOwner).toBe(
-      true,
+    expect(item.getSession(id)!.outputBufferBytes).toBeLessThanOrEqual(
+      512 * 1024,
     );
-
-    sessionManager.destroySession(id);
   });
 
-  it("destroySession cleans up all participants, not just the owner", () => {
-    const id = createConnectedSession();
-    const ownerWs = makeFakeWs();
-    sessionManager.attachWs(id, "owner-1", ownerWs);
+  it("updates terminal dimensions and notifies the attached Owner", () => {
+    const item = manager();
+    managers.push(item);
+    const id = connect(item);
+    const ws = makeFakeWs();
+    item.attachWs(id, "owner-1", ws, "tab-1");
 
-    const guestWs = makeFakeWs();
-    sessionManager.joinAsParticipant(id, guestWs, {
-      userId: null,
-      permissionLevel: "read-only",
-    });
+    item.resizeSession(id, 120, 40);
 
-    sessionManager.destroySession(id);
-
-    expect(guestWs.send).toHaveBeenCalled();
-    expect(sessionManager.getSession(id)).toBeNull();
-  });
-
-  it("ownerEndSession notifies non-owner participants and destroys the session", () => {
-    const id = createConnectedSession();
-    const ownerWs = makeFakeWs();
-    sessionManager.attachWs(id, "owner-1", ownerWs);
-
-    const guestWs = makeFakeWs();
-    sessionManager.joinAsParticipant(id, guestWs, {
-      userId: null,
-      permissionLevel: "read-write",
-    });
-
-    sessionManager.ownerEndSession(id, "owner ended the session");
-
-    expect(guestWs.send).toHaveBeenCalledWith(
-      JSON.stringify({
-        type: "sessionTerminatedByOwner",
-        reason: "owner ended the session",
-      }),
+    expect(item.getSession(id)).toMatchObject({ cols: 120, rows: 40 });
+    expect(ws.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "resized", cols: 120, rows: 40 }),
     );
-    expect(sessionManager.getSession(id)).toBeNull();
-  });
-});
-
-describe("isMessageAllowedForParticipant", () => {
-  it("allows any message type for the owner or when there is no participant", () => {
-    expect(isMessageAllowedForParticipant(null, "connectToHost")).toBe(true);
-    expect(
-      isMessageAllowedForParticipant(
-        { isOwner: true, permissionLevel: "read-write" },
-        "resize",
-      ),
-    ).toBe(true);
-  });
-
-  it("drops input from a read-only participant", () => {
-    expect(
-      isMessageAllowedForParticipant(
-        { isOwner: false, permissionLevel: "read-only" },
-        "input",
-      ),
-    ).toBe(false);
-  });
-
-  it("allows input from a read-write non-owner participant", () => {
-    expect(
-      isMessageAllowedForParticipant(
-        { isOwner: false, permissionLevel: "read-write" },
-        "input",
-      ),
-    ).toBe(true);
-  });
-
-  it("allows ping and disconnect for any non-owner participant", () => {
-    expect(
-      isMessageAllowedForParticipant(
-        { isOwner: false, permissionLevel: "read-only" },
-        "ping",
-      ),
-    ).toBe(true);
-    expect(
-      isMessageAllowedForParticipant(
-        { isOwner: false, permissionLevel: "read-only" },
-        "disconnect",
-      ),
-    ).toBe(true);
-  });
-
-  it("blocks resize and auth/tmux message types for non-owner participants regardless of permission level", () => {
-    for (const type of [
-      "resize",
-      "totp_response",
-      "password_response",
-      "tmux_attach",
-      "tmux_detach",
-      "get_cwd",
-      "vault_start_auth",
-      "opkssh_start_auth",
-    ]) {
-      expect(
-        isMessageAllowedForParticipant(
-          { isOwner: false, permissionLevel: "read-write" },
-          type,
-        ),
-      ).toBe(false);
-    }
   });
 });
