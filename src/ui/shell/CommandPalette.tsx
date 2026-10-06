@@ -26,7 +26,6 @@ import {
 } from "lucide-react";
 import { getRecentActivity, type RecentActivityItem } from "@/main-axios";
 import type { Host, TabType, Tab } from "@/types/ui-types";
-import { canEditHost } from "@/sidebar/host-permissions";
 import { RAIL_UTILITY_ITEMS, useRailItems } from "@/sidebar/rail-items";
 import {
   defaultConnectAction,
@@ -561,8 +560,7 @@ export function CommandPalette({
                                 </button>
                               );
                             })}
-                            {canEditHost(host) && (
-                              <>
+                            <>
                                 <div className="w-px h-3.5 bg-border/60 mx-0.5 shrink-0" />
                                 <button
                                   title={t("hosts.editHost")}
@@ -586,7 +584,6 @@ export function CommandPalette({
                                   <Pencil className="size-3.5" />
                                 </button>
                               </>
-                            )}
                           </div>
                         </CommandItem>
                       ))}
