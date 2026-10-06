@@ -55,7 +55,6 @@ const failedVersions = new Map<string, string | null>();
 let queue: Promise<void> = Promise.resolve();
 let deps: PluginLoaderDeps | null = null;
 let started = false;
-let guestMode = false;
 
 function assetUrl(summary: PluginSummary, file: string): string {
   const version = summary.assetVersion
@@ -214,7 +213,6 @@ async function activate(summary: PluginSummary): Promise<void> {
       summary.id,
       manifestFor(summary),
       summary.contributes,
-      { guest: guestMode },
     );
     // A plugin whose activate never settles would hold up every plugin
     // queued after it, so it fails instead.
@@ -410,47 +408,8 @@ function onFocus() {
   void syncPlugins();
 }
 
-async function fetchGuestPlugins(): Promise<PluginSummary[]> {
-  const response = await fetch(getBackendUrl("/plugins/public"));
-  if (!response.ok) return [];
-  const body = (await response.json()) as unknown;
-  return Array.isArray(body) ? (body as PluginSummary[]) : [];
-}
-
-let guestViewsRequest: Promise<string[]> | null = null;
-
-/**
- * The `?view=` names enabled guest plugins serve to anonymous pages, so the
- * entry point can tell a guest link from a signed-in full-screen view
- * without knowing any plugin.
- */
-export function fetchGuestViews(): Promise<string[]> {
-  guestViewsRequest ??= fetchGuestPlugins()
-    .then((plugins) =>
-      plugins.flatMap(
-        (plugin) =>
-          (plugin.contributes as { guestViews?: string[] } | undefined)
-            ?.guestViews ?? [],
-      ),
-    )
-    .catch(() => []);
-  return guestViewsRequest;
-}
-
-/**
- * Starts the runtime. Idempotent. `guest` is for anonymous pages (shared
- * session links): only plugins declaring contributes.guest load, from the
- * public list, and nothing is refetched on focus.
- */
-export function startPluginRuntime(
-  options: { guest?: boolean } = {},
-): Promise<void> {
+export function startPluginRuntime(): Promise<void> {
   installPluginHostBridge();
-  if (options.guest) {
-    guestMode = true;
-    if (!deps) configurePluginLoader({ fetchPlugins: fetchGuestPlugins });
-    return syncPlugins();
-  }
   setPluginLocaleResolver((namespace, _language, file) => {
     const summary = getPluginRecord(namespace)?.summary;
     if (!summary) return Promise.resolve(null);
