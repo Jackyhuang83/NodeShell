@@ -64,7 +64,7 @@ export function buildLayoutTabSnapshots(
   const snapshots: WorkspaceTabSnapshot[] = capturable.map((tab) => ({
     slotId: slotIdByTabId.get(tab.id)!,
     type: tab.type,
-    hostSyncId: tab.host?.syncId ?? null,
+    hostId: tab.host?.id ?? null,
     hostNameSnapshot: tab.host?.name ?? null,
     label: tab.label,
     customLabel: tab.customLabel,
@@ -104,8 +104,8 @@ export function resolveLayoutTabTarget(
   | { kind: "host"; host: Host }
   | { kind: "skip" } {
   let host: Host | undefined;
-  if (snapshot.hostSyncId) {
-    host = allHosts.find((h) => h.syncId === snapshot.hostSyncId);
+  if (snapshot.hostId) {
+    host = allHosts.find((h) => h.id === snapshot.hostId);
     if (!host) return { kind: "skip" };
   }
 
