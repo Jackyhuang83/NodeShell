@@ -1826,8 +1826,6 @@ export interface RenderWithAppOptions {
   hosts?: Array<Record<string, unknown>>;
   /** The plugin's locales/en.json, loaded into its namespace. */
   locales?: Record<string, unknown>;
-  /** Render as an anonymous guest page. */
-  guest?: boolean;
   /** What app.tabs.getLayout returns until the plugin applies another. */
   layout?: import("./frontend.js").ShellLayout;
   /** Fire app.tabs.onReady after activation, as the shell does after login. */
