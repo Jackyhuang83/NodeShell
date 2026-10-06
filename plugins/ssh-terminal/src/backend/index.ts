@@ -6,16 +6,10 @@ import { registerTerminalRoutes } from "./routes.js";
 import {
   DEFAULT_TIMEOUT_MINUTES,
   TerminalSessionManager,
-  type TerminalSession,
 } from "./session-manager.js";
-import {
-  SESSION_GUESTS_KEY,
-  type LiveSessionInfo,
-  type LiveSessionsV1,
-  type RecordingsWriterV1,
-  type SessionGuestsV1,
-  type SessionSharingV1,
-  type TmuxSessionsV1,
+import type {
+  RecordingsWriterV1,
+  TmuxSessionsV1,
 } from "./services.js";
 import { ADMIN_KEYS } from "./settings.js";
 import { createTerminalSocket } from "./terminal-socket.js";
@@ -23,23 +17,6 @@ import {
   validateAdminSettings,
   validateUserSettings,
 } from "./settings-validation.js";
-
-function toInfo(session: TerminalSession): LiveSessionInfo {
-  return {
-    id: session.id,
-    userId: session.userId,
-    hostId: session.hostId,
-    hostName: session.hostName,
-    isConnected: session.isConnected,
-    createdAt: session.createdAt,
-    lastDetachedAt: session.lastDetachedAt,
-    tabInstanceId:
-      session.attachedTabInstanceId ?? session.tabInstanceId ?? null,
-    tmuxSessionName: session.tmuxSessionName,
-    cols: session.cols,
-    rows: session.rows,
-  };
-}
 
 /**
  * A service another plugin may or may not provide. The handle always exists;
@@ -87,14 +64,6 @@ export async function activate(ctx: PluginContext) {
     sessionManager,
     getTmux: () =>
       optionalService<TmuxSessionsV1>(ctx, "tmux.sessions", "detect"),
-    getSharing: () =>
-      optionalService<SessionSharingV1>(
-        ctx,
-        "sessions.sharing",
-        "authorizeJoin",
-      ),
-    getGuests: () =>
-      ctx.registry.consume<SessionGuestsV1>(SESSION_GUESTS_KEY) ?? null,
   });
 
   // NodeShell v0.1 has no anonymous terminal/session-sharing surface.
@@ -112,44 +81,6 @@ export async function activate(ctx: PluginContext) {
     log,
     sessionManager,
   });
-
-  const liveSessions: LiveSessionsV1 = {
-    getSession: (sessionId) => {
-      const session = sessionManager.getSession(sessionId);
-      return session ? toInfo(session) : null;
-    },
-    listForUser: (userId) => {
-      // A plugin caller only ever sees its actor's sessions; core calls this
-      // outside any actor, for the user its own route authenticated.
-      const actor = ctx.currentActor();
-      if (actor && actor !== userId) return [];
-      return sessionManager.getUserSessions(userId).map(toInfo);
-    },
-    ownerEndSession: (sessionId, reason) =>
-      sessionManager.ownerEndSession(sessionId, reason),
-    disconnectParticipants: (sessionId, shareId, options) =>
-      sessionManager.disconnectShareParticipants(sessionId, shareId, options),
-    listGuests: (sessionId, shareId) =>
-      sessionManager.listShareGuests(sessionId, shareId),
-    setRoomShareControl: (sessionId, shareId, controllerUserId) =>
-      sessionManager.setRoomShareControl(sessionId, shareId, controllerUserId),
-    subscribe: (sessionId, onData) => {
-      const session = sessionManager.getSession(sessionId);
-      if (!session) return () => {};
-      session.dataListeners.add(onData);
-      return () => session.dataListeners.delete(onData);
-    },
-    write: (sessionId, data) => {
-      const session = sessionManager.getSession(sessionId);
-      if (!session?.sshStream || session.sshStream.destroyed) return false;
-      sessionManager.bufferInput(sessionId, data);
-      session.sshStream.write(data);
-      return true;
-    },
-    idleTimeoutMinutes: () => timeoutMinutes,
-  };
-  // sessions.live is keyed by session type; remote desktop provides the others.
-  ctx.services.provide("sessions.live", liveSessions, { name: "ssh" });
 
   ctx.registry.provide(
     "ssh-terminal.hostImportNormalizer",
