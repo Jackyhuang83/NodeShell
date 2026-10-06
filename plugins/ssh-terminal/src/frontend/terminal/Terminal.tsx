@@ -147,7 +147,7 @@ interface SSHTerminalProps {
   onOpenTab?: (type: TabType) => void;
   /** False when this terminal sits in an unfocused split pane. */
   isFocusedPane?: boolean;
-  /** Fires when the backend reports the created session id (collab presenting). */
+  /** Fires when the backend reports the created session id. */
   onSessionReady?: (sessionId: string) => void;
 }
 
@@ -220,9 +220,7 @@ const TerminalInner = forwardRef<TerminalHandle, SSHTerminalProps>(
     // precedence over the configured font size, so it survives the periodic
     // option refreshes (keepalive/refit/reconnect) that would otherwise snap
     // the size back to config.fontSize.
-    const fontSizeStorageKey = getFontSizeStorageKey(
-      hostConfig.syncId ?? hostConfig.id,
-    );
+    const fontSizeStorageKey = getFontSizeStorageKey(hostConfig.id);
     const configuredFontSize = config.fontSize;
     const fontSizePersistenceRef = useRef({
       key: fontSizeStorageKey,
