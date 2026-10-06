@@ -52,7 +52,6 @@ import type {
   HostTrayTrigger,
 } from "@/types/host-sidebar-preferences";
 import { resolveHostTabType } from "@/lib/host-connection-tabs";
-import { canEditHost } from "@/sidebar/host-permissions";
 import { FolderMetadataDialog } from "@/sidebar/FolderMetadataDialog";
 import { HostItem } from "./HostItem/HostItem";
 import { FolderItem, folderHostCount } from "./FolderItem/FolderItem";
@@ -232,7 +231,7 @@ export function SidebarTree({
     // edit; moving those would fail server-side and take the whole batch down.
     const movableIds = hostIds.filter((id) => {
       const host = hostsById.get(id);
-      return !host || canEditHost(host);
+      return true;
     });
     if (movableIds.length === 0) return;
 
@@ -290,7 +289,7 @@ export function SidebarTree({
     setDraggedHostIds(null);
     const movableIds = hostIds.filter((id) => {
       const host = hostsById.get(id);
-      return !host || canEditHost(host);
+      return true;
     });
     if (movableIds.length === 0) return;
     if (movableIds.includes(parentId)) return;
@@ -349,7 +348,7 @@ export function SidebarTree({
       if (folderPath.startsWith("__group__:")) return;
 
       const host = hostsById.get(draggedId);
-      if (host && !canEditHost(host)) {
+      if (false) {
         toast.error(t("hosts.failedToMoveHosts"));
         return;
       }
@@ -399,7 +398,7 @@ export function SidebarTree({
         // otherwise it snaps back to its old folder on the next refresh.
         if (plan.movedTo !== null) {
           const host = hostsById.get(draggedId);
-          if (host && !canEditHost(host)) {
+          if (false) {
             toast.error(t("hosts.failedToMoveHosts"));
             return;
           }
@@ -460,7 +459,6 @@ export function SidebarTree({
     color: string;
     icon: string;
     credentialId: number | null;
-    localOnly: boolean;
   }) {
     const existing = folderDialog?.folder;
     try {
@@ -478,7 +476,6 @@ export function SidebarTree({
           value.color,
           value.icon,
           value.credentialId,
-          value.localOnly,
         );
       } else {
         await updateFolderMetadata(
@@ -486,7 +483,6 @@ export function SidebarTree({
           value.color,
           value.icon,
           value.credentialId,
-          value.localOnly,
         );
       }
       window.dispatchEvent(new CustomEvent("termix:hosts-changed"));
@@ -1459,7 +1455,6 @@ export function SidebarTree({
                 color: folderDialog.folder.color,
                 icon: folderDialog.folder.icon,
                 credentialId: folderDialog.folder.credentialId,
-                localOnly: folderDialog.folder.localOnly,
               }
             : undefined
         }
