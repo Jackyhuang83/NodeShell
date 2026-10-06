@@ -43,7 +43,7 @@ import {
   registerAction,
   registerSlotContribution,
 } from "@/shell/action-registry";
-import { pluginApiFor, pluginFetch, pluginWsUrl } from "@/lib/plugin-transport";
+import { pluginFetch, pluginWsUrl } from "@/lib/plugin-transport";
 import { registerPluginComponent } from "./component-registry";
 import type { LucideIcon } from "lucide-react";
 import { registerSshAuthEditor } from "./auth-registry";
@@ -488,17 +488,9 @@ export function createPluginApp(
       }
     },
     api: pluginHostBridge.getApi(pluginId),
-    apiFor: (origin) =>
-      pluginApiFor(
-        pluginId,
-        origin as never,
-        pluginHostBridge.getApi(pluginId) as never,
-      ) as unknown as TermixApp["api"],
     fetch: (path, init) => pluginFetch(pluginId, path, init),
-    wsUrl: (path, options) =>
-      pluginWsUrl(pluginId, path, options as never) as ReturnType<
-        TermixApp["wsUrl"]
-      >,
+    wsUrl: (path) =>
+      pluginWsUrl(pluginId, path) as ReturnType<TermixApp["wsUrl"]>,
 
     tabs: {
       ...tabsApi,
@@ -508,12 +500,6 @@ export function createPluginApp(
       closeTab: shell.closeTab,
       onChange: (listener) => track(tabsApi.onChange(listener)),
       onReady: (listener) => track(tabsApi.onReady(listener)),
-    },
-
-    desktop: {
-      available: false,
-      remoteServerUrl: async () => null,
-      onRemoteServerChange: () => () => {},
     },
 
     onSettingsChanged: (listener) => {
