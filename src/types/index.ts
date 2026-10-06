@@ -5,14 +5,8 @@ import type {
 } from "@termix/plugin-sdk/frontend";
 import type { Request } from "express";
 import type { RefObject } from "react";
-import type { HostAuthOverrides } from "./auth-protocols.js";
 import type { DefaultOverrides } from "./host-defaults.js";
 
-export type {
-  AuthOverrideProtocol,
-  HostAuthOverrideState,
-  HostAuthOverrides,
-} from "./auth-protocols.js";
 /**
  * Core's own SSH auth types, plus whatever a plugin registers through
  * ctx.auth (the owning plugin decides the name).
@@ -47,7 +41,6 @@ export type Host = {
   tags: string[];
   pin: boolean;
   authType: SSHAuthType;
-  shareSshAuth?: boolean;
   password?: string;
   key?: string;
   keyPassword?: string;
@@ -80,18 +73,10 @@ export type Host = {
   sshPort?: number;
   /** Each plugin protocol's login, secrets left out. */
   protocolAuth?: Record<string, HostProtocolAuthSummary>;
-  /**
-   * Stable identity across a desktop/server sync pair. `id` is an
-   * autoincrement local to whichever database produced the row, so it cannot
-   * name the same host on both sides; this can. Absent on hosts that have
-   * never been part of a sync.
-   */
-  syncId?: string | null;
   createdAt: string;
   updatedAt: string;
 
   sortOrder?: number | null;
-  connectionOrigin?: "local" | "remote" | null;
 
   /** Assigned when a host is opened in a tab; distinguishes duplicate tabs. */
   instanceId?: string;
@@ -103,15 +88,6 @@ export type Host = {
   hasPassword?: boolean;
   hasSudoPassword?: boolean;
 
-  isShared?: boolean;
-  authOverrides?: HostAuthOverrides;
-  permissionLevel?: "connect" | "view" | "edit" | "manage";
-  sharedExpiresAt?: string;
-  ownerUsername?: string;
-  /** A read-only copy of a host shared with the linked account. */
-  sharedCopy?: boolean;
-  /** Desktop only: kept on this device, never synced to the server. */
-  localOnly?: boolean;
 
   /** Enabled plugins' host-scope settings, keyed by plugin id. Secrets redacted. */
   pluginSettings?: Record<string, Record<string, unknown>>;
@@ -136,14 +112,12 @@ export interface HostData {
   tags?: string[];
   pin?: boolean;
   authType: SSHAuthType;
-  shareSshAuth?: boolean;
   password?: string;
   key?: File | string | null;
   keyPassword?: string;
   keyType?: string;
   sudoPassword?: string;
   credentialId?: number | null;
-  connectionOrigin?: "local" | "remote" | null;
   overrideCredentialUsername?: boolean;
   forceKeyboardInteractive?: boolean;
   jumpHosts?: JumpHostData[];
@@ -171,8 +145,6 @@ export interface HostData {
    * keeps its login, null removes it, and a field left out keeps its value.
    */
   protocolAuth?: Record<string, HostProtocolAuthInput | null>;
-  /** Desktop only: kept on this device, never synced to the server. */
-  localOnly?: boolean;
 }
 
 export type SSHHost = Host;
@@ -186,8 +158,6 @@ export interface SSHFolder {
   icon?: string;
   credentialId?: number | null;
   sortOrder?: number | null;
-  /** Desktop only: the folder and its hosts stay on this device. */
-  localOnly?: boolean;
   createdAt: string;
   updatedAt: string;
 }
