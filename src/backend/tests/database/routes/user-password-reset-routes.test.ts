@@ -31,6 +31,15 @@ vi.mock("../../../database/repositories/factory.js", () => ({
   createCurrentRecentActivityRepository: deletingRepo("activity"),
   createCurrentHostRepository: deletingRepo("hosts"),
   createCurrentCredentialRepository: deletingRepo("credentials"),
+  createCurrentUserAuthRepository: () => ({
+    clearSecondFactors: async (userId: string) => {
+      calls.secondFactorsReset.push(userId);
+      return 0;
+    },
+  }),
+  createCurrentTrustedDeviceRepository: () => ({
+    deleteByUserId: async () => 0,
+  }),
 }));
 
 vi.mock("../../../plugins/events.js", () => ({
@@ -56,13 +65,6 @@ vi.mock("../../../utils/user-keys.js", () => ({
 vi.mock("../../../utils/crypto-migration/dek-migration.js", () => ({
   deleteLegacyWraps: async (userId: string) => {
     calls.legacyWrapsDeletedFor.push(userId);
-  },
-}));
-
-vi.mock("../../../auth/second-factor-admin.js", () => ({
-  resetUserSecondFactors: async (userId: string) => {
-    calls.secondFactorsReset.push(userId);
-    return [];
   },
 }));
 
