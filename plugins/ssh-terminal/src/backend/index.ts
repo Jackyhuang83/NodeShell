@@ -7,10 +7,7 @@ import {
   DEFAULT_TIMEOUT_MINUTES,
   TerminalSessionManager,
 } from "./session-manager.js";
-import type {
-  RecordingsWriterV1,
-  TmuxSessionsV1,
-} from "./services.js";
+import type { TmuxSessionsV1 } from "./services.js";
 import { ADMIN_KEYS } from "./settings.js";
 import { createTerminalSocket } from "./terminal-socket.js";
 import {
@@ -53,8 +50,6 @@ export async function activate(ctx: PluginContext) {
   const sessionManager = new TerminalSessionManager({
     log,
     getTimeoutMinutes: () => timeoutMinutes,
-    getRecordings: () =>
-      optionalService<RecordingsWriterV1>(ctx, "recordings.writer", "open"),
   });
   ctx.disposables.add(() => sessionManager.destroyAll());
 
