@@ -26,11 +26,6 @@ export function hostToSSHHost(h: Host): SSHHost {
     hasSudoPassword: h.hasSudoPassword,
     pluginSettings: h.pluginSettings ?? {},
     connectionType: "ssh",
-    connectionOrigin: h.connectionOrigin ?? null,
-    isShared: h.isShared ?? false,
-    // Carries the host's identity to a delegated backend. Without it the
-    // remote side resolves our local row id against its own table.
-    syncId: h.syncId ?? null,
     createdAt: "",
     updatedAt: "",
   } as unknown as SSHHost;
