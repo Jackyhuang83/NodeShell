@@ -83,7 +83,7 @@ describe("validate-plugin-manifest.cjs", () => {
   // plugin could otherwise gate a route on admin authority it never had.
   it("rejects a permission name outside the plugin's own namespace", () => {
     const { status, output } = runValidator(
-      "invalid-role-default-escalation.json",
+      "invalid-core-permission-namespace.json",
     );
     expect(status).toBe(1);
     expect(output).toContain("admin.users.manage");
