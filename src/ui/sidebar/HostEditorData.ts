@@ -18,18 +18,6 @@ export type { HostProtocols };
 
 export type HostAuthType = Host["authType"];
 
-/**
- * Whether the Connection Origin control is meaningful for a host.
- *
- * Every protocol Termix can dial from either backend belongs here, plugin
- * protocols included (Termix-SSH/Support#1240); before that the control was
- * gated on SSH alone, so a host enabling only remote desktop could never
- * reach the setting.
- */
-export function connectionOriginAppliesTo(protocols: HostProtocols): boolean {
-  return Object.values(protocols).some(Boolean);
-}
-
 /** Overlays a plugin's draft on a new host's form. */
 export function applyHostDraft(
   form: HostEditorForm,
@@ -117,7 +105,6 @@ export function createHostEditorForm(host: Host | null) {
     username: host?.username ?? (host ? "" : "root"),
     sshPort: host?.sshPort ?? host?.port ?? 22,
     authType: host?.authType ?? "password",
-    shareSshAuth: host?.shareSshAuth ?? false,
     password: host?.hasPassword ? "existing_password" : (host?.password ?? ""),
     key: host?.key ?? (host?.hasKey ? "existing_key" : ""),
     keyPassword: host?.hasKeyPassword
@@ -133,9 +120,6 @@ export function createHostEditorForm(host: Host | null) {
     tagInput: "",
     notes: host?.notes ?? "",
     pin: host?.pin ?? false,
-    connectionOrigin: (host?.connectionOrigin ?? null) as
-      "local" | "remote" | null,
-    localOnly: host?.localOnly ?? false,
     forceKeyboardInteractive: host?.forceKeyboardInteractive ?? false,
     sudoPassword: host?.hasSudoPassword
       ? "existing_sudo_password"
@@ -175,33 +159,6 @@ export function createHostEditorForm(host: Host | null) {
 
 export type HostEditorForm = ReturnType<typeof createHostEditorForm>;
 
-export function omitOwnerSshAuthFromSharedEdit(
-  payload: SSHHostData,
-): SSHHostData {
-  const {
-    authType: _authType,
-    password: _password,
-    key: _key,
-    keyPassword: _keyPassword,
-    keyType: _keyType,
-    sudoPassword: _sudoPassword,
-    credentialId: _credentialId,
-    overrideCredentialUsername: _overrideCredentialUsername,
-    shareSshAuth: _shareSshAuth,
-    ...editableFields
-  } = payload;
-
-  const sshOptions = editableFields.sshOptions
-    ? { ...editableFields.sshOptions }
-    : undefined;
-  if (sshOptions) delete sshOptions.agentSocketPath;
-
-  return {
-    ...editableFields,
-    sshOptions,
-  } as SSHHostData;
-}
-
 export function buildHostEditorPayload(
   form: HostEditorForm,
   protocols: HostProtocols,
@@ -231,7 +188,6 @@ export function buildHostEditorPayload(
     tags: form.tags,
     pin: form.pin,
     authType: form.authType,
-    shareSshAuth: form.shareSshAuth,
     password:
       usesPassword || usesKey || usesCredential
         ? form.password === "existing_password"
@@ -253,8 +209,6 @@ export function buildHostEditorPayload(
       usesCredential && form.credentialId ? Number(form.credentialId) : null,
     overrideCredentialUsername: form.overrideCredentialUsername,
     notes: form.notes,
-    connectionOrigin: form.connectionOrigin,
-    localOnly: form.localOnly,
     enableSsh: protocols.enableSsh,
     sshPort: Number(form.sshPort),
     forceKeyboardInteractive: form.forceKeyboardInteractive,
