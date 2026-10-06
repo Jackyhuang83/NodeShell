@@ -102,9 +102,6 @@ const HANDLER_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const PERMISSION_NAME_PATTERN = /^[a-z0-9_-]+(\.[a-z0-9_-]+)*$/;
 
 /** The roles core seeds. A plugin may only set defaults for these. */
-export const SYSTEM_ROLE_NAMES = ["admin", "user"] as const;
-export type SystemRoleName = (typeof SYSTEM_ROLE_NAMES)[number];
-
 /**
  * Core permission groups. A plugin permission may not start with one of these,
  * or a manifest could declare admin.users.manage and gate a route on it.
@@ -170,8 +167,6 @@ export interface PluginPermissionContribution {
   name: string;
   titleKey: string;
   descriptionKey: string;
-  /** System roles that should hold this the first time it is seen. */
-  defaultRoles?: SystemRoleName[];
 }
 
 export interface PluginActionContribution {
@@ -1827,7 +1822,7 @@ function validatePermissions(
     }
     rejectUnknown(
       entry,
-      ["name", "titleKey", "descriptionKey", "defaultRoles"],
+      ["name", "titleKey", "descriptionKey"],
       at,
       errors,
     );
@@ -1861,22 +1856,6 @@ function validatePermissions(
     requireString(entry.titleKey, `${at}.titleKey`, errors);
     requireString(entry.descriptionKey, `${at}.descriptionKey`, errors);
 
-    if (entry.defaultRoles === undefined) return;
-    if (!Array.isArray(entry.defaultRoles)) {
-      errors.push(`${at}.defaultRoles must be an array`);
-      return;
-    }
-    entry.defaultRoles.forEach((role: unknown, roleIndex: number) => {
-      if (
-        typeof role !== "string" ||
-        !(SYSTEM_ROLE_NAMES as readonly string[]).includes(role)
-      ) {
-        errors.push(
-          `${at}.defaultRoles[${roleIndex}] must be one of: ${SYSTEM_ROLE_NAMES.join(", ")}`,
-        );
-      }
-    });
-  });
 }
 
 function validateActions(actions: unknown, errors: string[]): void {
