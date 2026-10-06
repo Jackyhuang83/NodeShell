@@ -202,11 +202,7 @@ function normalizeHostAddress(value: unknown): string {
     .toLowerCase();
 }
 
-/**
- * Whether a numeric host id resolved to a different machine than the client
- * meant. Ids from the desktop app and a sync server drift apart, and the
- * resolved row supplies the credentials, so a mismatch must be refused.
- */
+/** Whether the saved host id resolves to a different address than requested. */
 export function hostAddressMismatch(
   clientAddress: unknown,
   resolvedAddress: unknown,
@@ -217,20 +213,12 @@ export function hostAddressMismatch(
 }
 
 export const HOST_ADDRESS_MISMATCH_MESSAGE =
-  "Host mismatch: this server resolved the selected host to a different machine, so the connection was refused. " +
-  "The host ids on this device and on the sync server have drifted apart. " +
-  'Set the connection origin to "This device" for this host, or re-run a full sync, then try again.';
-
-export const HOST_NOT_ON_THIS_SERVER_MESSAGE =
-  "This host does not exist on the sync server, so the connection was refused. " +
-  'Run a sync so the server knows about it, or set the connection origin to "This device" for this host.';
+  "Host mismatch: the selected saved host resolves to a different address, so the connection was refused.";
 
 export function resolveServerJumpHosts(
   clientJumpHosts: Array<{ hostId: number }> | undefined,
   serverJumpHosts: Array<{ hostId: number }> | undefined,
-  hostSyncId?: string | null,
 ): Array<{ hostId: number }> | undefined {
-  if (hostSyncId) return serverJumpHosts ?? [];
   return clientJumpHosts?.length ? clientJumpHosts : serverJumpHosts;
 }
 
