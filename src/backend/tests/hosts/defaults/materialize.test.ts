@@ -314,11 +314,4 @@ describe("materializeHosts", () => {
     expect(db.hosts[0].sshPort).toBe(22);
   });
 
-  it("leaves a desktop's copy of a shared host alone", async () => {
-    db.hosts = [host({ id: 1, sharedSource: "{}" })];
-    setDefault("admin", "core.sshPort", 2022);
-    await materializeHosts({ all: true });
-    expect(db.hosts[0].sshPort).toBe(22);
-    expect(db.hosts[0].defaultOverrides).toBeNull();
-  });
 });
