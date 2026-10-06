@@ -44,8 +44,6 @@ export interface PluginHostRecord {
   tags?: string[];
   pin?: boolean;
   notes?: string;
-  /** Stable across a desktop and the server it syncs with. */
-  syncId?: string | null;
   /** Sub-host nesting: the host this one is organized under. */
   parentHostId?: string | null;
   authType?: string;
@@ -53,8 +51,6 @@ export interface PluginHostRecord {
   overrideCredentialUsername?: boolean;
   /** "ssh", or the id of the plugin protocol a host without SSH uses. */
   connectionType?: string;
-  /** Desktop app: where connections to this host start from. */
-  connectionOrigin?: "local" | "remote" | null;
   enableSsh?: boolean;
   sshPort?: number;
   jumpHosts?: { hostId: string | number }[];
@@ -70,45 +66,11 @@ export interface PluginHostRecord {
   pluginSettings?: Record<string, Record<string, unknown>>;
   /** Each declared protocol's login, secrets left out. */
   protocolAuth?: Record<string, HostProtocolAuthSummary>;
-  /** Set on a Quick Connect host, which is never saved. */
-  quickConnectLogin?: QuickConnectLogin;
-  /** Quick Connect only: core can save this host as it is. */
-  quickConnectSavable?: boolean;
   /** Assigned when a host is opened in a tab; tells duplicate tabs apart. */
   instanceId?: string;
   /** Core's status: "online" once a login worked. */
   status?: "online" | "reachable" | "offline" | "unknown";
   online?: boolean;
-  /** Someone else owns this host and shared it with the user. */
-  isShared?: boolean;
-  permissionLevel?: "connect" | "view" | "edit" | "manage";
-  sharedExpiresAt?: string;
-  ownerUsername?: string;
-  /**
-   * A shared host's login per protocol ("ssh" or a plugin protocol): whether
-   * the owner shared theirs, and the recipient's own credential if they had
-   * to pick one.
-   */
-  authOverrides?: Partial<Record<string, HostAuthOverrideSummary>>;
-  /** A read-only copy of a host shared with the linked account. */
-  sharedCopy?: boolean;
-  /** Desktop only: kept on this device, never synced to the server. */
-  localOnly?: boolean;
-}
-
-export interface HostAuthOverrideSummary {
-  credentialId?: number | string;
-  required: boolean;
-  ownerAuthShared: boolean;
-}
-
-/** The protocol login a Quick Connect host carries, in plain text. */
-export interface QuickConnectLogin {
-  protocol: string;
-  username?: string;
-  password?: string;
-  /** "domain" when the protocol's Quick Connect entry shows that field. */
-  fields?: Record<string, string>;
 }
 
 /** "direct" (a username and password), "credential" (a saved one) or "none". */
@@ -196,11 +158,6 @@ export interface ShellApi {
   connectHost: (host: PluginHostRecord, type?: string) => void;
   closeTab: (tabId: string) => void;
   renameTab: (tabId: string, label: string) => void;
-  /** Saves a quick-connect tab's host as a real host. Absent in some shells. */
-  saveQuickConnect?: (
-    tab: PluginTabRecord,
-    host: PluginHostRecord,
-  ) => Promise<void>;
   /**
    * Opens the host editor for a new host with these fields filled in. The
    * user reviews and saves it. Absent in some shells.
@@ -257,8 +214,6 @@ export interface RailItemContribution {
   rightDockable?: boolean;
   /** Shown on the mobile bar's primary row. */
   mobilePrimary?: boolean;
-  /** Desktop app only. */
-  electronOnly?: boolean;
   separatorAfter?: boolean;
   /** Hidden without being unregistered, e.g. while a feature is switched off. */
   hidden?: boolean;
@@ -443,7 +398,7 @@ export interface HostActionContribution {
   titleKey: string;
   icon: IconComponent;
   /**
-   * "connect" is a way to open a session (terminal, remote desktop) and is offered as a
+   * "connect" is a way to open a host session and is offered as a
    * host's default action by priority. "open" opens a tool for the host.
    */
   kind: "connect" | "open";
@@ -459,11 +414,6 @@ export interface HostActionContribution {
   copyUrlView?: string;
   /** Where a host overview (the dashboard's host status list) sends a click. */
   overview?: boolean;
-  /**
-   * Offered as a button in Quick Connect, next to the default connect button,
-   * for an address that is never saved. Opens tabType.
-   */
-  quickConnect?: boolean;
   /**
    * Position in the host row. Core: Files 20, Tunnel 40, Tmux 70. Connect
    * actions default to 100 and sit after a separator.
@@ -493,12 +443,8 @@ export interface HostProtocolContribution {
   defaultPort: number;
   titleKey: string;
   descriptionKey?: string;
-  /** Added to the host editor's connection origin help while the protocol is on. */
-  connectionOriginNoteKey?: string;
   icon: IconComponent;
   order?: number;
-  /** Offer it in Quick Connect, optionally with a domain field. */
-  quickConnect?: { showDomain?: boolean };
 }
 
 export interface HostBadgeContribution {
