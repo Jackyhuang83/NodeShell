@@ -15,17 +15,6 @@ const MAX_SESSIONS_PER_USER = 10;
 // drops. Batch pending lines and flush on a short trailing edge instead.
 const RECORDING_FLUSH_INTERVAL_MS = 300;
 
-export interface SessionParticipant {
-  ws: WebSocket;
-  userId: string | null; // null for anonymous link guests
-  permissionLevel: "read-write" | "read-only";
-  isOwner: boolean;
-  displayName?: string;
-  guestLabel?: string;
-  tabInstanceId?: string;
-  joinedViaShareId?: string;
-}
-
 export interface TerminalSession {
   id: string;
   userId: string;
@@ -43,7 +32,7 @@ export interface TerminalSession {
   isConnected: boolean;
   createdAt: number;
 
-  participants: Map<string, SessionParticipant>;
+  ownerWs: WebSocket | null;
   lastDetachedAt: number | null;
   detachTimeout: NodeJS.Timeout | null;
 
@@ -65,31 +54,6 @@ export interface TerminalSession {
   lastPersistedBytes: number;
   terminatedByOwner: boolean;
   terminationReason: string | null;
-}
-
-/** Message types a non-owner participant may legally send. */
-const NON_OWNER_ALLOWED_MESSAGE_TYPES = new Set([
-  "input",
-  "ping",
-  "disconnect",
-]);
-
-/**
- * Server-side gate for whether a participant may send a given WS message
- * type. The owner may send anything; non-owners are limited to input (if
- * read-write), ping, and disconnect. Pure function so read-only enforcement
- * is unit-testable without a real WebSocketServer.
- */
-export function isMessageAllowedForParticipant(
-  participant: Pick<SessionParticipant, "isOwner" | "permissionLevel"> | null,
-  messageType: string,
-): boolean {
-  if (!participant || participant.isOwner) return true;
-  if (!NON_OWNER_ALLOWED_MESSAGE_TYPES.has(messageType)) return false;
-  if (messageType === "input" && participant.permissionLevel === "read-only") {
-    return false;
-  }
-  return true;
 }
 
 export interface SessionManagerDeps {
@@ -125,7 +89,7 @@ export class TerminalSessionManager {
     const userSessions = this.getUserSessions(userId);
     if (userSessions.length >= MAX_SESSIONS_PER_USER) {
       const detached = userSessions
-        .filter((s) => this.getOwnerParticipant(s) === null)
+        .filter((s) => !s.ownerWs || s.ownerWs.readyState !== WebSocket.OPEN)
         .sort(
           (a, b) =>
             (a.lastDetachedAt ?? a.createdAt) -
@@ -153,7 +117,9 @@ export class TerminalSessionManager {
               operation: "session_tab_duplicate_skip",
               existingSessionId: existing.id,
               tabInstanceId,
-              hasAttachedWs: this.getOwnerParticipant(existing) !== null,
+              hasAttachedWs:
+                !!existing.ownerWs &&
+                existing.ownerWs.readyState === WebSocket.OPEN,
             },
           );
           return existing.id;
@@ -216,7 +182,7 @@ export class TerminalSessionManager {
       rows,
       isConnected: false,
       createdAt: now,
-      participants: new Map(),
+      ownerWs: null,
       lastDetachedAt: null,
       detachTimeout: null,
       outputBuffer: [],
@@ -268,25 +234,6 @@ export class TerminalSessionManager {
     session.isConnected = true;
   }
 
-  /** Finds the owner's participant entry, if currently attached. */
-  private getOwnerParticipant(
-    session: TerminalSession,
-  ): SessionParticipant | null {
-    for (const participant of session.participants.values()) {
-      if (participant.isOwner) return participant;
-    }
-    return null;
-  }
-
-  private getOwnerEntry(
-    session: TerminalSession,
-  ): [string, SessionParticipant] | null {
-    for (const entry of session.participants.entries()) {
-      if (entry[1].isOwner) return entry;
-    }
-    return null;
-  }
-
   attachWs(
     sessionId: string,
     userId: string,
@@ -322,9 +269,9 @@ export class TerminalSessionManager {
       return null;
     }
 
-    const ownerParticipant = this.getOwnerParticipant(session);
+    const currentWs = session.ownerWs;
     const isDetached =
-      !ownerParticipant || ownerParticipant.ws.readyState !== WebSocket.OPEN;
+      !currentWs || currentWs.readyState !== WebSocket.OPEN;
     const isOriginalTab =
       (session.attachedTabInstanceId ?? session.tabInstanceId) ===
       tabInstanceId;
@@ -371,10 +318,9 @@ export class TerminalSessionManager {
       );
     }
 
-    const ownerEntry = this.getOwnerEntry(session);
-    if (ownerEntry && ownerEntry[1].ws !== ws) {
+    if (currentWs && currentWs !== ws && currentWs.readyState === WebSocket.OPEN) {
       try {
-        ownerEntry[1].ws.send(
+        currentWs.send(
           JSON.stringify({
             type: "sessionTakenOver",
             sessionId,
@@ -384,7 +330,6 @@ export class TerminalSessionManager {
       } catch {
         /* ignore */
       }
-      session.participants.delete(ownerEntry[0]);
     }
 
     if (session.detachTimeout) {
@@ -392,17 +337,9 @@ export class TerminalSessionManager {
       session.detachTimeout = null;
     }
 
-    const participantId = randomUUID();
-    session.participants.set(participantId, {
-      ws,
-      userId,
-      permissionLevel: "read-write",
-      isOwner: true,
-      tabInstanceId,
-    });
+    session.ownerWs = ws;
     session.attachedTabInstanceId = tabInstanceId;
     session.lastDetachedAt = null;
-    this.broadcastParticipants(sessionId);
 
     this.log.info("WebSocket attached to session", {
       operation: "session_attach",
@@ -414,234 +351,16 @@ export class TerminalSessionManager {
     return session;
   }
 
-  /**
-   * Adds a non-owner participant (in-app share join or anonymous link guest).
-   * Purely additive - never evicts the owner or any other participant.
-   */
-  joinAsParticipant(
-    sessionId: string,
-    ws: WebSocket,
-    opts: {
-      userId: string | null;
-      permissionLevel: "read-write" | "read-only";
-      displayName?: string;
-      guestLabel?: string;
-      tabInstanceId?: string;
-      shareId?: string;
-    },
-  ): TerminalSession | null {
+  /** Sends a message to the attached Owner socket, if present. */
+  broadcast(sessionId: string, message: object): void {
     const session = this.sessions.get(sessionId);
-    if (!session || !session.isConnected) return null;
-
-    const participantId = randomUUID();
-    session.participants.set(participantId, {
-      ws,
-      userId: opts.userId,
-      permissionLevel: opts.permissionLevel,
-      isOwner: false,
-      displayName: opts.displayName,
-      guestLabel: opts.guestLabel,
-      tabInstanceId: opts.tabInstanceId,
-      joinedViaShareId: opts.shareId,
-    });
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(
-        JSON.stringify({
-          type: "resized",
-          cols: session.cols,
-          rows: session.rows,
-        }),
-      );
+    const ws = session?.ownerWs;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try {
+      ws.send(JSON.stringify(message));
+    } catch {
+      // The health check or close handler will clean up the detached socket.
     }
-    this.broadcastParticipants(sessionId);
-
-    this.log.info("Participant joined shared session", {
-      operation: "session_join_participant",
-      sessionId,
-      userId: opts.userId,
-      permissionLevel: opts.permissionLevel,
-      shareId: opts.shareId,
-    });
-
-    return session;
-  }
-
-  /**
-   * Tells everyone in a shared session who is present. Sent on join and
-   * leave, and only while someone besides the owner is (or just was) in the
-   * room - a solo owner never receives presence traffic.
-   */
-  private broadcastParticipants(sessionId: string, includeSolo = false): void {
-    const session = this.sessions.get(sessionId);
-    if (!session) return;
-    const participants = Array.from(session.participants.values()).map(
-      (participant) => ({
-        isOwner: participant.isOwner,
-        permissionLevel: participant.permissionLevel,
-        label: participant.displayName ?? participant.guestLabel ?? null,
-      }),
-    );
-    if (
-      !includeSolo &&
-      participants.every((participant) => participant.isOwner)
-    )
-      return;
-    // Link guests are anonymous viewers; they do not get the roster.
-    this.broadcast(
-      sessionId,
-      { type: "participants", participants },
-      (participant) => participant.userId !== null,
-    );
-  }
-
-  /** The anonymous link guests watching through one share. */
-  listShareGuests(
-    sessionId: string,
-    shareId: string,
-  ): { label: string | null }[] {
-    const session = this.sessions.get(sessionId);
-    if (!session) return [];
-    return Array.from(session.participants.values())
-      .filter(
-        (participant) =>
-          participant.userId === null &&
-          participant.joinedViaShareId === shareId,
-      )
-      .map((participant) => ({ label: participant.guestLabel ?? null }));
-  }
-
-  /**
-   * Grants stage control: participants joined via this share become
-   * read-write only while they are the controller. The owner is untouched.
-   */
-  setRoomShareControl(
-    sessionId: string,
-    shareId: string,
-    controllerUserId: string | null,
-  ): void {
-    const session = this.sessions.get(sessionId);
-    if (!session) return;
-    for (const participant of session.participants.values()) {
-      if (participant.isOwner || participant.joinedViaShareId !== shareId)
-        continue;
-      participant.permissionLevel =
-        controllerUserId && participant.userId === controllerUserId
-          ? "read-write"
-          : "read-only";
-    }
-  }
-
-  /**
-   * Disconnects non-owner participants that joined through one share.
-   * Supplying userId narrows the kick to that authenticated user; null targets
-   * anonymous guests. Omitting it revokes the share for every participant.
-   */
-  disconnectShareParticipants(
-    sessionId: string,
-    shareId: string,
-    options: { userId?: string | null; reason: string },
-  ): number {
-    const session = this.sessions.get(sessionId);
-    if (!session) return 0;
-    const filterByUser = Object.hasOwn(options, "userId");
-    let disconnected = 0;
-    for (const [id, participant] of session.participants.entries()) {
-      if (
-        participant.isOwner ||
-        participant.joinedViaShareId !== shareId ||
-        (filterByUser && participant.userId !== options.userId)
-      ) {
-        continue;
-      }
-      session.participants.delete(id);
-      disconnected += 1;
-      if (participant.ws.readyState === WebSocket.OPEN) {
-        try {
-          participant.ws.send(
-            JSON.stringify({
-              type: "sessionExpired",
-              sessionId,
-              message: options.reason,
-            }),
-          );
-          participant.ws.close(1008, options.reason);
-        } catch {
-          participant.ws.terminate();
-        }
-      }
-    }
-    if (disconnected > 0) this.broadcastParticipants(sessionId, true);
-    return disconnected;
-  }
-
-  /** Fans out a message to every OPEN participant socket; skips closed ones and send failures. */
-  broadcast(
-    sessionId: string,
-    message: object,
-    include?: (participant: SessionParticipant) => boolean,
-  ): void {
-    const session = this.sessions.get(sessionId);
-    if (!session) return;
-    const payload = JSON.stringify(message);
-    for (const participant of session.participants.values()) {
-      if (participant.ws.readyState !== WebSocket.OPEN) continue;
-      if (include && !include(participant)) continue;
-      try {
-        participant.ws.send(payload);
-      } catch {
-        /* ignore individual send failures, keep broadcasting to the rest */
-      }
-    }
-  }
-
-  /** Finds the participant entry (owner or not) for a given socket. */
-  getParticipantForWs(
-    session: TerminalSession,
-    ws: WebSocket,
-  ): SessionParticipant | null {
-    for (const participant of session.participants.values()) {
-      if (participant.ws === ws) return participant;
-    }
-    return null;
-  }
-
-  /**
-   * Removes a non-owner participant's socket. No detach timeout or session
-   * destruction side effects - a guest leaving must never end the session.
-   */
-  removeParticipant(sessionId: string, ws: WebSocket): void {
-    const session = this.sessions.get(sessionId);
-    if (!session) return;
-    for (const [id, participant] of session.participants.entries()) {
-      if (participant.ws === ws && !participant.isOwner) {
-        session.participants.delete(id);
-        this.broadcastParticipants(sessionId, true);
-        this.log.info("Participant left shared session", {
-          operation: "session_leave_participant",
-          sessionId,
-          userId: participant.userId,
-        });
-        return;
-      }
-    }
-  }
-
-  /** Broadcasts termination to all guests, then destroys the session. */
-  ownerEndSession(sessionId: string, reason: string): void {
-    const session = this.sessions.get(sessionId);
-    if (!session) return;
-
-    this.broadcast(sessionId, { type: "sessionTerminatedByOwner", reason });
-    session.terminatedByOwner = true;
-    session.terminationReason = reason;
-
-    this.log.info("Owner ended shared session", {
-      operation: "session_owner_end",
-      sessionId,
-      reason,
-    });
-
-    this.destroySession(sessionId);
   }
 
   detachWs(sessionId: string): void {
@@ -653,10 +372,7 @@ export class TerminalSessionManager {
       session.detachTimeout = null;
     }
 
-    const ownerEntry = this.getOwnerEntry(session);
-    if (ownerEntry) {
-      session.participants.delete(ownerEntry[0]);
-    }
+    session.ownerWs = null;
     session.lastDetachedAt = Date.now();
 
     // Persist log immediately when the user detaches so it appears right away,
@@ -697,22 +413,7 @@ export class TerminalSessionManager {
     }
     session.dataListeners.clear();
 
-    for (const participant of session.participants.values()) {
-      if (participant.isOwner) continue;
-      if (participant.ws.readyState !== WebSocket.OPEN) continue;
-      try {
-        participant.ws.send(
-          JSON.stringify({
-            type: "sessionExpired",
-            sessionId,
-            message: "Session has ended",
-          }),
-        );
-      } catch {
-        /* ignore */
-      }
-    }
-    session.participants.clear();
+    session.ownerWs = null;
 
     if (session.sshStream) {
       try {
@@ -945,10 +646,7 @@ export class TerminalSessionManager {
     for (const [id, session] of this.sessions) {
       if (!session.isConnected) continue;
 
-      const hasOpenParticipant = Array.from(session.participants.values()).some(
-        (p) => p.ws.readyState === WebSocket.OPEN,
-      );
-      if (hasOpenParticipant) {
+      if (session.ownerWs?.readyState === WebSocket.OPEN) {
         continue;
       }
 
