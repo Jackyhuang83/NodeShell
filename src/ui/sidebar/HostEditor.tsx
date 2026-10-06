@@ -51,14 +51,12 @@ import {
   applyHostDraft,
   buildHostEditorPayload,
   createHostEditorForm,
-  omitOwnerSshAuthFromSharedEdit,
   type HostAuthType,
   type HostEditorForm,
   type HostProtocols,
 } from "./HostEditorData";
 import { HostEditorGeneralTab } from "./HostEditorGeneralTab";
 import { withProtocolSettings } from "./host-protocols";
-import { canEditHost } from "./host-permissions";
 import {
   getHostEditorSection,
   isSshGroupTab,
@@ -410,10 +408,7 @@ export function HostEditor({
           ? withAllNamespaces(form.defaultOverrides, defaultKeys)
           : null,
       };
-      const fullData = buildHostEditorPayload(withOverrides, protocols);
-      const data = lockAuthReferences
-        ? omitOwnerSshAuthFromSharedEdit(fullData)
-        : fullData;
+      const data = buildHostEditorPayload(withOverrides, protocols);
       let saved: SSHHost = host
         ? await updateSSHHost(Number(host.id), data)
         : await createSSHHost(data);
@@ -573,13 +568,6 @@ export function HostEditor({
     }
   };
 
-  // Shared hosts: view-level recipients see a read-only editor; edit-level
-  // recipients may change the host but never its credential references
-  // or auth type (owner-only, enforced server-side too).
-  const isSharedHost = !!host?.isShared;
-  const readOnly = isSharedHost && host !== null && !canEditHost(host);
-  const lockAuthReferences = isSharedHost && !readOnly;
-
   const handleProtocolToggle = (
     proto: keyof typeof protocols,
     value: boolean,
@@ -616,24 +604,7 @@ export function HostEditor({
   return (
     <HostDefaultsContext.Provider value={defaultsContext}>
       <div className="flex flex-col gap-3">
-        {isSharedHost && (
-          <div className="flex items-start gap-2.5 p-3 border border-accent-brand/30 bg-accent-brand/5 text-xs text-muted-foreground">
-            <Shield className="size-3.5 shrink-0 mt-0.5 text-accent-brand" />
-            <div>
-              {readOnly
-                ? t("hosts.sharing.viewOnlyBanner", {
-                    owner: host?.ownerUsername || "?",
-                  })
-                : t("hosts.sharing.sharedEditBanner", {
-                    owner: host?.ownerUsername || "?",
-                  })}
-            </div>
-          </div>
-        )}
-        <fieldset
-          disabled={readOnly}
-          className={`flex flex-col gap-3 min-w-0 ${readOnly ? "opacity-80" : ""}`}
-        >
+        <fieldset className="flex flex-col gap-3 min-w-0">
           <div className="flex flex-col gap-3">
             {activeTab === "general" && (
               <HostEditorGeneralTab
@@ -794,7 +765,6 @@ export function HostEditor({
                   title={t("hosts.authenticationLabel")}
                   icon={<Shield className="size-3.5" />}
                   action={
-                    !isSharedHost &&
                     !defaultsMode &&
                     canQuickCreateCredential && (
                       <Button
@@ -810,18 +780,7 @@ export function HostEditor({
                     )
                   }
                 >
-                  {isSharedHost && (
-                    <div className="py-3 text-xs text-muted-foreground">
-                      {t(
-                        host?.shareSshAuth
-                          ? "hosts.sharing.ownerAuthShared"
-                          : "hosts.sharing.ownerAuthPrivate",
-                      )}
-                    </div>
-                  )}
-                  <div
-                    className={`flex flex-col gap-4 py-3 ${isSharedHost ? "hidden" : ""}`}
-                  >
+                  <div className="flex flex-col gap-4 py-3">
                     <div className="flex flex-col gap-1.5">
                       <label className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                         {t("hosts.authenticationMethod")}
@@ -1282,17 +1241,6 @@ export function HostEditor({
                         </div>
                       </div>
                     )}
-                    <HostOnly>
-                      <SettingRow
-                        label={t("hosts.shareSshAuthLabel")}
-                        description={t("hosts.shareSshAuthDesc")}
-                      >
-                        <FakeSwitch
-                          checked={form.shareSshAuth}
-                          onChange={(v) => setField("shareSshAuth", v)}
-                        />
-                      </SettingRow>
-                    </HostOnly>
                     <SettingRow
                       label={t("hosts.forceKeyboardInteractiveLabel")}
                       description={t("hosts.forceKeyboardInteractiveShortDesc")}
