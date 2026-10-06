@@ -9,9 +9,6 @@ type RawSSHHost = SSHHostWithStatus & {
 };
 type HostJumpHost = NonNullable<Host["jumpHosts"]>[number];
 type RawCredential = {
-  isShared?: boolean;
-  ownerUsername?: string | null;
-  permissionLevel?: "use" | "manage";
   id: number | string;
   name: string;
   username: string;
@@ -57,9 +54,7 @@ export function sshHostToHost(h: SSHHostWithStatus): Host {
     ram: null,
     lastAccess: "",
     tags: h.tags ?? [],
-    syncId: h.syncId ?? null,
     authType: h.authType,
-    shareSshAuth: h.shareSshAuth ?? false,
     password: h.password,
     hasPassword: !!host.hasPassword || !!h.password,
     hasKey: !!host.hasKey || !!(typeof h.key === "string" && h.key),
@@ -71,9 +66,6 @@ export function sshHostToHost(h: SSHHostWithStatus): Host {
     notes: h.notes,
     pin: h.pin ?? false,
     sortOrder: h.sortOrder ?? null,
-    connectionOrigin: h.connectionOrigin ?? null,
-    localOnly: !!h.localOnly,
-    sharedCopy: !!h.sharedCopy,
     enableSsh: h.enableSsh != null ? h.enableSsh : isSshHost,
     sshPort:
       h.sshPort ??
@@ -92,30 +84,6 @@ export function sshHostToHost(h: SSHHostWithStatus): Host {
     statusCheckInterval: h.statusCheckInterval ?? null,
     forceKeyboardInteractive: h.forceKeyboardInteractive ?? false,
     overrideCredentialUsername: h.overrideCredentialUsername ?? false,
-    isShared: h.isShared ?? false,
-    authOverrides: h.authOverrides
-      ? Object.fromEntries(
-          Object.entries(h.authOverrides).flatMap(([protocol, state]) =>
-            state
-              ? [
-                  [
-                    protocol,
-                    {
-                      ...state,
-                      credentialId:
-                        state.credentialId != null
-                          ? String(state.credentialId)
-                          : undefined,
-                    },
-                  ],
-                ]
-              : [],
-          ),
-        )
-      : undefined,
-    permissionLevel: h.permissionLevel,
-    sharedExpiresAt: h.sharedExpiresAt,
-    ownerUsername: h.ownerUsername,
   };
 }
 
@@ -133,8 +101,5 @@ export function mapCredentials(res: unknown): Credential[] {
     pin: c.pin ?? false,
     sortOrder: c.sortOrder ?? null,
     certPublicKey: c.certPublicKey ?? undefined,
-    isShared: c.isShared ?? false,
-    ownerUsername: c.ownerUsername ?? null,
-    permissionLevel: c.permissionLevel,
   }));
 }
