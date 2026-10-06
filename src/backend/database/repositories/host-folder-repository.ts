@@ -1,14 +1,9 @@
 import { and, eq, like, or, sql } from "drizzle-orm";
-import { randomUUID } from "crypto";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { hosts, sshCredentials, sshFolders } from "../db/schema.js";
 import type { DatabaseContext } from "./database-context.js";
 import { rowsAffected } from "./mutation-result.js";
-import {
-  deleteReturning,
-  insertReturning,
-  updateReturning,
-} from "./returning.js";
+import { insertReturning, updateReturning } from "./returning.js";
 
 export type HostFolderRecord = typeof sshFolders.$inferSelect;
 export type HostFolderHostRecord = typeof hosts.$inferSelect;
@@ -83,28 +78,6 @@ export class HostFolderRepository {
       .where(eq(sshFolders.userId, userId));
   }
 
-  /**
-   * Keeps a folder, its subfolders and every host in them on this device
-   * only, or lets them sync again.
-   */
-  async setLocalOnly(
-    userId: string,
-    folderName: string,
-    localOnly: boolean,
-  ): Promise<void> {
-    const inFolder = (col: SQLiteColumn) =>
-      or(eq(col, folderName), like(col, `${folderName} / %`));
-    await this.context.drizzle
-      .update(sshFolders)
-      .set({ localOnly })
-      .where(and(eq(sshFolders.userId, userId), inFolder(sshFolders.name)));
-    await this.context.drizzle
-      .update(hosts)
-      .set({ localOnly, updatedAt: new Date().toISOString() })
-      .where(and(eq(hosts.userId, userId), inFolder(hosts.folder)));
-    await this.afterWrite();
-  }
-
   async upsertMetadata(
     userId: string,
     name: string,
@@ -133,7 +106,6 @@ export class HostFolderRepository {
     }
 
     const [created] = await insertReturning(this.context, sshFolders, {
-      syncId: randomUUID(),
       userId,
       name,
       color,
@@ -178,7 +150,6 @@ export class HostFolderRepository {
           }
           tx.insert(sshFolders)
             .values({
-              syncId: randomUUID(),
               userId,
               name,
               sortOrder,
@@ -205,7 +176,6 @@ export class HostFolderRepository {
             continue;
           }
           await tx.insert(sshFolders).values({
-            syncId: randomUUID(),
             userId,
             name,
             sortOrder,
@@ -241,33 +211,19 @@ export class HostFolderRepository {
   async deleteHostsAndFolderRecords(
     userId: string,
     folderName: string,
-  ): Promise<{ hostSyncIds: string[]; folderSyncIds: string[] }> {
+  ): Promise<void> {
     const folderMatch = (col: SQLiteColumn) =>
       or(eq(col, folderName), like(col, `${folderName} / %`));
 
-    const hostsToDelete = await this.listHostsInFolder(userId, folderName);
-    if (hostsToDelete.length > 0) {
-      await this.context.drizzle
-        .delete(hosts)
-        .where(and(eq(hosts.userId, userId), folderMatch(hosts.folder)));
-    }
+    await this.context.drizzle
+      .delete(hosts)
+      .where(and(eq(hosts.userId, userId), folderMatch(hosts.folder)));
 
-    const deletedFolders = await deleteReturning(
-      this.context,
-      sshFolders,
-      and(eq(sshFolders.userId, userId), folderMatch(sshFolders.name)),
-    );
+    await this.context.drizzle
+      .delete(sshFolders)
+      .where(and(eq(sshFolders.userId, userId), folderMatch(sshFolders.name)));
 
     await this.afterWrite();
-
-    return {
-      hostSyncIds: hostsToDelete
-        .map((h) => h.syncId)
-        .filter((id): id is string => !!id),
-      folderSyncIds: deletedFolders
-        .map((f) => f.syncId)
-        .filter((id): id is string => !!id),
-    };
   }
 
   async deleteByUserId(userId: string): Promise<number> {
