@@ -357,7 +357,6 @@ function emptyHostRecord(id: number, userId: string): PluginHostRecord {
   return {
     id,
     userId,
-    syncId: null,
     name: null,
     ip: "",
     port: 22,
@@ -376,11 +375,9 @@ function emptyHostRecord(id: number, userId: string): PluginHostRecord {
     sshPort: null,
     statusCheckEnabled: true,
     statusCheckInterval: null,
-    connectionOrigin: null,
     sshOptions: {},
     pluginSettings: {},
     status: null,
-    localOnly: false,
     createdAt: null,
     updatedAt: null,
   };
@@ -918,12 +915,8 @@ export function createFakeContext(
       },
       poolKey: (pool, host) =>
         `${pool}:${host.userId}:${host.ip}:${host.port}:${host.username}`,
-      resolveHost: async (hostId, resolveOptions) =>
-        (options.sshHosts ?? []).find((host) =>
-          resolveOptions?.syncId
-            ? host.syncId === resolveOptions.syncId
-            : host.id === hostId,
-        ) ?? null,
+      resolveHost: async (hostId) =>
+        (options.sshHosts ?? []).find((host) => host.id === hostId) ?? null,
       prepare: async () => ({
         config: {},
         outcome: { status: "ready" },
@@ -1499,10 +1492,10 @@ export function createMockCtx(
         require("ssh:connect");
         return ctx.ssh.openTransport(host, config, transportOptions);
       },
-      resolveHost: async (hostId, resolveOptions) => {
+      resolveHost: async (hostId) => {
         require("ssh:connect");
         require("credentials:use");
-        return ctx.ssh.resolveHost(hostId, resolveOptions);
+        return ctx.ssh.resolveHost(hostId);
       },
       startInteraction: async (interaction, request) => {
         require("ssh:connect");
