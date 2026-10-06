@@ -39,7 +39,6 @@ export function FolderItem({
   depth = 0,
   onOpenTab,
   onEditHost,
-  onShareHost,
   onDeleteHost,
   onDuplicateHost,
   query = "",
@@ -92,7 +91,6 @@ export function FolderItem({
     },
   ) => void;
   onEditHost?: (host: Host) => void;
-  onShareHost?: (host: Host) => void;
   onDeleteHost: (host: Host) => void;
   onDuplicateHost: (host: Host) => void;
   query?: string;
@@ -319,7 +317,6 @@ export function FolderItem({
                 depth={depth + 1}
                 onOpenTab={onOpenTab}
                 onEditHost={onEditHost}
-                onShareHost={onShareHost}
                 onDeleteHost={onDeleteHost}
                 onDuplicateHost={onDuplicateHost}
                 query={query}
