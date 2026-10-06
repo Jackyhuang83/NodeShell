@@ -19,7 +19,9 @@ vi.mock("../../database/db/index.js", () => ({
 vi.mock("../../database/repositories/factory.js", () => ({
   createCurrentSettingsRepository: () => ({ get: async () => null }),
   createCurrentSessionRepository: () => ({}),
-  createCurrentUserRepository: () => ({}),
+  createCurrentUserRepository: () => ({
+    findOwner: async () => ({ id: "user-1", username: "owner", isAdmin: true }),
+  }),
   createCurrentApiKeyRepository: () => ({}),
   createCurrentTrustedDeviceRepository: () => ({}),
   getCurrentSettingValue: () => null,
