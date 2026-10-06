@@ -334,7 +334,7 @@ describe("plugin permissions", () => {
     expect(errors.join()).toMatch(/already starts with this plugin/);
   });
 
-  it("refuses a default for a role core does not seed", () => {
+  it("refuses the removed defaultRoles field", () => {
     const errors = validateManifest(
       base({
         contributes: {
@@ -350,7 +350,7 @@ describe("plugin permissions", () => {
       }),
     );
 
-    expect(errors.join()).toMatch(/defaultRoles\[0\]/);
+    expect(errors.join()).toMatch(/Unknown field "defaultRoles"/);
   });
 
   it("refuses a duplicate name", () => {
