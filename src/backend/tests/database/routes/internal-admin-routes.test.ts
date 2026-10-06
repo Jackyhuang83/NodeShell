@@ -24,7 +24,7 @@ vi.mock("../../../utils/auth-manager.js", () => ({
   AuthManager: {
     getInstance: () => ({
       registerUser: vi.fn(async () => {}),
-      unlockWithSystemKey: vi.fn(async () => true),
+      recoverUserDataKey: vi.fn(async () => true),
     }),
   },
 }));
@@ -87,7 +87,7 @@ describe("internal admin boundary", () => {
       request(app()).get("/internal/admin/status"),
     ).set("X-Real-IP", "203.0.113.10");
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(403);
     expect(response.body.error).toMatch(/local/i);
   });
 
@@ -148,7 +148,7 @@ describe("internal admin boundary", () => {
       newPassword: "correct-horse-battery-staple",
     });
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(404);
     expect(response.body.error).toMatch(/owner/i);
   });
 });
