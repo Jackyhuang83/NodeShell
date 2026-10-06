@@ -32,7 +32,6 @@ function toTerminalHost(host: PluginHostRecord): TerminalHostConfig {
     sshOptions: host.sshOptions,
     jumpHosts: host.jumpHosts,
     connectionType: host.connectionType,
-    connectionOrigin: host.connectionOrigin,
     pluginSettings: host.pluginSettings,
   };
 }
