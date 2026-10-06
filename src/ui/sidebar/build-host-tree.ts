@@ -15,7 +15,7 @@ import { sshHostToHost } from "./HostManagerData";
  *
  * The backend already enforces that folder and parentHostId are mutually
  * exclusive on write and rejects cycles, but this still defends against
- * stale/imported/synced data: a missing, inaccessible, or cyclic parent
+ * stale/imported data: a missing, inaccessible, or cyclic parent
  * falls back to folder/root placement rather than being dropped or looping.
  */
 export function buildHostTree(
@@ -27,7 +27,6 @@ export function buildHostTree(
       icon?: string;
       credentialId?: number | null;
       sortOrder?: number | null;
-      localOnly?: boolean;
     }
   >,
 ): HostFolder {
@@ -49,7 +48,6 @@ export function buildHostTree(
           icon: meta?.icon,
           credentialId: meta?.credentialId ?? null,
           sortOrder: meta?.sortOrder ?? null,
-          localOnly: !!meta?.localOnly,
           children: [],
         };
         folderMap.set(accumulated, folder);
