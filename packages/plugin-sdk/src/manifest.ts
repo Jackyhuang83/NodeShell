@@ -1855,7 +1855,7 @@ function validatePermissions(
 
     requireString(entry.titleKey, `${at}.titleKey`, errors);
     requireString(entry.descriptionKey, `${at}.descriptionKey`, errors);
-
+  });
 }
 
 function validateActions(actions: unknown, errors: string[]): void {
