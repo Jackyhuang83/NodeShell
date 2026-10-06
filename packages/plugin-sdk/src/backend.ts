@@ -508,8 +508,6 @@ export interface PluginHostSummary {
 export interface PluginHostRecord {
   id: number;
   userId: string;
-  /** Stable across a desktop and the server it syncs with. */
-  syncId: string | null;
   name: string | null;
   ip: string;
   port: number;
@@ -531,7 +529,6 @@ export interface PluginHostRecord {
   statusCheckEnabled: boolean;
   /** Seconds between status checks; null follows the global setting. */
   statusCheckInterval: number | null;
-  connectionOrigin: "local" | "remote" | null;
   /** Keepalive, legacy algorithms, agent and environment options. */
   sshOptions: HostSshOptions;
   /**
@@ -541,8 +538,6 @@ export interface PluginHostRecord {
   pluginSettings: Record<string, unknown>;
   /** Core's last reachability check, or null before the first one. */
   status: PluginHostStatusEntry | null;
-  /** Desktop only: kept on this device, never synced to the server. */
-  localOnly: boolean;
   createdAt: string | null;
   updatedAt: string | null;
 }
@@ -938,16 +933,10 @@ export interface PluginSsh {
   dropPooled: (pool: string, hostId: number) => void;
 
   /**
-   * The host as the acting user may connect to it: RBAC, owner-key
-   * decryption, shared-host overrides and external secret references
-   * resolved, secrets included. By sync id when given, since a numeric id
-   * only names a host on the database that issued it. Null when the host is
-   * not on this server or the user cannot reach it.
+   * The saved host the acting Owner may connect to, with credentials and
+   * external secret references resolved server-side.
    */
-  resolveHost: (
-    hostId: number,
-    options?: { syncId?: string | null },
-  ) => Promise<PluginSshHost | null>;
+  resolveHost: (hostId: number) => Promise<PluginSshHost | null>;
 
   /**
    * Lower level: fills an ssh2 config for a client the plugin drives itself,
