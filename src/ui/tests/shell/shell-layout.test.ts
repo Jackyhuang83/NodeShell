@@ -58,7 +58,6 @@ function makeHost(overrides: Partial<Host> = {}): Host {
     authType: "password",
     enableTerminal: true,
     enableCommandHistory: true,
-    syncId: "sync-web-01",
     ...overrides,
   } as Host;
 }
@@ -105,13 +104,13 @@ describe("buildWorkspaceTabSnapshots", () => {
     expect(snapshots[0]).toMatchObject({
       slotId: "slot-0",
       type: "terminal",
-      hostSyncId: "sync-web-01",
+      hostId: "1",
       hostNameSnapshot: "web-01",
     });
     expect(snapshots[1]).toMatchObject({
       slotId: "slot-1",
       type: "tunnel",
-      hostSyncId: null,
+      hostId: null,
     });
     expect(slotIdByTabId.get("t1")).toBe("slot-0");
     expect(slotIdByTabId.get("t2")).toBe("slot-1");
@@ -143,18 +142,18 @@ describe("buildWorkspaceTabSnapshots", () => {
 });
 
 describe("resolveWorkspaceTabTarget", () => {
-  const hosts: Host[] = [makeHost({ id: "1", syncId: "sync-web-01" })];
+  const hosts: Host[] = [makeHost({ id: "1" })];
 
   it("resolves a host-bound snapshot by matching syncId", () => {
     const snapshot: WorkspaceTabSnapshot = {
       slotId: "s1",
       type: "terminal",
       label: "web-01",
-      hostSyncId: "sync-web-01",
+      hostId: "1",
     };
     const result = resolveWorkspaceTabTarget(snapshot, hosts);
     expect(result.kind).toBe("host");
-    expect((result as { host: Host }).host.syncId).toBe("sync-web-01");
+    expect((result as { host: Host }).host.id).toBe("1");
   });
 
   it("skips a host-bound snapshot whose host no longer exists", () => {
@@ -162,7 +161,7 @@ describe("resolveWorkspaceTabTarget", () => {
       slotId: "s1",
       type: "terminal",
       label: "deleted-host",
-      hostSyncId: "sync-gone",
+      hostId: "404",
       hostNameSnapshot: "deleted-host",
     };
     expect(resolveWorkspaceTabTarget(snapshot, hosts)).toEqual({
@@ -170,7 +169,7 @@ describe("resolveWorkspaceTabTarget", () => {
     });
   });
 
-  it("resolves a hostless singleton type without a hostSyncId", () => {
+  it("resolves a hostless singleton type without a hostId", () => {
     const snapshot: WorkspaceTabSnapshot = {
       slotId: "s1",
       type: "tunnel",
@@ -187,11 +186,11 @@ describe("resolveWorkspaceTabTarget", () => {
       slotId: "s1",
       type: "fleet-inventory",
       label: "Fleet",
-      hostSyncId: "sync-web-01",
+      hostId: "1",
     };
     const result = resolveWorkspaceTabTarget(snapshot, hosts);
     expect(result.kind).toBe("singleton");
-    expect((result as { host?: Host }).host?.syncId).toBe("sync-web-01");
+    expect((result as { host?: Host }).host?.id).toBe("1");
   });
 
   it("reopens a hostless, non-singleton type with a host as its own tab", () => {
@@ -200,11 +199,11 @@ describe("resolveWorkspaceTabTarget", () => {
       slotId: "s1",
       type: "tunnel",
       label: "Tunnels",
-      hostSyncId: "sync-web-01",
+      hostId: "1",
     };
     const result = resolveWorkspaceTabTarget(snapshot, hosts);
     expect(result.kind).toBe("host");
-    expect((result as { host?: Host }).host?.syncId).toBe("sync-web-01");
+    expect((result as { host?: Host }).host?.id).toBe("1");
   });
 
   it("skips a non-singleton, non-plugin type with no resolvable host", () => {
@@ -440,14 +439,14 @@ describe("plugin tab types in layouts", () => {
   });
 
   it("reopens a missing plugin's host tab while its host exists", () => {
-    const host = makeHost({ syncId: "sync-1" });
+    const host = makeHost({ id: "1" });
     expect(
       resolveWorkspaceTabTarget(
         {
           slotId: "s",
           type: "some-plugin-tab",
           label: "Gone",
-          hostSyncId: "sync-1",
+          hostId: "1",
         },
         [host],
       ),
@@ -458,7 +457,7 @@ describe("plugin tab types in layouts", () => {
           slotId: "s",
           type: "some-plugin-tab",
           label: "Gone",
-          hostSyncId: "sync-deleted",
+          hostId: "404",
         },
         [host],
       ),
