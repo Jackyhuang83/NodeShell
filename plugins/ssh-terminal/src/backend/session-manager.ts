@@ -397,6 +397,7 @@ export class TerminalSessionManager {
       const removed = session.outputBuffer.shift();
       if (removed) session.outputBufferBytes -= removed.length;
     }
+  }
 
   resizeSession(sessionId: string, cols: number, rows: number): void {
     const session = this.sessions.get(sessionId);
