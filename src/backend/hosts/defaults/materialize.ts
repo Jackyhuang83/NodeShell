@@ -319,10 +319,7 @@ export async function materializeHosts(
   options: MaterializeOptions = {},
 ): Promise<MaterializeResult> {
   const repository = createCurrentHostDefaultsRepository();
-  const rows = (await repository.listHosts(target)).filter(
-    // A desktop's read-only copy of a shared host follows its owner's server.
-    (row) => !row.sharedSource,
-  );
+  const rows = await repository.listHosts(target);
   if (rows.length === 0) return { changedHostIds: [] };
 
   const { catalog } = currentCatalog();
