@@ -167,9 +167,6 @@ export const hosts = sqliteTable(
     // never been manually reordered; falls back to name sort in that case.
     sortOrder: integer("sort_order"),
     authType: text("auth_type").notNull(),
-    shareSshAuth: integer("share_ssh_auth", { mode: "boolean" })
-      .notNull()
-      .default(false),
     forceKeyboardInteractive: text("force_keyboard_interactive"),
 
     password: text("password"),
@@ -198,12 +195,6 @@ export const hosts = sqliteTable(
     sshPort: integer("ssh_port").default(22),
 
 
-    // null = use the desktop app's global default; "local" | "remote" pins
-    // this specific host's SSH/Docker-console/Serial connections to originate
-    // from the embedded local backend or a connected remote sync server.
-    // Ignored for plugin protocols, which always need the remote server.
-    connectionOrigin: text("connection_origin"),
-
     portKnockSequence: text("port_knock_sequence"),
 
     hostKeyFingerprint: text("host_key_fingerprint"),
@@ -213,15 +204,6 @@ export const hosts = sqliteTable(
     hostKeyLastVerified: text("host_key_last_verified"),
     hostKeyChangedCount: integer("host_key_changed_count").default(0),
 
-    // Stable identity used to match this row across two independently-seeded
-    // databases (the embedded backend and a connected remote server) during
-    // sync -- local autoincrement ids collide across instances.
-    syncId: text("sync_id").unique(),
-    // Desktop only: a host kept on this device that never goes to the server.
-    localOnly: integer("local_only", { mode: "boolean" }).notNull().default(false),
-    // Desktop only: set on the read-only copy of a host someone shared with
-    // the linked account. JSON with the share's owner and permission level.
-    sharedSource: text("shared_source"),
     // Which host default keys this host sets itself, per namespace, as JSON:
     // {"core":["sshPort"],"<pluginId>":["key"]}. Null, or a missing
     // namespace, means not classified yet. Every other key follows the
@@ -278,8 +260,6 @@ export const sshCredentials = sqliteTable(
 
   usageCount: integer("usage_count").notNull().default(0),
   lastUsed: text("last_used"),
-  syncId: text("sync_id").unique(),
-  sharedSource: text("shared_source"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
@@ -368,8 +348,6 @@ export const sshFolders = sqliteTable(
     // Manual drag-to-reorder position among sibling folders. Null falls back
     // to name sort, same convention as hosts.sortOrder.
     sortOrder: integer("sort_order"),
-    syncId: text("sync_id").unique(),
-    localOnly: integer("local_only", { mode: "boolean" }).notNull().default(false),
     createdAt: text("created_at")
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
