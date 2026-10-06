@@ -14,33 +14,6 @@ import type { SSHHost } from "../../types/index.js";
 const sshLogger = logger;
 
 /**
- * Resolve a host the client named by its sync identity.
- *
- * `id` is an autoincrement belonging to whichever database produced the row.
- * When the desktop app delegates a connection to a sync server, the two
- * sequences have no reason to agree, and resolving the client's id here lands
- * on whatever host happens to own that number — a different machine, with its
- * own address, credentials and host key. `syncId` is the same string on both
- * sides, so it names the host the user actually picked.
- *
- * Returns null when the sync id is unknown here, rather than falling back to
- * the numeric id: an unknown host is exactly the case where guessing picks the
- * wrong machine.
- */
-export async function resolveHostBySyncId(
-  syncId: string,
-  userId: string,
-): Promise<SSHHost | null> {
-  const hostId =
-    await createCurrentHostResolutionRepository().findHostIdBySyncId(syncId);
-  if (hostId === null) return null;
-
-  // Permissions, decryption, shared-host handling and auditing all belong to
-  // the id-based path; this only decides which row it is pointed at.
-  return resolveHostById(hostId, userId);
-}
-
-/**
  * Resolve a host with its credentials server-side by hostId.
  * This avoids passing credentials through the frontend.
  */
@@ -48,14 +21,6 @@ export async function resolveHostById(
   hostId: number,
   userId: string,
 ): Promise<SSHHost | null> {
-  const { PermissionManager } = await import("../utils/permission-manager.js");
-  const access = await PermissionManager.getInstance().canAccessHost(
-    userId,
-    hostId,
-    "connect",
-  );
-  if (!access.hasAccess) return null;
-
   const repository = createCurrentHostResolutionRepository();
   const resolvedHost = await repository.findHostById(hostId, userId);
   if (!resolvedHost) return null;
