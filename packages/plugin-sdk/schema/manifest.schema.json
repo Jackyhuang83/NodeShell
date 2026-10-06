@@ -114,7 +114,6 @@
           "events:core",
           "notify:send",
           "audit:read",
-          "desktop:window",
           "db:core-refs",
           "hosts:read",
           "db:own",
@@ -1089,11 +1088,6 @@
         "type": "string",
         "enum": ["linux", "win32", "darwin"]
       }
-    },
-    "desktop": {
-      "type": "string",
-      "enum": ["mirror", "local", "server"],
-      "description": "How a desktop linked to a server treats this plugin: mirror follows the server, local is decided on each desktop, server never runs on a linked desktop. Defaults to mirror."
     },
     "nativeDependencies": {
       "type": "array",
