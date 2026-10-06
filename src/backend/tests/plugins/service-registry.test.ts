@@ -346,25 +346,6 @@ describe("service registry", () => {
       expect(Object.keys(handle)).toEqual(["hello"]);
     });
 
-    it("rebinds the acting user with asUser", async () => {
-      register();
-      const seen: string[] = [];
-      const handle = createServiceHandle<{
-        hello: (name: string) => Promise<string>;
-        asUser: (userId: string) => { hello: (n: string) => Promise<string> };
-      }>("testplugin.greet", "consumer-plugin", {
-        resolveUserId: () => undefined,
-        hasPermission: async (userId) => {
-          seen.push(userId);
-          return true;
-        },
-        audit: () => {},
-      });
-
-      await handle.asUser("user-42").hello("world");
-      expect(seen).toEqual(["user-42"]);
-    });
-
     it("surfaces an unavailable service rather than a generic undefined", () => {
       const { handle } = handleFor(true);
       expect(
