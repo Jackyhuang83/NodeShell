@@ -64,14 +64,12 @@ describe("PermissionManager single-owner model", () => {
       expect(await manager.canAccessHost("owner", 42, action)).toEqual({
         hasAccess: true,
         isOwner: true,
-        isShared: false,
       });
     }
 
     expect(await manager.canAccessHost("owner", 99, "connect")).toEqual({
       hasAccess: false,
       isOwner: false,
-      isShared: false,
     });
   });
 
@@ -82,7 +80,6 @@ describe("PermissionManager single-owner model", () => {
     expect(await manager.canAccessHost("other-admin", 42, "manage")).toEqual({
       hasAccess: false,
       isOwner: false,
-      isShared: false,
     });
   });
 
@@ -92,7 +89,6 @@ describe("PermissionManager single-owner model", () => {
     expect(await manager.canAccessHost("stranger", 42, "connect")).toEqual({
       hasAccess: false,
       isOwner: false,
-      isShared: false,
     });
   });
 
@@ -122,7 +118,6 @@ describe("PermissionManager single-owner model", () => {
     expect(await manager.canAccessHost("owner", 42, "connect")).toEqual({
       hasAccess: false,
       isOwner: false,
-      isShared: false,
     });
 
     state.failListLookup = true;
