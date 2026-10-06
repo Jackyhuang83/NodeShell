@@ -1101,9 +1101,6 @@ export function SidebarTree({
                         onOpenTab(item, type, options)
                       }
                       onEditHost={() => onEditHost(item)}
-                      onShareHost={
-                        onShareHost ? () => onShareHost(item) : undefined
-                      }
                       onDelete={() => handleDeleteHost(item)}
                       onDuplicate={() => handleDuplicateHost(item)}
                       query={query}
