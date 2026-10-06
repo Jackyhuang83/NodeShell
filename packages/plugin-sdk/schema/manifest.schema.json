@@ -549,14 +549,6 @@
               "descriptionKey": {
                 "type": "string",
                 "minLength": 1
-              },
-              "defaultRoles": {
-                "type": "array",
-                "description": "System roles that hold this the first time it is seen.",
-                "items": {
-                  "type": "string",
-                  "enum": ["admin", "user"]
-                }
               }
             }
           }
