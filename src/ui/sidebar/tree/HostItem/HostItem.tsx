@@ -19,11 +19,9 @@ import {
   MoreHorizontal,
   Pencil,
   Pin,
-  Share2,
   SquarePlus,
   Terminal,
   Trash2,
-  Users,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -45,11 +43,6 @@ import type {
   HostTrayTrigger,
 } from "@/types/host-sidebar-preferences";
 import { copyToClipboard } from "@/lib/clipboard";
-import {
-  canDeleteHost,
-  canEditHost,
-  canShareHost,
-} from "@/sidebar/host-permissions";
 import {
   useStatusColorScheme,
   getStatusClasses,
@@ -165,8 +158,7 @@ const HOST_ITEM_DENSITY_TOKENS = {
 export function HostItem({
   host,
   onOpenTab,
-  onEditHost: onEditHostProp,
-  onShareHost: onShareHostProp,
+  onEditHost,
   onDelete,
   onDuplicate,
   query = "",
@@ -212,7 +204,6 @@ export function HostItem({
     },
   ) => void;
   onEditHost?: () => void;
-  onShareHost?: () => void;
   onDelete: () => void;
   onDuplicate: () => void;
   query?: string;
@@ -268,10 +259,7 @@ export function HostItem({
   onDropChildHosts?: (hostIds: string[]) => void;
 }) {
   const { t } = useTranslation();
-  // Shared hosts expose actions matching the recipient's permission level.
-  const onEditHost = canEditHost(host) ? onEditHostProp : undefined;
-  const onShareHost = canShareHost(host) ? onShareHostProp : undefined;
-  const allowDelete = canDeleteHost(host);
+  const allowDelete = true;
   const allHostActions = useHostActions();
   const pluginActions = hostActionsFor(allHostActions, host);
   const badges = hostBadgesFor(useHostBadges(), host);
@@ -314,8 +302,8 @@ export function HostItem({
   const actionsOnly = trayTrigger === "actionsOnly";
   const shouldUseClickTray =
     !alwaysShowTray && !actionsOnly && (trayTrigger === "click" || isTouchOnly);
-  const showPasswordCopy = !host.isShared && canCopyHostPassword(host);
-  const showSudoPasswordCopy = !host.isShared && canCopyHostSudoPassword(host);
+  const showPasswordCopy = canCopyHostPassword(host);
+  const showSudoPasswordCopy = canCopyHostSudoPassword(host);
   const [parentDragOver, setParentDragOver] = useState(false);
   const [contextMenuPosition, setContextMenuPosition] = useState<{
     x: number;
@@ -345,7 +333,7 @@ export function HostItem({
   );
   const reorderEdge = isReorderHovered ? reorderHoverEdge : null;
   const canDrag =
-    arrangeMode && !selectionMode && !isTouchOnly && canEditHost(host);
+    arrangeMode && !selectionMode && !isTouchOnly;
   // The middle band nests the dragged host under this one; the top/bottom
   // bands reorder. Both live on the same row, so the pointer's position
   // inside it picks the intent instead of a modifier key.
@@ -542,18 +530,6 @@ export function HostItem({
           <Pencil className="size-3.5" />
         </button>
       )}
-      {onShareHost && (
-        <button
-          title={t("hosts.shareHost")}
-          onClick={(e) => {
-            e.stopPropagation();
-            onShareHost();
-          }}
-          className={trayButtonClass}
-        >
-          <Share2 className="size-3.5" />
-        </button>
-      )}
       <DropdownMenu
         open={isMenuOpen}
         onOpenChange={(open) => {
@@ -746,17 +722,6 @@ export function HostItem({
             >
               <Pencil className="size-3.5 mr-2" />
               {t("hosts.editHostAction")}
-            </DropdownMenuItem>
-          )}
-          {onShareHost && (
-            <DropdownMenuItem
-              onClick={(e) => {
-                e.stopPropagation();
-                onShareHost();
-              }}
-            >
-              <Share2 className="size-3.5 mr-2" />
-              {t("hosts.shareHost")}
             </DropdownMenuItem>
           )}
           {pluginMenuItems.map((item) => {
@@ -1122,26 +1087,6 @@ export function HostItem({
             const Badge = badge.component;
             return <Badge key={badge.id} host={host} />;
           })}
-          {host.isShared && (
-            <TooltipProvider delayDuration={300}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="flex items-center gap-0.5 text-[9px] px-1 py-px border border-accent-brand/30 bg-accent-brand/10 text-accent-brand shrink-0 leading-none uppercase tracking-wider">
-                    <Users className="size-2.5" />
-                    {t("hosts.sharing.sharedBadge")}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  {t("hosts.sharing.sharedBadgeTooltip", {
-                    owner: host.ownerUsername || "?",
-                    level: t(
-                      `hosts.sharing.levels.${host.permissionLevel ?? "connect"}.label`,
-                    ),
-                  })}
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
           {isCompact &&
             showTags &&
             host.tags?.slice(0, 2).map((tag) => (
