@@ -149,7 +149,6 @@ export function createPluginApp(
           promotable: item.promotable,
           rightDockable: item.rightDockable,
           mobilePrimary: item.mobilePrimary,
-          electronOnly: item.electronOnly,
           separatorAfter: item.separatorAfter ?? true,
           hidden: item.hidden,
           after: item.after,
@@ -275,9 +274,6 @@ export function createPluginApp(
           titleKey: key(protocol.titleKey),
           descriptionKey: protocol.descriptionKey
             ? key(protocol.descriptionKey)
-            : undefined,
-          connectionOriginNoteKey: protocol.connectionOriginNoteKey
-            ? key(protocol.connectionOriginNoteKey)
             : undefined,
         }),
       );
