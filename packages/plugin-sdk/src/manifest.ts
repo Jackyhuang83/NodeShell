@@ -357,16 +357,6 @@ export interface PluginContributions {
   tabs?: PluginTabContribution[];
   panels?: PluginViewContribution[];
   dashboardCards?: PluginViewContribution[];
-  /**
-   * The frontend also runs on anonymous guest pages (shared-session and
-   * collab links), where it is activated with app.guest set.
-   */
-  guest?: boolean;
-  /**
-   * `?view=` names an anonymous guest page may open. Each must be served by a
-   * tab's `standalone` component. Needs `guest: true`.
-   */
-  guestViews?: string[];
   actions?: PluginActionContribution[];
   actionSlots?: PluginActionSlot[];
   permissions?: PluginPermissionContribution[];
@@ -602,8 +592,6 @@ const ALLOWED_CONTRIBUTES = new Set([
   "tabs",
   "panels",
   "dashboardCards",
-  "guest",
-  "guestViews",
   "actions",
   "actionSlots",
   "permissions",
@@ -1099,18 +1087,6 @@ function validateContributes(
   validateTabs(contributes.tabs, errors);
   validateViews(contributes.panels, "panels", errors);
   validateViews(contributes.dashboardCards, "dashboardCards", errors);
-  if (
-    contributes.guest !== undefined &&
-    typeof contributes.guest !== "boolean"
-  ) {
-    errors.push('Field "contributes.guest" must be a boolean');
-  }
-  if (contributes.guestViews !== undefined) {
-    validateNameList(contributes.guestViews, "contributes.guestViews", errors);
-    if (contributes.guest !== true) {
-      errors.push('Field "contributes.guestViews" needs "contributes.guest"');
-    }
-  }
   if (contributes.syncEntities !== undefined) {
     validateSyncEntities(contributes.syncEntities, errors);
   }
