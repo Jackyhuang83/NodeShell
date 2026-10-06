@@ -62,10 +62,6 @@ vi.mock("../../hosts/host-resolver.js", () => ({
     h.resolved.push({ by: "id", ref: id, userId });
     return id === 404 ? null : { id, ip: "10.0.0.1", password: "pw" };
   },
-  resolveHostBySyncId: async (syncId: string, userId: string) => {
-    h.resolved.push({ by: "syncId", ref: syncId, userId });
-    return { id: 9, ip: "10.0.0.9" };
-  },
 }));
 vi.mock("../../hosts/connect/build-connect-config.js", () => ({
   buildConnectConfig: async (
@@ -138,14 +134,10 @@ beforeEach(() => {
 });
 
 describe("ctx.ssh.resolveHost", () => {
-  it("resolves by sync id first, as the acting user, and audits", async () => {
+  it("resolves the saved host id as the acting Owner and audits", async () => {
     const { ssh, audit } = sshWith();
-    expect(await ssh.resolveHost(3, { syncId: "abc" })).toMatchObject({
-      id: 9,
-    });
     expect(await ssh.resolveHost(3)).toMatchObject({ id: 3, password: "pw" });
     expect(h.resolved).toEqual([
-      { by: "syncId", ref: "abc", userId: "user-1" },
       { by: "id", ref: 3, userId: "user-1" },
     ]);
     expect(audit).toHaveBeenCalledWith("ssh_resolve_host", "host 3", {
