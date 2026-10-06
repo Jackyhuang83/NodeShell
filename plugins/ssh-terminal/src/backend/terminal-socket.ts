@@ -21,7 +21,6 @@ import {
   getErrorMessage,
   hostAddressMismatch,
   HOST_ADDRESS_MISMATCH_MESSAGE,
-  HOST_NOT_ON_THIS_SERVER_MESSAGE,
   isRetriableDnsError,
   isWindowsSftpPath,
   MemoryAgent,
@@ -53,8 +52,6 @@ interface ConnectToHostData {
   rows: number;
   hostConfig: {
     id: number;
-    /** Names the host across a sync pair; `id` only names it locally. */
-    syncId?: string | null;
     instanceId?: string;
     ip: string;
     port: number;
@@ -1294,7 +1291,6 @@ export function createTerminalSocket(deps: TerminalSocketDeps) {
         data;
       const {
         id,
-        syncId: hostSyncId,
         ip: rawIp,
         port: clientPort,
         username: clientUsername,
@@ -1454,41 +1450,11 @@ export function createTerminalSocket(deps: TerminalSocketDeps) {
 
       if (id > 0 && userId) {
         try {
-          // Prefer the sync identity. A numeric id belongs to whichever database
-          // produced it, so on a sync server it names a different host than the
-          // desktop app meant; syncId is the same string on both sides.
-          resolvedHostData = (await ctx.ssh.resolveHost(id, {
-            syncId: hostSyncId,
-          })) as unknown as typeof resolvedHostData | null;
+          resolvedHostData = (await ctx.ssh.resolveHost(
+            id,
+          )) as unknown as typeof resolvedHostData | null;
 
-          if (hostSyncId && !resolvedHostData) {
-            sshLogger.error(
-              "Refusing to connect: host is not known to this server",
-              undefined,
-              {
-                operation: "ssh_connect_host_sync_id_unknown",
-                hostId: id,
-                userId,
-              },
-            );
-            ws.send(
-              JSON.stringify({
-                type: "error",
-                message: HOST_NOT_ON_THIS_SERVER_MESSAGE,
-              }),
-            );
-            cleanupAuthState(connectionTimeout);
-            return;
-          }
-
-          // Older clients send only the numeric id, which cannot be trusted to
-          // mean the same host here. Everything below is taken from the row it
-          // lands on -- the address, the credentials, the jump hosts, the stored
-          // host key -- so compare the address before using any of it.
-          if (
-            !hostSyncId &&
-            hostAddressMismatch(clientIp, resolvedHostData?.ip)
-          ) {
+          if (hostAddressMismatch(clientIp, resolvedHostData?.ip)) {
             sshLogger.error(
               "Refusing to connect: host id resolves to a different address here",
               undefined,
@@ -1514,7 +1480,6 @@ export function createTerminalSocket(deps: TerminalSocketDeps) {
             const resolvedJumpHosts = resolveServerJumpHosts(
               hostConfig.jumpHosts,
               resolvedHostData.jumpHosts,
-              hostSyncId,
             );
             if (resolvedJumpHosts !== hostConfig.jumpHosts) {
               hostConfig.jumpHosts = resolvedJumpHosts;
