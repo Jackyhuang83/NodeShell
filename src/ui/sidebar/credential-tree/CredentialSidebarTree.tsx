@@ -33,7 +33,6 @@ export function CredentialSidebarTree({
   onEditCredential,
   onCloneCredential,
   onDeleteCredential,
-  onShareCredential,
   usedByCounts,
   query = "",
   loading = false,
@@ -54,7 +53,6 @@ export function CredentialSidebarTree({
   onEditCredential: (cred: Credential) => void;
   onCloneCredential: (cred: Credential) => void;
   onDeleteCredential: (cred: Credential) => void;
-  onShareCredential?: (cred: Credential) => void;
   usedByCounts?: Map<string, number>;
   query?: string;
   loading?: boolean;
