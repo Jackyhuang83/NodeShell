@@ -34,16 +34,8 @@ import {
 } from "./helpers.js";
 import { SSHAuthManager } from "./keyboard-prompt.js";
 import { HOST_KEYS } from "./settings.js";
-import {
-  isMessageAllowedForParticipant,
-  type TerminalSessionManager,
-} from "./session-manager.js";
-import type {
-  SessionGuestsV1,
-  SessionSharingV1,
-  SharedSessionRef,
-  TmuxSessionsV1,
-} from "./services.js";
+import { type TerminalSessionManager } from "./session-manager.js";
+import type { TmuxSessionsV1 } from "./services.js";
 
 const { Client, utils: ssh2Utils } = ssh2Pkg;
 
@@ -104,19 +96,14 @@ export interface TerminalSocketDeps {
   sessionManager: TerminalSessionManager;
   /** The optional tmux.sessions service, as the acting user. */
   getTmux: () => TmuxSessionsV1 | null;
-  /** The optional sessions.sharing service, as the acting user. */
-  getSharing: () => SessionSharingV1 | null;
-  /** Guest link resolution, published on ctx.registry by session sharing. */
-  getGuests: () => SessionGuestsV1 | null;
 }
 
 /**
  * Serves /plugin-ws/ssh-terminal/terminal.
  *
- * The route is public with optional auth: a signed-in user arrives with a
- * token core verifies, and a share-link or room guest arrives with a token of
- * its own that is resolved here. Socket and ssh2 listeners are bound with
- * AsyncResource so every ctx call inside them still runs as the socket's user.
+ * The route requires an authenticated Owner socket. Socket and ssh2 listeners
+ * are bound with AsyncResource so every ctx call inside them still runs as the
+ * socket's user.
  */
 export function createTerminalSocket(deps: TerminalSocketDeps) {
   const { ctx, log: sshLogger, sessionManager } = deps;
@@ -136,143 +123,6 @@ export function createTerminalSocket(deps: TerminalSocketDeps) {
     sockets.clear();
   }
 
-  /** Joins an anonymous guest socket to a live shared session, read-only or not per the share. */
-  async function attachShareGuest(
-    ws: WebSocket,
-    share: SharedSessionRef,
-    guests: SessionGuestsV1,
-  ): Promise<void> {
-    const session = sessionManager.getSession(share.sessionId);
-    if (!session || !session.isConnected) {
-      ws.close(1008, "Session has ended");
-      return;
-    }
-
-    const joined = sessionManager.joinAsParticipant(share.sessionId, ws, {
-      userId: null,
-      permissionLevel: share.permissionLevel,
-      guestLabel: "Guest",
-      shareId: share.id,
-    });
-    if (!joined) {
-      ws.close(1008, "Session is no longer active");
-      return;
-    }
-
-    guests.recordJoin(share.id).catch(() => {});
-
-    const buffered = sessionManager.getBuffer(joined);
-    if (buffered) {
-      ws.send(JSON.stringify({ type: "data", data: buffered }));
-    }
-    ws.send(
-      JSON.stringify({ type: "sessionAttached", sessionId: share.sessionId }),
-    );
-    ws.send(JSON.stringify({ type: "connected", message: "Joined session" }));
-
-    const currentSessionId: string = share.sessionId;
-
-    let wsAlive = true;
-    ws.on("pong", () => {
-      wsAlive = true;
-    });
-    const wsPingInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        if (!wsAlive) {
-          ws.terminate();
-          return;
-        }
-        wsAlive = false;
-        ws.ping();
-      } else {
-        clearInterval(wsPingInterval);
-      }
-    }, 30000);
-
-    ws.on("close", () => {
-      clearInterval(wsPingInterval);
-      sessionManager.removeParticipant(currentSessionId, ws);
-      sshLogger.info("Guest left shared terminal session", {
-        operation: "terminal_guest_disconnect",
-        sessionId: currentSessionId,
-        shareId: share.id,
-      });
-    });
-
-    ws.on("message", (msg: RawData) => {
-      let type: string;
-      let data: unknown;
-      try {
-        ({ type, data } = parseWsMessage(msg));
-      } catch {
-        return;
-      }
-
-      const liveSession = sessionManager.getSession(currentSessionId);
-      const participant = liveSession
-        ? sessionManager.getParticipantForWs(liveSession, ws)
-        : null;
-      // A guest is only ever a participant. Once it has left (or was never
-      // added) it may send nothing, or a read-only guest could "disconnect"
-      // and then type into the owner's shell as nobody in particular.
-      if (!participant || !isMessageAllowedForParticipant(participant, type)) {
-        return;
-      }
-
-      switch (type) {
-        case "input": {
-          if (typeof data !== "string") break;
-          const inputData = data;
-          sessionManager.bufferInput(currentSessionId, inputData);
-          const inputStream = liveSession?.sshStream;
-          if (inputStream) {
-            try {
-              inputStream.write(Buffer.from(inputData, "utf8"));
-            } catch {
-              inputStream.write(Buffer.from(inputData, "latin1"));
-            }
-          }
-          break;
-        }
-        case "ping":
-          ws.send(JSON.stringify({ type: "pong" }));
-          break;
-        case "disconnect":
-          sessionManager.removeParticipant(currentSessionId, ws);
-          ws.close(1000, "Left the session");
-          break;
-        default:
-          break;
-      }
-    });
-  }
-
-  /**
-   * A share-link (?shareToken) or collab room (?roomGuestToken) guest. Never
-   * touches user credentials: guests join an already-live stream. Session
-   * sharing resolves the token; without it guest links are refused.
-   */
-  async function handleGuestConnection(
-    ws: WebSocket,
-    connection: PluginWebSocketConnection,
-    tokens: { shareToken?: string; roomGuestToken?: string },
-  ): Promise<void> {
-    const guests = deps.getGuests();
-    if (!guests) {
-      ws.close(1008, "Session sharing is not available");
-      return;
-    }
-    const resolved = await guests.resolve({
-      ...tokens,
-      clientIp: connection.clientIp,
-    });
-    if ("reason" in resolved) {
-      ws.close(1008, resolved.reason);
-      return;
-    }
-    return attachShareGuest(ws, resolved.share, guests);
-  }
-
   async function handleConnection(
     connection: PluginWebSocketConnection,
   ): Promise<void> {
@@ -288,19 +138,6 @@ export function createTerminalSocket(deps: TerminalSocketDeps) {
         sessionId,
       });
     });
-
-    const urlObj = new URL(req.url || "", "http://localhost");
-    const shareToken = urlObj.searchParams.get("shareToken");
-
-    if (shareToken) {
-      await handleGuestConnection(ws, connection, { shareToken });
-      return;
-    }
-    const roomGuestToken = urlObj.searchParams.get("roomGuestToken");
-    if (roomGuestToken) {
-      await handleGuestConnection(ws, connection, { roomGuestToken });
-      return;
-    }
 
     if (!connection.userId) {
       ws.close(1008, "Authentication required");
@@ -375,10 +212,6 @@ export function createTerminalSocket(deps: TerminalSocketDeps) {
       "close",
       bind(() => {
         clearInterval(wsPingInterval);
-        void deps
-          .getSharing()
-          ?.unsubscribeRoom(ws)
-          .catch(() => {});
         sshLogger.info("Terminal WebSocket disconnected", {
           operation: "terminal_ws_disconnect",
           sessionId,
@@ -388,21 +221,7 @@ export function createTerminalSocket(deps: TerminalSocketDeps) {
         if (currentSessionId) {
           const session = sessionManager.getSession(currentSessionId);
           if (session?.isConnected) {
-            const participant = sessionManager.getParticipantForWs(session, ws);
-            if (participant && !participant.isOwner) {
-              sessionManager.removeParticipant(currentSessionId, ws);
-            } else {
-              // Only detach if this WS is still the owner's attached socket, or
-              // no owner is currently attached. If a refresh reconnected and
-              // reattached a new WS before this close event fired, we must not
-              // clobber that new attachment.
-              const ownerStillAttached = Array.from(
-                session.participants.values(),
-              ).some((p) => p.isOwner && p.ws !== ws);
-              if (!ownerStillAttached) {
-                sessionManager.detachWs(currentSessionId);
-              }
-            }
+            sessionManager.detachWs(currentSessionId);
           } else {
             sessionManager.destroySession(currentSessionId);
             currentSessionId = null;
@@ -451,21 +270,6 @@ export function createTerminalSocket(deps: TerminalSocketDeps) {
             JSON.stringify({ type: "error", message: "Invalid message" }),
           );
           return;
-        }
-
-        // Server-side gate: non-owner participants (read-only or read-write
-        // guests/joiners) may only send input/ping/disconnect - everything else
-        // (auth flows, tmux, resize, etc.) is owner-only and silently ignored.
-        if (type !== "joinSharedSession") {
-          const gateSession = currentSessionId
-            ? sessionManager.getSession(currentSessionId)
-            : null;
-          const gateParticipant = gateSession
-            ? sessionManager.getParticipantForWs(gateSession, ws)
-            : null;
-          if (!isMessageAllowedForParticipant(gateParticipant, type)) {
-            return;
-          }
         }
 
         try {
@@ -632,19 +436,6 @@ export function createTerminalSocket(deps: TerminalSocketDeps) {
             }
 
             case "disconnect": {
-              const disconnectSession = currentSessionId
-                ? sessionManager.getSession(currentSessionId)
-                : null;
-              const disconnectParticipant = disconnectSession
-                ? sessionManager.getParticipantForWs(disconnectSession, ws)
-                : null;
-              if (disconnectParticipant && !disconnectParticipant.isOwner) {
-                if (currentSessionId) {
-                  sessionManager.removeParticipant(currentSessionId, ws);
-                  currentSessionId = null;
-                }
-                break;
-              }
               if (currentSessionId) {
                 sessionManager.destroySession(currentSessionId);
                 currentSessionId = null;
@@ -1002,125 +793,6 @@ export function createTerminalSocket(deps: TerminalSocketDeps) {
                   }),
                 );
               });
-              break;
-            }
-
-            case "collab_subscribe": {
-              const { roomId } = (data ?? {}) as { roomId?: string };
-              if (typeof roomId !== "string" || !roomId) break;
-              try {
-                const sharing = deps.getSharing();
-                const joined = sharing
-                  ? await sharing.subscribeRoom(roomId, ws)
-                  : false;
-                if (!joined) {
-                  ws.send(
-                    JSON.stringify({
-                      type: "error",
-                      message: "Room not found",
-                    }),
-                  );
-                }
-              } catch (error) {
-                sshLogger.error("Failed to subscribe to collab room", error, {
-                  operation: "collab_subscribe_error",
-                  userId,
-                });
-              }
-              break;
-            }
-
-            case "collab_unsubscribe": {
-              const { roomId } = (data ?? {}) as { roomId?: string };
-              void deps
-                .getSharing()
-                ?.unsubscribeRoom(
-                  ws,
-                  typeof roomId === "string" ? roomId : undefined,
-                )
-                .catch(() => {});
-              break;
-            }
-
-            case "joinSharedSession": {
-              const joinData = data as {
-                shareId: string;
-                tabInstanceId?: string;
-              };
-              try {
-                const sharing = deps.getSharing();
-                const authorized = sharing
-                  ? await sharing.authorizeJoin(joinData.shareId)
-                  : null;
-                if (!sharing || !authorized) {
-                  ws.send(
-                    JSON.stringify({
-                      type: "error",
-                      message: "Share not found or not accessible",
-                    }),
-                  );
-                  break;
-                }
-                const { share, displayName } = authorized;
-
-                const joinedSession = sessionManager.joinAsParticipant(
-                  share.sessionId,
-                  ws,
-                  {
-                    userId,
-                    permissionLevel: share.permissionLevel,
-                    displayName,
-                    tabInstanceId: joinData.tabInstanceId,
-                    shareId: share.id,
-                  },
-                );
-                if (!joinedSession) {
-                  ws.send(
-                    JSON.stringify({
-                      type: "error",
-                      message: "Shared session is no longer active",
-                    }),
-                  );
-                  break;
-                }
-
-                currentSessionId = share.sessionId;
-                sshStream = joinedSession.sshStream;
-                sshConn = joinedSession.sshConn;
-                isConnecting = false;
-                isConnected = true;
-
-                sharing.recordJoin(share.id).catch(() => {});
-
-                const buffered = sessionManager.getBuffer(joinedSession);
-                if (buffered) {
-                  ws.send(JSON.stringify({ type: "data", data: buffered }));
-                }
-                ws.send(
-                  JSON.stringify({
-                    type: "sessionAttached",
-                    sessionId: share.sessionId,
-                  }),
-                );
-                ws.send(
-                  JSON.stringify({
-                    type: "connected",
-                    message: "Joined session",
-                  }),
-                );
-              } catch (error) {
-                sshLogger.error("Failed to join shared session", error, {
-                  operation: "terminal_join_shared_session_error",
-                  userId,
-                  shareId: joinData.shareId,
-                });
-                ws.send(
-                  JSON.stringify({
-                    type: "error",
-                    message: "Failed to join shared session",
-                  }),
-                );
-              }
               break;
             }
 
