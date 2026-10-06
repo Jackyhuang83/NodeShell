@@ -25,7 +25,6 @@ export type FolderMetadataValue = {
   color: string;
   icon: string;
   credentialId: number | null;
-  localOnly: boolean;
 };
 
 type CredentialOption = { id: string; name: string; username?: string };
@@ -46,7 +45,6 @@ export function FolderMetadataDialog({
     color?: string;
     icon?: string;
     credentialId?: number | null;
-    localOnly?: boolean;
   };
   /** Every folder path that already exists, for duplicate-name validation. */
   existingPaths?: string[];
@@ -60,7 +58,6 @@ export function FolderMetadataDialog({
   const [color, setColor] = useState(DEFAULT_FOLDER_COLOR);
   const [icon, setIcon] = useState(DEFAULT_FOLDER_ICON);
   const [credentialId, setCredentialId] = useState<string>("");
-  const [localOnly, setLocalOnly] = useState(false);
   const [credentials, setCredentials] = useState<CredentialOption[]>([]);
 
   const parentPath =
@@ -87,7 +84,6 @@ export function FolderMetadataDialog({
       setCredentialId(
         initial?.credentialId ? String(initial.credentialId) : "",
       );
-      setLocalOnly(!!initial?.localOnly);
     }
   }, [open, initial]);
 
@@ -115,7 +111,6 @@ export function FolderMetadataDialog({
       color,
       icon,
       credentialId: credentialId ? Number(credentialId) : null,
-      localOnly,
     });
     onOpenChange(false);
   }
